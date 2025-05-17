@@ -84,9 +84,7 @@ fn gen_function<'a>(function: &parser::Function<'a>) -> Function<'a> {
 fn gen_block(block: &parser::Block, instructions: &mut Vec<Instruction>) {
     for block_item in block {
         match block_item {
-            parser::BlockItem::STATEMENT(statement) => {
-                gen_instructions(&statement, instructions)
-            }
+            parser::BlockItem::STATEMENT(statement) => gen_instructions(&statement, instructions),
             parser::BlockItem::DECLARATION(decl) => {
                 if let Some(value) = &decl.value {
                     let result = gen_expression(&value, instructions);
@@ -139,6 +137,11 @@ fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instru
             instructions.push(Instruction::LABEL(name.to_string()));
         }
         parser::Statement::COMPOUND(block) => gen_block(block, instructions),
+        parser::Statement::BREAK(_)
+        | parser::Statement::CONTINUE(_)
+        | parser::Statement::WHILE(_)
+        | parser::Statement::DOWHILE(_)
+        | parser::Statement::FOR(_, _, _) => panic!("Not implemented!"),
     }
 }
 fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instruction>) -> Value {

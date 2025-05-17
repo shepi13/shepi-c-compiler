@@ -106,6 +106,11 @@ lazy_static! {
             r"(^if\b)",
             r"(^else\b)",
             r"(^goto\b)",
+            r"(^do\b)",
+            r"(^for\b)",
+            r"(^while\b)",
+            r"(^break\b)",
+            r"(^continue\b)",
         ].join("|")).unwrap()));
         // Identifiers and Constants
         regexes.push((
