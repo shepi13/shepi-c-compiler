@@ -193,12 +193,11 @@ fn gen_instructions(
                 gen_move(&mut assembly_instructions, &src1, &dst);
                 gen_binary_op(&mut assembly_instructions, operator, src2, dst);
             }
-            generator::Instruction::JUMP(jump) => {
+            generator::Instruction::JUMP(target) => {
+                assembly_instructions.push(Instruction::JMP(target));
+            }
+            generator::Instruction::JUMPCOND(jump) => {
                 let condition = match jump.jump_type {
-                    generator::JumpType::JUMP => {
-                        assembly_instructions.push(Instruction::JMP(jump.target));
-                        continue;
-                    }
                     generator::JumpType::JUMPIFZERO => Condition::EQUAL,
                     generator::JumpType::JUMPIFNOTZERO => Condition::NOTEQUAL,
                 };

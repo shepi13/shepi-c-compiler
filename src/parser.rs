@@ -29,17 +29,32 @@ pub enum Statement<'a> {
     RETURN(Expression),
     EXPRESSION(Expression),
     IF(Expression, Rc<Statement<'a>>, Rc<Option<Statement<'a>>>),
+    WHILE(Loop<'a>),
+    DOWHILE(Loop<'a>),
+    FOR(ForInit, Loop<'a>, Option<Expression>),
+    BREAK(String),
+    CONTINUE(String),
     COMPOUND(Block<'a>),
-    LABEL(&'a str),
+    LABEL(&'a str, Rc<Statement<'a>>),
     GOTO(&'a str),
     NULL,
+}
+#[derive(Debug)]
+pub struct Loop<'a> {
+    pub label: String,
+    pub condition: Expression,
+    pub body: Rc<Statement<'a>>,
+}
+#[derive(Debug)]
+pub enum ForInit {
+    INITDECL(Declaration),
+    INITEXP(Option<Expression>),
 }
 #[derive(Debug)]
 pub struct Declaration {
     pub name: String,
     pub value: Option<Expression>,
 }
-
 // Expressions
 #[derive(Debug)]
 pub enum Expression {
@@ -109,6 +124,7 @@ pub struct SymbolTable<'a> {
     variables: Vec<HashMap<&'a str, String>>,
     labels: Vec<HashSet<&'a str>>,
     gotos: Vec<HashSet<&'a str>>,
+    loops: Vec<String>,
 }
 
 impl<'a> SymbolTable<'a> {
@@ -117,6 +133,7 @@ impl<'a> SymbolTable<'a> {
             variables: Vec::new(),
             labels: Vec::new(),
             gotos: Vec::new(),
+            loops: Vec::new(),
         }
     }
     fn enter_scope(&mut self) {
@@ -125,6 +142,14 @@ impl<'a> SymbolTable<'a> {
     fn enter_function(&mut self) {
         self.labels.push(HashSet::new());
         self.gotos.push(HashSet::new());
+    }
+    fn enter_loop(&mut self) -> String {
+        let label = SymbolTable::gen_loop_name();
+        self.loops.push(label.clone());
+        label
+    }
+    fn leave_loop(&mut self) {
+        self.loops.pop();
     }
     fn leave_scope(&mut self) {
         self.variables.pop();
@@ -170,7 +195,17 @@ impl<'a> SymbolTable<'a> {
         let stacklen = &self.gotos.len() - 1;
         self.gotos[stacklen].insert(target);
     }
-    
+    fn current_loop(&self) -> String {
+        if self.loops.len() == 0 {
+            panic!("Used Break/Continue outside Loop!");
+        }
+        self.loops[self.loops.len() - 1].clone()
+    }
+
+    fn gen_loop_name() -> String {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        format!("loop.{}", COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
     fn gen_variable_name(name: &str) -> String {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
@@ -307,6 +342,20 @@ fn parse_expression(
     }
     left
 }
+fn parse_optional_expression(
+    tokens: &mut &[TokenType],
+    symbol_table: &mut SymbolTable,
+) -> Option<Expression> {
+    match tokens[0] {
+        TokenType::CONSTANT(_) |
+        TokenType::HYPHEN |
+        TokenType::TILDE |
+        TokenType::EXCLAM |
+        TokenType::OPENPAREN |
+        TokenType::IDENTIFIER(_) => Some(parse_expression(tokens, 0, symbol_table)),
+        _ => None
+    }
+}
 fn parse_statement<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
@@ -333,7 +382,7 @@ fn parse_statement<'a>(
         if let TokenType::IDENTIFIER(name) = tokens[0] {
             *tokens = &tokens[2..];
             symbol_table.declare_label(name);
-            Statement::LABEL(name)
+            Statement::LABEL(name, parse_statement(tokens, symbol_table).into())
         } else {
             panic!("Token 0 must be identifier");
         }
@@ -343,8 +392,76 @@ fn parse_statement<'a>(
         symbol_table.declare_goto(target);
         Statement::GOTO(target)
     } else if try_consume(tokens, TokenType::OPENBRACE) {
+        symbol_table.enter_scope();
         let body = parse_block(tokens, symbol_table);
+        symbol_table.leave_scope();
         Statement::COMPOUND(body)
+    } else if try_consume(tokens, TokenType::KEYWORD("break")) {
+        expect(tokens, TokenType::SEMICOLON);
+        Statement::BREAK(symbol_table.current_loop())
+    } else if try_consume(tokens, TokenType::KEYWORD("continue")) {
+        expect(tokens, TokenType::SEMICOLON);
+        Statement::CONTINUE(symbol_table.current_loop())
+    } else if try_consume(tokens, TokenType::KEYWORD("while")) {
+        expect(tokens, TokenType::OPENPAREN);
+        let condition = parse_expression(tokens, 0, symbol_table);
+        expect(tokens, TokenType::CLOSEPAREN);
+        symbol_table.enter_scope();
+        let label = symbol_table.enter_loop();
+        let body = parse_statement(tokens, symbol_table);
+        symbol_table.leave_scope();
+        symbol_table.leave_loop();
+        Statement::WHILE(Loop {
+            label,
+            condition,
+            body: body.into(),
+        })
+    } else if try_consume(tokens, TokenType::KEYWORD("do")) {
+        let label = symbol_table.enter_loop();
+        symbol_table.enter_scope();
+        let body = parse_statement(tokens, symbol_table);
+        symbol_table.leave_scope();
+        symbol_table.leave_loop();
+        expect(tokens, TokenType::KEYWORD("while"));
+        expect(tokens, TokenType::OPENPAREN);
+        let condition = parse_expression(tokens, 0, symbol_table);
+        expect(tokens, TokenType::CLOSEPAREN);
+        expect(tokens, TokenType::SEMICOLON);
+        Statement::DOWHILE(Loop {
+            label,
+            condition,
+            body: body.into(),
+        })
+    } else if try_consume(tokens, TokenType::KEYWORD("for")) {
+        symbol_table.enter_scope();
+        let label = symbol_table.enter_loop();
+        expect(tokens, TokenType::OPENPAREN);
+        let init = if try_consume(tokens, TokenType::KEYWORD("int")) {
+            ForInit::INITDECL(parse_declaration(tokens, symbol_table))
+        } else {
+            let init = ForInit::INITEXP(parse_optional_expression(tokens, symbol_table));
+            expect(tokens, TokenType::SEMICOLON);
+            init
+        };
+        let condition = match parse_optional_expression(tokens, symbol_table) {
+            Some(expr) => expr,
+            None => Expression::LITEXP(Literal::INT(1)),
+        };
+        expect(tokens, TokenType::SEMICOLON);
+        let post_loop = parse_optional_expression(tokens, symbol_table);
+        expect(tokens, TokenType::CLOSEPAREN);
+        let body = parse_statement(tokens, symbol_table);
+        symbol_table.leave_loop();
+        symbol_table.leave_scope();
+        Statement::FOR(
+            init,
+            Loop {
+                label,
+                condition,
+                body: body.into(),
+            },
+            post_loop,
+        )
     } else {
         let expr = parse_expression(tokens, 0, symbol_table);
         expect(tokens, TokenType::SEMICOLON);
@@ -378,12 +495,10 @@ fn parse_block_item<'a>(
     }
 }
 fn parse_block<'a>(tokens: &mut &[TokenType<'a>], symbol_table: &mut SymbolTable<'a>) -> Block<'a> {
-    symbol_table.enter_scope();
     let mut body: Block = Vec::new();
     while tokens[0] != TokenType::CLOSEBRACE {
         body.push(parse_block_item(tokens, symbol_table));
     }
-    symbol_table.leave_scope();
     expect(tokens, TokenType::CLOSEBRACE);
     body
 }
@@ -392,14 +507,16 @@ fn parse_function<'a>(
     symbol_table: &mut SymbolTable<'a>,
 ) -> Function<'a> {
     // Parses a function
-    symbol_table.enter_function();
     expect(tokens, TokenType::KEYWORD("int"));
     let name = parse_identifier(tokens);
     expect(tokens, TokenType::OPENPAREN);
     expect(tokens, TokenType::KEYWORD("void"));
     expect(tokens, TokenType::CLOSEPAREN);
     expect(tokens, TokenType::OPENBRACE);
+    symbol_table.enter_function();
+    symbol_table.enter_scope();
     let body = parse_block(tokens, symbol_table);
+    symbol_table.leave_scope();
     symbol_table.leave_function();
     Function { name, body }
 }
