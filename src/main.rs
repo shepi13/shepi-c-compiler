@@ -105,8 +105,7 @@ fn main() {
     }
 
     // Code emission
-    let emitter = emission::CodeEmission::from(&assembly_file);
-    emitter.emit(assembly_ast);
+    emission::emit_program(&assembly_file, assembly_ast);
 
     if args.assembler_only {
         // Print assembly?
