@@ -1,95 +1,69 @@
 use crate::assembly::{self, Condition};
 use std::{fs::File, io::Write};
 
-pub struct CodeEmission {
-    file: File,
+pub fn emit_program(output_filename: &str, program: assembly::Program) {
+    let mut file = File::create(output_filename).expect("Failed to create file!");
+    emit_function(&mut file, &program.main);
+    writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
 }
-
-impl CodeEmission {
-    pub fn from(output_filename: &str) -> CodeEmission {
-        let file = File::create(output_filename).expect("Failed to create file!");
-        CodeEmission { file }
-    }
-    pub fn emit(mut self, program: assembly::Program) {
-        self.emit_function(&program.main);
-        writeln!(
-            &mut self.file,
-            "    .section .note.GNU-stack,\"\",@progbits"
-        )
-        .expect("Write Failed!");
-    }
-
-    fn emit_function(&mut self, function: &assembly::Function) {
-        writeln!(&mut self.file, "    .globl {}", function.name).expect("Write failed!");
-        writeln!(&mut self.file, "{}:", function.name).expect("Write failed!");
-        writeln!(&mut self.file, "    pushq %rbp").expect("Write failed!");
-        writeln!(&mut self.file, "    movq %rsp, %rbp").expect("Write failed!");
-        self.emit_instructions(&function.instructions);
-    }
-    fn emit_instructions(&mut self, instructions: &Vec<assembly::Instruction>) {
-        for instruction in instructions {
-            match instruction {
-                assembly::Instruction::MOV(src, dst) => {
-                    let src = get_operand(src);
-                    let dst = get_operand(dst);
-                    writeln!(&mut self.file, "    movl {src}, {dst}").expect("Write failed!");
-                }
-                assembly::Instruction::RET => {
-                    writeln!(&mut self.file, "    movq %rbp, %rsp").expect("Write failed!");
-                    writeln!(&mut self.file, "    popq %rbp").expect("Write failed!");
-                    writeln!(&mut self.file, "    ret").expect("Write failed!");
-                }
-                assembly::Instruction::STACKALLOCATE(val) => {
-                    writeln!(&mut self.file, "    subq ${}, %rsp", val).expect("Write failed!");
-                }
-                assembly::Instruction::UNARY(operator, operand) => {
-                    let operator = get_unary_operator(operator);
-                    let operand = get_operand(operand);
-                    writeln!(&mut self.file, "    {} {}", operator, operand)
-                        .expect("Write failed!");
-                }
-                assembly::Instruction::CDQ => {
-                    writeln!(&mut self.file, "    cdq").expect("Write failed!");
-                }
-                assembly::Instruction::IDIV(operand) => {
-                    writeln!(&mut self.file, "    idivl {}", get_operand(operand))
-                        .expect("Write failed!");
-                }
-                assembly::Instruction::BINARY(operator, left, right) => {
-                    let operator = get_binary_operator(operator);
-                    let src1 = get_operand(left);
-                    let src2 = get_operand(right);
-                    writeln!(&mut self.file, "    {} {}, {}", operator, src1, src2)
-                        .expect("Write failed!");
-                }
-                assembly::Instruction::SetCond(cond, val) => {
-                    writeln!(
-                        &mut self.file,
-                        "    set{} {}",
-                        get_cond_code(cond),
-                        get_short_reg(val)
-                    )
-                    .expect("Write failed!");
-                }
-                assembly::Instruction::COMPARE(left, right) => {
-                    writeln!(
-                        &mut self.file,
-                        "    cmpl {}, {}",
-                        get_operand(left),
-                        get_operand(right)
-                    )
-                    .expect("Write failed!");
-                }
-                assembly::Instruction::JMPCond(cond, target) => {
-                    writeln!(&mut self.file, "    j{} .L_{}", get_cond_code(cond), target)
-                        .expect("Write failed!");
-                }
-                assembly::Instruction::JMP(target) => {
-                    writeln!(&mut self.file, "    jmp .L_{}", target).expect("Write failed!");
-                }
-                assembly::Instruction::LABEL(target) => {
-                    writeln!(&mut self.file, ".L_{}:", target).expect("Write failed!");
-                }
+fn emit_function(file: &mut File, function: &assembly::Function) {
+    writeln!(file, "    .globl {}", function.name).unwrap();
+    writeln!(file, "{}:", function.name).unwrap();
+    writeln!(file, "    pushq %rbp").unwrap();
+    writeln!(file, "    movq %rsp, %rbp").unwrap();
+    emit_instructions(file, &function.instructions);
+}
+fn emit_instructions(file: &mut File, instructions: &Vec<assembly::Instruction>) {
+    for instruction in instructions {
+        match instruction {
+            assembly::Instruction::MOV(src, dst) => {
+                let src = get_operand(src);
+                let dst = get_operand(dst);
+                writeln!(file, "    movl {src}, {dst}").unwrap();
+            }
+            assembly::Instruction::RET => {
+                writeln!(file, "    movq %rbp, %rsp").unwrap();
+                writeln!(file, "    popq %rbp").unwrap();
+                writeln!(file, "    ret").unwrap();
+            }
+            assembly::Instruction::STACKALLOCATE(val) => {
+                writeln!(file, "    subq ${}, %rsp", val).unwrap();
+            }
+            assembly::Instruction::UNARY(operator, operand) => {
+                let operator = get_unary_operator(operator);
+                let operand = get_operand(operand);
+                writeln!(file, "    {} {}", operator, operand).unwrap();
+            }
+            assembly::Instruction::CDQ => {
+                writeln!(file, "    cdq").unwrap();
+            }
+            assembly::Instruction::IDIV(operand) => {
+                writeln!(file, "    idivl {}", get_operand(operand)).unwrap();
+            }
+            assembly::Instruction::BINARY(operator, left, right) => {
+                let operator = get_binary_operator(operator);
+                let src1 = get_operand(left);
+                let src2 = get_operand(right);
+                writeln!(file, "    {} {}, {}", operator, src1, src2).unwrap();
+            }
+            assembly::Instruction::SetCond(cond, val) => {
+                let code = get_cond_code(cond);
+                let reg = get_short_reg(val);
+                writeln!(file, "    set{} {}", code, reg).unwrap();
+            }
+            assembly::Instruction::COMPARE(left, right) => {
+                let left = get_operand(left);
+                let right = get_operand(right);
+                writeln!(file, "    cmpl {}, {}", left, right).unwrap();
+            }
+            assembly::Instruction::JMPCond(cond, target) => {
+                writeln!(file, "    j{} .L_{}", get_cond_code(cond), target).unwrap();
+            }
+            assembly::Instruction::JMP(target) => {
+                writeln!(file, "    jmp .L_{}", target).unwrap();
+            }
+            assembly::Instruction::LABEL(target) => {
+                writeln!(file, ".L_{}:", target).unwrap();
             }
         }
     }
