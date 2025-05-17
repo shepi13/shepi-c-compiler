@@ -69,13 +69,15 @@ pub enum Value {
 
 pub fn gen_tac_ast<'a>(parser_ast: &parser::Program<'a>) -> Program<'a> {
     Program {
-        main: gen_function(&parser_ast.main),
+        main: gen_function(&parser_ast[0]),
     }
 }
-fn gen_function<'a>(function: &parser::Function<'a>) -> Function<'a> {
+fn gen_function<'a>(function: &parser::FunctionDeclaration<'a>) -> Function<'a> {
     let mut instructions: Vec<Instruction> = Vec::new();
-    gen_block(&function.body, &mut instructions);
-    instructions.push(Instruction::RETURN(Value::CONSTANT(0)));
+    if let Some(body) = &function.body {
+        gen_block(&body, &mut instructions);
+        instructions.push(Instruction::RETURN(Value::CONSTANT(0)));
+    }
     Function {
         name: function.name,
         instructions,
@@ -85,11 +87,14 @@ fn gen_block(block: &parser::Block, instructions: &mut Vec<Instruction>) {
     for block_item in block {
         match block_item {
             parser::BlockItem::STATEMENT(statement) => gen_instructions(&statement, instructions),
-            parser::BlockItem::DECLARATION(decl) => gen_declaration(decl, instructions)
+            parser::BlockItem::DECLARATION(parser::Declaration::VARIABLE(decl)) => {
+                gen_declaration(decl, instructions);
+            }
+            parser::BlockItem::DECLARATION(parser::Declaration::FUNCTION(_)) => panic!("Not implemented!")
         }
     }
 }
-fn gen_declaration(declaration: &parser::Declaration, instructions: &mut Vec<Instruction>) {
+fn gen_declaration(declaration: &parser::VariableDeclaration, instructions: &mut Vec<Instruction>) {
     if let Some(value) = &declaration.value {
         let result = gen_expression(&value, instructions);
         instructions.push(Instruction::COPY(InstructionCopy {
@@ -275,6 +280,9 @@ fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instru
             }));
             instructions.push(Instruction::LABEL(end_label));
             dst
+        }
+        parser::Expression::FUNCTION(_, _) => {
+            panic!("Not implemented");
         }
     }
 }

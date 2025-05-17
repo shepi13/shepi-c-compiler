@@ -36,8 +36,12 @@ struct Args {
     codegen: bool,
 
     /// Output assembly, but don't run linker
-    #[arg(short = 'S')]
+    #[arg(short = 's')]
     assembler_only: bool,
+
+    /// Output assembly and run assembler to generate object file, but not linker,
+    #[arg(short = 'c')]
+    compile_only: bool,
 }
 
 fn path_with_extension(filename: &str, extension: &str) -> String {
@@ -112,12 +116,23 @@ fn main() {
         return;
     }
 
-    // Run linker
-    let status = Command::new("gcc")
-        .args([&assembly_file, "-o", &output_file])
-        .status()
-        .expect("Linker failed to run!");
-    if !status.success() {
-        panic!("Linker exited with failure");
+    if args.compile_only {
+        let status = Command::new("gcc")
+            .args([&assembly_file, "-c", "-o", &output_file])
+            .status()
+            .expect("Assembler failed to run!");
+        if !status.success() {
+            panic!("Assembler exited with error!");
+        }
+    }
+    else {
+        // Run linker
+        let status = Command::new("gcc")
+            .args([&assembly_file, "-o", &output_file])
+            .status()
+            .expect("Assembly and Linking failed to run!");
+        if !status.success() {
+            panic!("Assembler/Linker exited with failure");
+        }
     }
 }
