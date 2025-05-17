@@ -95,33 +95,33 @@ fn get_short_reg(operand: &assembly::Operand) -> String {
     }
 }
 
-fn get_cond_code(condition: &assembly::Condition) -> String {
+fn get_cond_code(condition: &assembly::Condition) -> &str {
     match condition {
-        Condition::EQUAL => String::from("e"),
-        Condition::NOTEQUAL => String::from("ne"),
-        Condition::GREATERTHAN => String::from("g"),
-        Condition::GREATERTHANEQUAL => String::from("ge"),
-        Condition::LESSTHAN => String::from("l"),
-        Condition::LESSTHANEQUAL => String::from("le"),
+        Condition::EQUAL => "e",
+        Condition::NOTEQUAL => "ne",
+        Condition::GREATERTHAN => "g",
+        Condition::GREATERTHANEQUAL => "ge",
+        Condition::LESSTHAN => "l",
+        Condition::LESSTHANEQUAL => "le",
     }
 }
 
-fn get_unary_operator(operator: &assembly::UnaryOperator) -> String {
+fn get_unary_operator(operator: &assembly::UnaryOperator) -> &str {
     match operator {
-        assembly::UnaryOperator::NEG => String::from("negl"),
-        assembly::UnaryOperator::NOT => String::from("notl"),
+        assembly::UnaryOperator::NEG => "negl",
+        assembly::UnaryOperator::NOT => "notl",
     }
 }
 
-fn get_binary_operator(operator: &assembly::BinaryOperator) -> String {
+fn get_binary_operator(operator: &assembly::BinaryOperator) -> &str {
     match operator {
-        assembly::BinaryOperator::ADD => String::from("addl"),
-        assembly::BinaryOperator::SUB => String::from("subl"),
-        assembly::BinaryOperator::MULT => String::from("imull"),
-        assembly::BinaryOperator::BITAND => String::from("andl"),
-        assembly::BinaryOperator::BITOR => String::from("orl"),
-        assembly::BinaryOperator::BITXOR => String::from("xorl"),
-        assembly::BinaryOperator::LEFTSHIFT => String::from("sal"),
-        assembly::BinaryOperator::RIGHTSHIFT => String::from("sar"),
+        assembly::BinaryOperator::ADD => "addl",
+        assembly::BinaryOperator::SUB => "subl",
+        assembly::BinaryOperator::MULT => "imull",
+        assembly::BinaryOperator::BITAND => "andl",
+        assembly::BinaryOperator::BITOR => "orl",
+        assembly::BinaryOperator::BITXOR => "xorl",
+        assembly::BinaryOperator::LEFTSHIFT => "sal",
+        assembly::BinaryOperator::RIGHTSHIFT => "sar",
     }
 }
