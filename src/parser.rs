@@ -17,7 +17,7 @@ pub struct Function<'a> {
     pub name: &'a str,
     pub body: Block<'a>,
 }
-type Block<'a> = Vec<BlockItem<'a>>;
+pub type Block<'a> = Vec<BlockItem<'a>>;
 // Statements and Declarations
 #[derive(Debug)]
 pub enum BlockItem<'a> {
