@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::parser::{self, Expression};
 
 #[derive(Debug)]
-pub struct Program {
-    pub main: Function,
+pub struct Program<'a> {
+    pub main: Function<'a>,
 }
 
 #[derive(Debug)]
-pub struct Function {
-    pub name: String,
+pub struct Function<'a> {
+    pub name: &'a str,
     pub instructions: Vec<Instruction>,
 }
 
@@ -92,7 +92,7 @@ fn gen_function(function: parser::Function) -> Function {
     }
     instructions.push(Instruction::RETURN(Value::CONSTANT(0)));
     Function {
-        name: function.name.to_string(),
+        name: function.name,
         instructions,
     }
 }

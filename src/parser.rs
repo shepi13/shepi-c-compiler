@@ -135,27 +135,22 @@ impl<'a> SymbolTable<'a> {
         };
     }
     fn declare_variable(&mut self, name: &'a str) -> String {
-        for table in &self.variables {
-            if table.contains_key(name) {
-                panic!("Duplicate variable name: {}", name);
-            }
-        }
         let stacklen = self.variables.len() - 1;
+        let table = &mut self.variables[stacklen];
+        if table.contains_key(name) {
+            panic!("Duplicate variable name in current scope: {}", name);
+        }
         let unique_name = SymbolTable::gen_variable_name(name);
-        self.variables[stacklen].insert(name, unique_name.clone());
+        table.insert(name, unique_name.clone());
         unique_name
     }
-    fn resolve_variable(&mut self, name: &str) -> String {
-        for table in &self.variables {
+    fn resolve_variable(&self, name: &str) -> String {
+        for table in self.variables.iter().rev() {
             if table.contains_key(name) {
                 return table[name].clone();
             }
         }
         panic!("Undeclared variable: {}", name);
-    }
-    fn gen_variable_name(name: &str) -> String {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
     }
     fn declare_label(&mut self, target: &'a str) {
         for table in &self.labels {
@@ -169,6 +164,11 @@ impl<'a> SymbolTable<'a> {
     fn declare_goto(&mut self, target: &'a str) {
         let stacklen = &self.gotos.len() - 1;
         self.gotos[stacklen].insert(target);
+    }
+    
+    fn gen_variable_name(name: &str) -> String {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
     }
 }
 
