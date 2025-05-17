@@ -41,9 +41,9 @@ pub enum Statement<'a> {
 }
 #[derive(Debug)]
 pub struct Loop<'a> {
-    label: String,
-    condition: Expression,
-    body: Rc<Statement<'a>>,
+    pub label: String,
+    pub condition: Expression,
+    pub body: Rc<Statement<'a>>,
 }
 #[derive(Debug)]
 pub enum ForInit {
