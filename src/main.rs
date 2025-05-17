@@ -86,7 +86,7 @@ fn main() {
     }
 
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(parser_ast);
+    let tac_ast = generator::gen_tac_ast(&parser_ast);
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);

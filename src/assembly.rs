@@ -4,12 +4,12 @@ use crate::generator;
 use crate::parser;
 
 #[derive(Debug)]
-pub struct Program {
-    pub main: Function,
+pub struct Program<'a> {
+    pub main: Function<'a>,
 }
 #[derive(Debug)]
-pub struct Function {
-    pub name: String,
+pub struct Function<'a> {
+    pub name: &'a str,
     pub instructions: Vec<Instruction>,
 }
 
@@ -85,14 +85,14 @@ impl StackGen {
     }
 }
 
-pub fn gen_assembly_tree(ast: generator::Program, stack: &mut StackGen) -> Program {
+pub fn gen_assembly_tree<'a>(ast: generator::Program<'a>, stack: &mut StackGen) -> Program<'a> {
     Program {
         main: gen_function(ast.main, stack),
     }
 }
-fn gen_function(function: generator::Function, stack: &mut StackGen) -> Function {
+fn gen_function<'a>(function: generator::Function<'a>, stack: &mut StackGen) -> Function<'a> {
     Function {
-        name: function.name.clone(),
+        name: function.name,
         instructions: gen_instructions(function.instructions, stack),
     }
 }

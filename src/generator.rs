@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::parser::{self, Expression};
 
 #[derive(Debug)]
-pub struct Program {
-    pub main: Function,
+pub struct Program<'a> {
+    pub main: Function<'a>,
 }
 
 #[derive(Debug)]
-pub struct Function {
-    pub name: String,
+pub struct Function<'a> {
+    pub name: &'a str,
     pub instructions: Vec<Instruction>,
 }
 
@@ -67,21 +67,29 @@ pub enum Value {
     VARIABLE(String),
 }
 
-pub fn gen_tac_ast(parser_ast: parser::Program) -> Program {
+pub fn gen_tac_ast<'a>(parser_ast: &parser::Program<'a>) -> Program<'a> {
     Program {
-        main: gen_function(parser_ast.main),
+        main: gen_function(&parser_ast.main),
     }
 }
-fn gen_function(function: parser::Function) -> Function {
+fn gen_function<'a>(function: &parser::Function<'a>) -> Function<'a> {
     let mut instructions: Vec<Instruction> = Vec::new();
-    for block_item in function.body {
+    gen_block(&function.body, &mut instructions);
+    instructions.push(Instruction::RETURN(Value::CONSTANT(0)));
+    Function {
+        name: function.name,
+        instructions,
+    }
+}
+fn gen_block(block: &parser::Block, instructions: &mut Vec<Instruction>) {
+    for block_item in block {
         match block_item {
             parser::BlockItem::STATEMENT(statement) => {
-                gen_instructions(&statement, &mut instructions)
+                gen_instructions(&statement, instructions)
             }
             parser::BlockItem::DECLARATION(decl) => {
-                if let Some(value) = decl.value {
-                    let result = gen_expression(&value, &mut instructions);
+                if let Some(value) = &decl.value {
+                    let result = gen_expression(&value, instructions);
                     instructions.push(Instruction::COPY(InstructionCopy {
                         src: result,
                         dst: Value::VARIABLE(decl.name.to_string()),
@@ -89,11 +97,6 @@ fn gen_function(function: parser::Function) -> Function {
                 }
             }
         }
-    }
-    instructions.push(Instruction::RETURN(Value::CONSTANT(0)));
-    Function {
-        name: function.name.to_string(),
-        instructions,
     }
 }
 fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instruction>) {
@@ -135,6 +138,7 @@ fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instru
         parser::Statement::LABEL(name) => {
             instructions.push(Instruction::LABEL(name.to_string()));
         }
+        parser::Statement::COMPOUND(block) => gen_block(block, instructions),
     }
 }
 fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instruction>) -> Value {
