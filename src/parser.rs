@@ -8,21 +8,13 @@ use lazy_static::lazy_static;
 
 use crate::lexer::TokenType;
 
-#[derive(Debug)]
-pub struct Program<'a> {
-    pub main: Function<'a>,
-}
-#[derive(Debug)]
-pub struct Function<'a> {
-    pub name: &'a str,
-    pub body: Block<'a>,
-}
+pub type Program<'a> = Vec<FunctionDeclaration<'a>>;
 pub type Block<'a> = Vec<BlockItem<'a>>;
 // Statements and Declarations
 #[derive(Debug)]
 pub enum BlockItem<'a> {
     STATEMENT(Statement<'a>),
-    DECLARATION(Declaration),
+    DECLARATION(Declaration<'a>),
 }
 #[derive(Debug)]
 pub enum Statement<'a> {
@@ -47,13 +39,24 @@ pub struct Loop<'a> {
 }
 #[derive(Debug)]
 pub enum ForInit {
-    INITDECL(Declaration),
+    INITDECL(VariableDeclaration),
     INITEXP(Option<Expression>),
 }
 #[derive(Debug)]
-pub struct Declaration {
+pub enum Declaration<'a> {
+    VARIABLE(VariableDeclaration),
+    FUNCTION(FunctionDeclaration<'a>),
+}
+#[derive(Debug)]
+pub struct VariableDeclaration {
     pub name: String,
     pub value: Option<Expression>,
+}
+#[derive(Debug)]
+pub struct FunctionDeclaration<'a> {
+    pub name: &'a str,
+    pub params: Vec<String>,
+    pub body: Option<Block<'a>>,
 }
 // Expressions
 #[derive(Debug)]
@@ -64,6 +67,7 @@ pub enum Expression {
     BINARY(Rc<BinaryExpression>),
     ASSIGNMENT(Rc<AssignmentExpression>),
     CONDITION(Rc<ConditionExpression>),
+    FUNCTION(String, Vec<Expression>),
 }
 #[derive(Debug)]
 pub enum UnaryExpression {
@@ -471,7 +475,7 @@ fn parse_statement<'a>(
 fn parse_declaration<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
-) -> Declaration {
+) -> VariableDeclaration {
     let name = parse_identifier(tokens);
     let name = symbol_table.declare_variable(name);
     let value = match tokens[0] {
@@ -482,14 +486,16 @@ fn parse_declaration<'a>(
         _ => None,
     };
     expect(tokens, TokenType::SEMICOLON);
-    Declaration { name, value }
+    VariableDeclaration { name, value }
 }
 fn parse_block_item<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
 ) -> BlockItem<'a> {
     if try_consume(tokens, TokenType::KEYWORD("int")) {
-        BlockItem::DECLARATION(parse_declaration(tokens, symbol_table))
+        BlockItem::DECLARATION(
+            Declaration::VARIABLE(parse_declaration(tokens, symbol_table))
+        )
     } else {
         BlockItem::STATEMENT(parse_statement(tokens, symbol_table))
     }
@@ -505,7 +511,7 @@ fn parse_block<'a>(tokens: &mut &[TokenType<'a>], symbol_table: &mut SymbolTable
 fn parse_function<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
-) -> Function<'a> {
+) -> FunctionDeclaration<'a> {
     // Parses a function
     expect(tokens, TokenType::KEYWORD("int"));
     let name = parse_identifier(tokens);
@@ -518,14 +524,15 @@ fn parse_function<'a>(
     let body = parse_block(tokens, symbol_table);
     symbol_table.leave_scope();
     symbol_table.leave_function();
-    Function { name, body }
+    FunctionDeclaration { name, params: Vec::new(), body: Some(body) }
 }
 pub fn parse<'a>(tokens: &mut &[TokenType<'a>], symbol_table: &mut SymbolTable<'a>) -> Program<'a> {
     // Parses entire program
-    let function = parse_function(tokens, symbol_table);
-    assert!(function.name == "main", "Failed to find main function!");
-    assert!(tokens.is_empty());
-    Program { main: function }
+    let mut program: Program = Vec::new();
+    while !tokens.is_empty() {
+        program.push(parse_function(tokens, symbol_table));
+    }
+    program
 }
 fn expect(tokens: &mut &[TokenType], token: TokenType) {
     if token != tokens[0] {

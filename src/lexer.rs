@@ -44,6 +44,8 @@ pub enum TokenType<'a> {
     //Conditional,
     QUESTIONMARK,
     COLON,
+    // Other
+    COMMA,
 }
 
 impl<'a> TokenType<'a> {
@@ -90,6 +92,7 @@ impl<'a> TokenType<'a> {
             TokenType::EQUAL => "=",
             TokenType::QUESTIONMARK => "?",
             TokenType::COLON => ":",
+            TokenType::COMMA => ",",
         };
         str_val.to_string()
     }
@@ -149,6 +152,7 @@ lazy_static! {
         regexes.push((TokenType::EQUAL, Regex::new(r"^=").unwrap()));
         regexes.push((TokenType::QUESTIONMARK, Regex::new(r"^\?").unwrap()));
         regexes.push((TokenType::COLON, Regex::new(r"^\:").unwrap()));
+        regexes.push((TokenType::COMMA, Regex::new(r"^\,").unwrap()));
         // Brackets
         regexes.push((TokenType::OPENPAREN, Regex::new(r"^\(").unwrap()));
         regexes.push((TokenType::CLOSEPAREN, Regex::new(r"^\)").unwrap()));
