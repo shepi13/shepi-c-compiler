@@ -35,7 +35,7 @@ pub enum Statement<'a> {
     BREAK(String),
     CONTINUE(String),
     COMPOUND(Block<'a>),
-    LABEL(&'a str),
+    LABEL(&'a str, Rc<Statement<'a>>),
     GOTO(&'a str),
     NULL,
 }
@@ -382,7 +382,7 @@ fn parse_statement<'a>(
         if let TokenType::IDENTIFIER(name) = tokens[0] {
             *tokens = &tokens[2..];
             symbol_table.declare_label(name);
-            Statement::LABEL(name)
+            Statement::LABEL(name, parse_statement(tokens, symbol_table).into())
         } else {
             panic!("Token 0 must be identifier");
         }
