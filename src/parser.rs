@@ -15,9 +15,9 @@ pub struct Program<'a> {
 #[derive(Debug)]
 pub struct Function<'a> {
     pub name: &'a str,
-    pub body: Vec<BlockItem<'a>>,
+    pub body: Block<'a>,
 }
-
+type Block<'a> = Vec<BlockItem<'a>>;
 // Statements and Declarations
 #[derive(Debug)]
 pub enum BlockItem<'a> {
@@ -29,6 +29,7 @@ pub enum Statement<'a> {
     RETURN(Expression),
     EXPRESSION(Expression),
     IF(Expression, Rc<Statement<'a>>, Rc<Option<Statement<'a>>>),
+    COMPOUND(Block<'a>),
     LABEL(&'a str),
     GOTO(&'a str),
     NULL,
@@ -120,11 +121,15 @@ impl<'a> SymbolTable<'a> {
     }
     fn enter_scope(&mut self) {
         self.variables.push(HashMap::new());
+    }
+    fn enter_function(&mut self) {
         self.labels.push(HashSet::new());
         self.gotos.push(HashSet::new());
     }
     fn leave_scope(&mut self) {
         self.variables.pop();
+    }
+    fn leave_function(&mut self) {
         let labels = self.labels.pop().expect("Scope missing from symbol table");
         let gotos = self.gotos.pop().expect("Scope missing from symbol table");
 
@@ -337,6 +342,9 @@ fn parse_statement<'a>(
         expect(tokens, TokenType::SEMICOLON);
         symbol_table.declare_goto(target);
         Statement::GOTO(target)
+    } else if try_consume(tokens, TokenType::OPENBRACE) {
+        let body = parse_block(tokens, symbol_table);
+        Statement::COMPOUND(body)
     } else {
         let expr = parse_expression(tokens, 0, symbol_table);
         expect(tokens, TokenType::SEMICOLON);
@@ -369,24 +377,30 @@ fn parse_block_item<'a>(
         BlockItem::STATEMENT(parse_statement(tokens, symbol_table))
     }
 }
+fn parse_block<'a>(tokens: &mut &[TokenType<'a>], symbol_table: &mut SymbolTable<'a>) -> Block<'a> {
+    symbol_table.enter_scope();
+    let mut body: Block = Vec::new();
+    while tokens[0] != TokenType::CLOSEBRACE {
+        body.push(parse_block_item(tokens, symbol_table));
+    }
+    symbol_table.leave_scope();
+    expect(tokens, TokenType::CLOSEBRACE);
+    body
+}
 fn parse_function<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
 ) -> Function<'a> {
     // Parses a function
+    symbol_table.enter_function();
     expect(tokens, TokenType::KEYWORD("int"));
     let name = parse_identifier(tokens);
     expect(tokens, TokenType::OPENPAREN);
     expect(tokens, TokenType::KEYWORD("void"));
     expect(tokens, TokenType::CLOSEPAREN);
     expect(tokens, TokenType::OPENBRACE);
-    symbol_table.enter_scope();
-    let mut body: Vec<BlockItem> = Vec::new();
-    while tokens[0] != TokenType::CLOSEBRACE {
-        body.push(parse_block_item(tokens, symbol_table));
-    }
-    symbol_table.leave_scope();
-    expect(tokens, TokenType::CLOSEBRACE);
+    let body = parse_block(tokens, symbol_table);
+    symbol_table.leave_function();
     Function { name, body }
 }
 pub fn parse<'a>(tokens: &mut &[TokenType<'a>], symbol_table: &mut SymbolTable<'a>) -> Program<'a> {

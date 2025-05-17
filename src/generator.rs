@@ -135,6 +135,7 @@ fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instru
         parser::Statement::LABEL(name) => {
             instructions.push(Instruction::LABEL(name.to_string()));
         }
+        parser::Statement::COMPOUND(block) => panic!("Not implemented!")
     }
 }
 fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instruction>) -> Value {
