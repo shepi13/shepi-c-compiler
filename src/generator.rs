@@ -2,16 +2,14 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::parser::{self, Expression};
+use crate::parser;
 
-#[derive(Debug)]
-pub struct Program<'a> {
-    pub main: Function<'a>,
-}
 
+pub type Program<'a> = Vec<Function<'a>>;
 #[derive(Debug)]
 pub struct Function<'a> {
     pub name: &'a str,
+    pub params: &'a Vec<String>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -24,6 +22,7 @@ pub enum Instruction {
     LABEL(String),
     JUMP(String),
     JUMPCOND(InstructionJump),
+    FUNCTION(String, Vec<Value>, Value),
 }
 #[derive(Debug)]
 pub struct InstructionUnary {
@@ -67,12 +66,14 @@ pub enum Value {
     VARIABLE(String),
 }
 
-pub fn gen_tac_ast<'a>(parser_ast: &parser::Program<'a>) -> Program<'a> {
-    Program {
-        main: gen_function(&parser_ast[0]),
+pub fn gen_tac_ast<'a>(parser_ast: &'a parser::Program<'a>) -> Program<'a> {
+    let mut program: Program = Vec::new();
+    for function in parser_ast {
+        program.push(gen_function(function));
     }
+    program
 }
-fn gen_function<'a>(function: &parser::FunctionDeclaration<'a>) -> Function<'a> {
+fn gen_function<'a>(function: &'a parser::FunctionDeclaration<'a>) -> Function<'a> {
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = &function.body {
         gen_block(&body, &mut instructions);
@@ -80,6 +81,7 @@ fn gen_function<'a>(function: &parser::FunctionDeclaration<'a>) -> Function<'a> 
     }
     Function {
         name: function.name,
+        params: &function.params,
         instructions,
     }
 }
@@ -90,7 +92,7 @@ fn gen_block(block: &parser::Block, instructions: &mut Vec<Instruction>) {
             parser::BlockItem::DECLARATION(parser::Declaration::VARIABLE(decl)) => {
                 gen_declaration(decl, instructions);
             }
-            parser::BlockItem::DECLARATION(parser::Declaration::FUNCTION(_)) => panic!("Not implemented!")
+            parser::BlockItem::DECLARATION(parser::Declaration::FUNCTION(_)) => ()
         }
     }
 }
@@ -141,21 +143,21 @@ fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instru
         parser::Statement::BREAK(name) => {
             let target = format!("break_{}", name);
             instructions.push(Instruction::JUMP(target));
-        },
+        }
         parser::Statement::CONTINUE(name) => {
             let target = format!("continue_{}", name);
             instructions.push(Instruction::JUMP(target));
-        },
+        }
         parser::Statement::DOWHILE(loop_data) => {
             let start = format!("start_{}", loop_data.label);
             instructions.push(Instruction::LABEL(start.clone()));
             gen_instructions(&loop_data.body, instructions);
             instructions.push(Instruction::LABEL(format!("continue_{}", loop_data.label)));
             let result = gen_expression(&loop_data.condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump { 
-                jump_type: JumpType::JUMPIFNOTZERO, 
-                condition: result, 
-                target: start, 
+            instructions.push(Instruction::JUMPCOND(InstructionJump {
+                jump_type: JumpType::JUMPIFNOTZERO,
+                condition: result,
+                target: start,
             }));
             instructions.push(Instruction::LABEL(format!("break_{}", loop_data.label)));
         }
@@ -164,7 +166,7 @@ fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instru
             let continue_label = format!("continue_{}", loop_data.label);
             instructions.push(Instruction::LABEL(continue_label.clone()));
             let result = gen_expression(&loop_data.condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump{
+            instructions.push(Instruction::JUMPCOND(InstructionJump {
                 jump_type: JumpType::JUMPIFZERO,
                 condition: result,
                 target: break_label.clone(),
@@ -181,16 +183,16 @@ fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instru
                 parser::ForInit::INITEXP(Some(expr)) => {
                     gen_expression(expr, instructions);
                 }
-                _ => ()
+                _ => (),
             };
             let break_label = format!("break_{}", loop_data.label);
             let start_label = format!("start_{}", loop_data.label);
             instructions.push(Instruction::LABEL(start_label.clone()));
             let condition = gen_expression(&loop_data.condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump { 
-                jump_type: JumpType::JUMPIFZERO, 
-                condition, 
-                target: break_label.clone(), 
+            instructions.push(Instruction::JUMPCOND(InstructionJump {
+                jump_type: JumpType::JUMPIFZERO,
+                condition,
+                target: break_label.clone(),
             }));
             gen_instructions(&loop_data.body, instructions);
             instructions.push(Instruction::LABEL(format!("continue_{}", loop_data.label)));
@@ -281,8 +283,11 @@ fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instru
             instructions.push(Instruction::LABEL(end_label));
             dst
         }
-        parser::Expression::FUNCTION(_, _) => {
-            panic!("Not implemented");
+        parser::Expression::FUNCTION(name, args) => {
+            let results = args.into_iter().map(|arg| gen_expression(arg, instructions)).collect();
+            let dst = Value::VARIABLE(gen_temp_name());
+            instructions.push(Instruction::FUNCTION(name.to_string(), results, dst.clone()));
+            dst
         }
     }
 }
@@ -290,8 +295,8 @@ fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instru
 fn gen_short_circuit(
     instructions: &mut Vec<Instruction>,
     operator: &parser::BinaryOperator,
-    left: &Expression,
-    right: &Expression,
+    left: &parser::Expression,
+    right: &parser::Expression,
 ) -> Value {
     let (jump_type, label_type) = match operator {
         parser::BinaryOperator::LOGICALAND => (JumpType::JUMPIFZERO, false),

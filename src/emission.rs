@@ -3,10 +3,12 @@ use std::{fs::File, io::Write};
 
 pub fn emit_program(output_filename: &str, program: assembly::Program) {
     let mut file = File::create(output_filename).expect("Failed to create file!");
-    emit_function(&mut file, &program.main);
+    for function in program {
+        emit_function(&mut file, function);
+    }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
 }
-fn emit_function(file: &mut File, function: &assembly::Function) {
+fn emit_function(file: &mut File, function: assembly::Function) {
     writeln!(file, "    .globl {}", function.name).unwrap();
     writeln!(file, "{}:", function.name).unwrap();
     writeln!(file, "    pushq %rbp").unwrap();
@@ -28,6 +30,9 @@ fn emit_instructions(file: &mut File, instructions: &Vec<assembly::Instruction>)
             }
             assembly::Instruction::STACKALLOCATE(val) => {
                 writeln!(file, "    subq ${}, %rsp", val).unwrap();
+            }
+            assembly::Instruction::STACKDEALLOCATE(val) => {
+                writeln!(file, "    addq ${}, %rsp", val).unwrap();
             }
             assembly::Instruction::UNARY(operator, operand) => {
                 let operator = get_unary_operator(operator);
@@ -65,7 +70,30 @@ fn emit_instructions(file: &mut File, instructions: &Vec<assembly::Instruction>)
             assembly::Instruction::LABEL(target) => {
                 writeln!(file, ".L_{}:", target).unwrap();
             }
+            assembly::Instruction::PUSH(operand) => {
+                writeln!(file, "    pushq {}", get_long_reg(operand)).unwrap();
+            }
+            assembly::Instruction::CALL(label) => {
+                writeln!(file, "    call {}", label).unwrap();
+            }
         }
+    }
+}
+
+fn get_long_reg(operand: &assembly::Operand) -> String {
+    match operand {
+        assembly::Operand::IMM(val) => format!("${val}"),
+        assembly::Operand::REGISTER(assembly::Register::AX) => String::from("%rax"),
+        assembly::Operand::REGISTER(assembly::Register::CX) => String::from("%rcx"),
+        assembly::Operand::REGISTER(assembly::Register::DX) => String::from("%rdx"),
+        assembly::Operand::REGISTER(assembly::Register::DI) => String::from("%rdi"),
+        assembly::Operand::REGISTER(assembly::Register::SI) => String::from("%rsi"),
+        assembly::Operand::REGISTER(assembly::Register::R8) => String::from("%r8"),
+        assembly::Operand::REGISTER(assembly::Register::R9) => String::from("%r9"),
+        assembly::Operand::REGISTER(assembly::Register::R10) => String::from("%r10"),
+        assembly::Operand::REGISTER(assembly::Register::R11) => String::from("%r11"),
+        assembly::Operand::REGISTER(assembly::Register::CL) => String::from("%cl"),
+        assembly::Operand::STACK(val) => format!("-{val}(%rbp)"),
     }
 }
 
@@ -75,6 +103,10 @@ fn get_operand(operand: &assembly::Operand) -> String {
         assembly::Operand::REGISTER(assembly::Register::AX) => String::from("%eax"),
         assembly::Operand::REGISTER(assembly::Register::CX) => String::from("%ecx"),
         assembly::Operand::REGISTER(assembly::Register::DX) => String::from("%edx"),
+        assembly::Operand::REGISTER(assembly::Register::DI) => String::from("%edi"),
+        assembly::Operand::REGISTER(assembly::Register::SI) => String::from("%esi"),
+        assembly::Operand::REGISTER(assembly::Register::R8) => String::from("%r8d"),
+        assembly::Operand::REGISTER(assembly::Register::R9) => String::from("%r9d"),
         assembly::Operand::REGISTER(assembly::Register::R10) => String::from("%r10d"),
         assembly::Operand::REGISTER(assembly::Register::R11) => String::from("%r11d"),
         assembly::Operand::REGISTER(assembly::Register::CL) => String::from("%cl"),
@@ -87,7 +119,11 @@ fn get_short_reg(operand: &assembly::Operand) -> String {
         assembly::Operand::IMM(val) => format!("${val}"),
         assembly::Operand::REGISTER(assembly::Register::AX) => String::from("%al"),
         assembly::Operand::REGISTER(assembly::Register::CX) => String::from("%cl"),
-        assembly::Operand::REGISTER(assembly::Register::DX) => String::from("%dl"),
+        assembly::Operand::REGISTER(assembly::Register::DX) => String::from("%dl"), 
+        assembly::Operand::REGISTER(assembly::Register::DI) => String::from("%dil"),
+        assembly::Operand::REGISTER(assembly::Register::SI) => String::from("%sil"),
+        assembly::Operand::REGISTER(assembly::Register::R8) => String::from("%r8b"),
+        assembly::Operand::REGISTER(assembly::Register::R9) => String::from("%r9b"),
         assembly::Operand::REGISTER(assembly::Register::R10) => String::from("%r10b"),
         assembly::Operand::REGISTER(assembly::Register::R11) => String::from("%r11b"),
         assembly::Operand::REGISTER(assembly::Register::CL) => String::from("%cl"),

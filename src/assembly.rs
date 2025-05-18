@@ -3,10 +3,7 @@ use std::collections::HashMap;
 use crate::generator;
 use crate::parser;
 
-#[derive(Debug)]
-pub struct Program<'a> {
-    pub main: Function<'a>,
-}
+pub type Program<'a> = Vec<Function<'a>>;
 #[derive(Debug)]
 pub struct Function<'a> {
     pub name: &'a str,
@@ -26,6 +23,9 @@ pub enum Instruction {
     SetCond(Condition, Operand),
     LABEL(String),
     STACKALLOCATE(usize),
+    STACKDEALLOCATE(usize),
+    PUSH(Operand),
+    CALL(String),
     CDQ,
     RET,
 }
@@ -49,7 +49,7 @@ pub enum BinaryOperator {
 #[derive(Debug, Clone)]
 pub enum Operand {
     IMM(u32),
-    STACK(usize),
+    STACK(isize),
     REGISTER(Register),
 }
 #[derive(Debug, Clone)]
@@ -57,6 +57,10 @@ pub enum Register {
     AX,
     CX,
     DX,
+    DI,
+    SI,
+    R8,
+    R9,
     R10,
     R11,
     CL,
@@ -71,7 +75,7 @@ pub enum Condition {
     LESSTHANEQUAL,
 }
 
-pub struct StackGen {
+struct StackGen {
     variables: HashMap<String, usize>,
     stack_offset: usize,
 }
@@ -85,23 +89,41 @@ impl StackGen {
     }
 }
 
-pub fn gen_assembly_tree<'a>(ast: generator::Program<'a>, stack: &mut StackGen) -> Program<'a> {
-    Program {
-        main: gen_function(ast.main, stack),
+pub fn gen_assembly_tree<'a>(ast: generator::Program<'a>) -> Program<'a> {
+    let mut program: Program = Vec::new();
+    for function in ast.into_iter() {
+        if function.instructions.is_empty() {
+            continue;
+        }
+        let stack = &mut StackGen::new();
+        let mut instructions: Vec<Instruction> = Vec::new();
+        instructions.push(Instruction::STACKALLOCATE(0));
+        for (i, param) in function.params.iter().enumerate() {
+            let param = gen_operand(generator::Value::VARIABLE(param.to_string()), stack);
+            match i {
+                0 => gen_move(&mut instructions, &Operand::REGISTER(Register::DI), &param),
+                1 => gen_move(&mut instructions, &Operand::REGISTER(Register::SI), &param),
+                2 => gen_move(&mut instructions, &Operand::REGISTER(Register::DX), &param),
+                3 => gen_move(&mut instructions, &Operand::REGISTER(Register::CX), &param),
+                4 => gen_move(&mut instructions, &Operand::REGISTER(Register::R8), &param),
+                5 => gen_move(&mut instructions, &Operand::REGISTER(Register::R9), &param),
+                _ => gen_move(&mut instructions, &Operand::STACK((4-i as isize)*8), &param),
+            }
+        }
+        instructions.append(&mut gen_instructions(function.instructions, stack));
+        instructions[0] = Instruction::STACKALLOCATE(stack.stack_offset + 16 - stack.stack_offset%16);
+        program.push(Function {
+            name: function.name,
+            instructions
+        });
     }
-}
-fn gen_function<'a>(function: generator::Function<'a>, stack: &mut StackGen) -> Function<'a> {
-    Function {
-        name: function.name,
-        instructions: gen_instructions(function.instructions, stack),
-    }
+    program
 }
 fn gen_instructions(
     instructions: Vec<generator::Instruction>,
     stack: &mut StackGen,
 ) -> Vec<Instruction> {
     let mut assembly_instructions: Vec<Instruction> = Vec::new();
-    assembly_instructions.push(Instruction::STACKALLOCATE(0));
     for instruction in instructions {
         match instruction {
             generator::Instruction::RETURN(val) => {
@@ -216,11 +238,46 @@ fn gen_instructions(
             generator::Instruction::LABEL(target) => {
                 assembly_instructions.push(Instruction::LABEL(target));
             }
+            generator::Instruction::FUNCTION(name, args, dst) => {
+                gen_func_call(&mut assembly_instructions, stack, name, args, dst);
+            }
         }
     }
     assembly_instructions
 }
-
+fn gen_func_call(instructions: &mut Vec<Instruction>, stack: &mut StackGen, name: String, args: Vec<generator::Value>, dst: generator::Value) {
+    let arg_registers = [Register::DI, Register::SI, Register::DX, Register::CX, Register::R8, Register::R9];
+    let stack_padding = if args.len() > 6 && args.len() % 2 != 0 {8} else {0};
+    if stack_padding != 0 {
+        instructions.push(Instruction::STACKALLOCATE(stack_padding));
+    }
+    for (i, arg) in args.iter().enumerate() {
+        if i >= 6 {
+            break;
+        }
+        gen_move(instructions, &gen_operand(arg.clone(), stack), &Operand::REGISTER(arg_registers[i].clone()));
+    }
+    let mut i  = args.len() as isize - 1;
+    while i >= 6 {
+        let operand = gen_operand(args[i as usize].clone(), stack);
+        match operand {
+            Operand::IMM(_) | Operand::REGISTER(_) => { 
+                instructions.push(Instruction::PUSH(operand));
+            }
+            _ => {
+                gen_move(instructions, &operand, &Operand::REGISTER(Register::AX));
+                instructions.push(Instruction::PUSH(Operand::REGISTER(Register::AX)));
+            }
+        }
+        i -= 1;
+    }
+    instructions.push(Instruction::CALL(name));
+    let extra_bytes = if args.len() > 6 {8 * (args.len() - 6) + stack_padding} else {stack_padding};
+    if extra_bytes != 0 {
+        instructions.push(Instruction::STACKDEALLOCATE(extra_bytes));
+    }
+    gen_move(instructions, &Operand::REGISTER(Register::AX), &gen_operand(dst, stack))
+}
 fn gen_move(instructions: &mut Vec<Instruction>, src: &Operand, dst: &Operand) {
     match (src, dst) {
         (Operand::STACK(_), Operand::STACK(_)) => {
@@ -352,16 +409,12 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen) -> Operand {
         generator::Value::CONSTANT(val) => Operand::IMM(val),
         generator::Value::VARIABLE(name) => {
             if let Some(location) = stack.variables.get(&name) {
-                Operand::STACK(*location)
+                Operand::STACK(*location as isize)
             } else {
                 stack.stack_offset += 4;
                 stack.variables.insert(name.to_string(), stack.stack_offset);
-                Operand::STACK(stack.stack_offset)
+                Operand::STACK(stack.stack_offset as isize)
             }
         }
     }
-}
-
-pub fn add_stack_offset(program: &mut Program, stack: StackGen) {
-    program.main.instructions[0] = Instruction::STACKALLOCATE(stack.stack_offset);
 }
