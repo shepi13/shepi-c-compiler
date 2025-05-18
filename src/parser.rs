@@ -122,10 +122,22 @@ pub enum Literal {
     INT(u32),
 }
 
-// PARSER
+#[derive(Debug, PartialEq, Clone)]
+pub enum SymbolType {
+    INT,
+    FUNCTION(usize),
+}
+#[derive(Debug, Clone)]
+pub struct Symbol {
+    name: String,
+    symbol_type: SymbolType,
+    external: bool,
+    defined: bool,
+}
 
 pub struct SymbolTable<'a> {
-    variables: Vec<HashMap<&'a str, String>>,
+    symbols: Vec<HashMap<&'a str, Symbol>>,
+    extern_symbols: HashMap<&'a str, Symbol>,
     labels: Vec<HashSet<&'a str>>,
     gotos: Vec<HashSet<&'a str>>,
     loops: Vec<String>,
@@ -134,14 +146,15 @@ pub struct SymbolTable<'a> {
 impl<'a> SymbolTable<'a> {
     pub fn new() -> Self {
         Self {
-            variables: Vec::new(),
-            labels: Vec::new(),
-            gotos: Vec::new(),
+            symbols: vec![HashMap::new()],
+            labels: vec![HashSet::new()],
+            gotos: vec![HashSet::new()],
             loops: Vec::new(),
+            extern_symbols: HashMap::new(),
         }
     }
     fn enter_scope(&mut self) {
-        self.variables.push(HashMap::new());
+        self.symbols.push(HashMap::new());
     }
     fn enter_function(&mut self) {
         self.labels.push(HashSet::new());
@@ -156,7 +169,7 @@ impl<'a> SymbolTable<'a> {
         self.loops.pop();
     }
     fn leave_scope(&mut self) {
-        self.variables.pop();
+        self.symbols.pop();
     }
     fn leave_function(&mut self) {
         let labels = self.labels.pop().expect("Scope missing from symbol table");
@@ -169,22 +182,93 @@ impl<'a> SymbolTable<'a> {
         };
     }
     fn declare_variable(&mut self, name: &'a str) -> String {
-        let stacklen = self.variables.len() - 1;
-        let table = &mut self.variables[stacklen];
+        let stacklen = self.symbols.len() - 1;
+        let table = &mut self.symbols[stacklen];
         if table.contains_key(name) {
             panic!("Duplicate variable name in current scope: {}", name);
         }
         let unique_name = SymbolTable::gen_variable_name(name);
-        table.insert(name, unique_name.clone());
+        table.insert(
+            name,
+            Symbol {
+                name: unique_name.clone(),
+                symbol_type: SymbolType::INT,
+                external: false,
+                defined: false,
+            },
+        );
         unique_name
     }
     fn resolve_variable(&self, name: &str) -> String {
-        for table in self.variables.iter().rev() {
+        for table in self.symbols.iter().rev() {
             if table.contains_key(name) {
-                return table[name].clone();
+                assert!(
+                    table[name].symbol_type == SymbolType::INT,
+                    "Expected a variable!"
+                );
+                return table[name].name.clone();
             }
         }
         panic!("Undeclared variable: {}", name);
+    }
+    fn declare_function(&mut self, name: &'a str, params: &Vec<String>, defined: bool) -> &'a str {
+        let stacklen = self.symbols.len() - 2;
+        let table = &mut self.symbols[stacklen];
+        assert!(stacklen == 0 || !defined, "Nested functin definitions not allowed");
+        match self.extern_symbols.get(name) {
+            Some(symbol) => {
+                assert!(
+                    symbol.external,
+                    "Duplicate function definition in current scope: {}",
+                    name
+                );
+                assert!(
+                    symbol.symbol_type == SymbolType::FUNCTION(params.len()),
+                    "Incompatible function definitions, arguments of previously declared function are different types"
+                );
+                assert!(!symbol.defined || !defined, "Illegal function redefinition");
+            }
+            None => {
+                self.extern_symbols.insert(
+                    name,
+                    Symbol {
+                        name: name.to_string(),
+                        symbol_type: SymbolType::FUNCTION(params.len()),
+                        external: true,
+                        defined,
+                    },
+                );
+            }
+        };
+        if table.contains_key(name) {
+            assert!(
+                table[name].symbol_type == SymbolType::FUNCTION(params.len()),
+                "Incompatible Function definitions"
+            );
+        } else {
+            table.insert(
+                name,
+                Symbol {
+                    name: name.to_string(),
+                    symbol_type: SymbolType::FUNCTION(params.len()),
+                    external: true,
+                    defined,
+                },
+            );
+        }
+        name
+    }
+    fn resolve_function(&self, name: &str, params: &Vec<Expression>) -> String {
+        for table in self.symbols.iter().rev() {
+            if table.contains_key(name) {
+                assert!(
+                    table[name].symbol_type == SymbolType::FUNCTION(params.len()),
+                    "Incompatible function call!"
+                );
+                return table[name].name.clone();
+            }
+        }
+        panic!("Undeclared function: {}", name);
     }
     fn declare_label(&mut self, target: &'a str) {
         for table in &self.labels {
@@ -276,6 +360,19 @@ fn parse_binop(tokens: &mut &[TokenType]) -> BinaryOperator {
         _ => panic!("Expected binary operator"),
     }
 }
+fn parse_argument_list(
+    tokens: &mut &[TokenType],
+    symbol_table: &mut SymbolTable,
+) -> Vec<Expression> {
+    let mut args: Vec<Expression> = Vec::new();
+    let mut comma = false;
+    while tokens[0] != TokenType::CLOSEPAREN {
+        args.push(parse_expression(tokens, 0, symbol_table));
+        comma = try_consume(tokens, TokenType::COMMA);
+    }
+    assert!(!comma, "Trailing comma not allowed in C arg list");
+    args
+}
 fn parse_factor(tokens: &mut &[TokenType], symbol_table: &mut SymbolTable) -> Expression {
     // Parses a factor (unary value/operator) of a larger expression
     let token = &tokens[0];
@@ -298,7 +395,16 @@ fn parse_factor(tokens: &mut &[TokenType], symbol_table: &mut SymbolTable) -> Ex
             expect(tokens, TokenType::CLOSEPAREN);
             expr
         }
-        TokenType::IDENTIFIER(name) => Expression::VAR(symbol_table.resolve_variable(name)),
+        TokenType::IDENTIFIER(name) => {
+            if try_consume(tokens, TokenType::OPENPAREN) {
+                let args = parse_argument_list(tokens, symbol_table);
+                let name = symbol_table.resolve_function(name, &args);
+                expect(tokens, TokenType::CLOSEPAREN);
+                Expression::FUNCTION(name.to_string(), args)
+            } else {
+                Expression::VAR(symbol_table.resolve_variable(name))
+            }
+        }
         _ => panic!("Expected factor, found {}", token.to_string()),
     };
     result
@@ -351,13 +457,13 @@ fn parse_optional_expression(
     symbol_table: &mut SymbolTable,
 ) -> Option<Expression> {
     match tokens[0] {
-        TokenType::CONSTANT(_) |
-        TokenType::HYPHEN |
-        TokenType::TILDE |
-        TokenType::EXCLAM |
-        TokenType::OPENPAREN |
-        TokenType::IDENTIFIER(_) => Some(parse_expression(tokens, 0, symbol_table)),
-        _ => None
+        TokenType::CONSTANT(_)
+        | TokenType::HYPHEN
+        | TokenType::TILDE
+        | TokenType::EXCLAM
+        | TokenType::OPENPAREN
+        | TokenType::IDENTIFIER(_) => Some(parse_expression(tokens, 0, symbol_table)),
+        _ => None,
     }
 }
 fn parse_statement<'a>(
@@ -440,8 +546,8 @@ fn parse_statement<'a>(
         symbol_table.enter_scope();
         let label = symbol_table.enter_loop();
         expect(tokens, TokenType::OPENPAREN);
-        let init = if try_consume(tokens, TokenType::KEYWORD("int")) {
-            ForInit::INITDECL(parse_declaration(tokens, symbol_table))
+        let init = if tokens[0] == TokenType::KEYWORD("int") {
+            ForInit::INITDECL(parse_variable_declaration(tokens, symbol_table))
         } else {
             let init = ForInit::INITEXP(parse_optional_expression(tokens, symbol_table));
             expect(tokens, TokenType::SEMICOLON);
@@ -472,10 +578,11 @@ fn parse_statement<'a>(
         Statement::EXPRESSION(expr)
     }
 }
-fn parse_declaration<'a>(
+fn parse_variable_declaration<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
 ) -> VariableDeclaration {
+    expect(tokens, TokenType::KEYWORD("int"));
     let name = parse_identifier(tokens);
     let name = symbol_table.declare_variable(name);
     let value = match tokens[0] {
@@ -492,10 +599,14 @@ fn parse_block_item<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
 ) -> BlockItem<'a> {
-    if try_consume(tokens, TokenType::KEYWORD("int")) {
-        BlockItem::DECLARATION(
-            Declaration::VARIABLE(parse_declaration(tokens, symbol_table))
-        )
+    if tokens[0] == TokenType::KEYWORD("int") {
+        let decl = match tokens[2] {
+            TokenType::OPENPAREN => {
+                Declaration::FUNCTION(parse_function_declaration(tokens, symbol_table))
+            }
+            _ => Declaration::VARIABLE(parse_variable_declaration(tokens, symbol_table)),
+        };
+        BlockItem::DECLARATION(decl)
     } else {
         BlockItem::STATEMENT(parse_statement(tokens, symbol_table))
     }
@@ -508,7 +619,26 @@ fn parse_block<'a>(tokens: &mut &[TokenType<'a>], symbol_table: &mut SymbolTable
     expect(tokens, TokenType::CLOSEBRACE);
     body
 }
-fn parse_function<'a>(
+fn parse_param_list<'a>(
+    tokens: &mut &[TokenType<'a>],
+    symbol_table: &mut SymbolTable<'a>,
+) -> Vec<String> {
+    if try_consume(tokens, TokenType::KEYWORD("void")) {
+        return Vec::new();
+    }
+    let mut params: Vec<String> = Vec::new();
+    loop {
+        expect(tokens, TokenType::KEYWORD("int"));
+        let name = parse_identifier(tokens);
+        let name = symbol_table.declare_variable(name);
+        params.push(name);
+        if !try_consume(tokens, TokenType::COMMA) {
+            break;
+        }
+    }
+    params
+}
+fn parse_function_declaration<'a>(
     tokens: &mut &[TokenType<'a>],
     symbol_table: &mut SymbolTable<'a>,
 ) -> FunctionDeclaration<'a> {
@@ -516,21 +646,37 @@ fn parse_function<'a>(
     expect(tokens, TokenType::KEYWORD("int"));
     let name = parse_identifier(tokens);
     expect(tokens, TokenType::OPENPAREN);
-    expect(tokens, TokenType::KEYWORD("void"));
-    expect(tokens, TokenType::CLOSEPAREN);
-    expect(tokens, TokenType::OPENBRACE);
     symbol_table.enter_function();
     symbol_table.enter_scope();
-    let body = parse_block(tokens, symbol_table);
+    let params = parse_param_list(tokens, symbol_table);
+    expect(tokens, TokenType::CLOSEPAREN);
+    let function = if try_consume(tokens, TokenType::SEMICOLON) {
+        symbol_table.declare_function(name, &params, false);
+        FunctionDeclaration {
+            name,
+            params,
+            body: None,
+        }
+    } else if try_consume(tokens, TokenType::OPENBRACE) {
+        symbol_table.declare_function(name, &params, true);
+        let body = parse_block(tokens, symbol_table);
+        FunctionDeclaration {
+            name,
+            params,
+            body: Some(body),
+        }
+    } else {
+        panic!("Function declaration must be followed by definition or semicolon");
+    };
     symbol_table.leave_scope();
     symbol_table.leave_function();
-    FunctionDeclaration { name, params: Vec::new(), body: Some(body) }
+    function
 }
 pub fn parse<'a>(tokens: &mut &[TokenType<'a>], symbol_table: &mut SymbolTable<'a>) -> Program<'a> {
     // Parses entire program
     let mut program: Program = Vec::new();
     while !tokens.is_empty() {
-        program.push(parse_function(tokens, symbol_table));
+        program.push(parse_function_declaration(tokens, symbol_table));
     }
     program
 }

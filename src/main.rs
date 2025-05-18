@@ -60,6 +60,7 @@ fn main() {
 
     let preprocess_file = path_with_extension(&args.filename, "i");
     let assembly_file = path_with_extension(&args.filename, "s");
+    let object_file = path_with_extension(&args.filename, "o");
     let output_file = path_with_extension(&args.filename, "");
 
     // Run preprocessor
@@ -98,9 +99,7 @@ fn main() {
     }
 
     // Run Full codegen
-    let mut stack_map = assembly::StackGen::new();
-    let mut assembly_ast = assembly::gen_assembly_tree(tac_ast, &mut stack_map);
-    assembly::add_stack_offset(&mut assembly_ast, stack_map);
+    let assembly_ast = assembly::gen_assembly_tree(tac_ast);
 
     if args.codegen {
         // Print generated code?
@@ -118,14 +117,13 @@ fn main() {
 
     if args.compile_only {
         let status = Command::new("gcc")
-            .args([&assembly_file, "-c", "-o", &output_file])
+            .args([&assembly_file, "-c", "-o", &object_file])
             .status()
             .expect("Assembler failed to run!");
         if !status.success() {
             panic!("Assembler exited with error!");
         }
-    }
-    else {
+    } else {
         // Run linker
         let status = Command::new("gcc")
             .args([&assembly_file, "-o", &output_file])
