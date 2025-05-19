@@ -1,6 +1,5 @@
 use crate::parser::{
-    self, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Loop, Program,
-    Statement, VariableDeclaration,
+    self, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Loop, Program, Statement, SwitchStatement, UnaryOperator, VariableDeclaration
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -21,6 +20,13 @@ pub struct Symbol {
     pub defined: bool,
 }
 
+#[derive(Debug)]
+pub struct SwitchSymbol {
+    pub label: String,
+    pub cases: HashMap<i32, String>,
+    default: Option<String>,
+}
+
 pub type SymbolMap = HashMap<String, Symbol>;
 pub struct SymbolTable {
     // Stacks, only used for type checking
@@ -29,6 +35,9 @@ pub struct SymbolTable {
     gotos: Vec<HashSet<String>>,
     loops: Vec<String>,
     current_function: String,
+
+    break_scopes: Vec<String>,
+    switches: Vec<SwitchSymbol>,
 
     // Global symbols
     extern_symbols: SymbolMap,
@@ -41,32 +50,70 @@ impl SymbolTable {
             labels: vec![HashSet::new()],
             gotos: vec![HashSet::new()],
             loops: Vec::new(),
+            break_scopes: Vec::new(),
+            switches: Vec::new(),
             extern_symbols: HashMap::new(),
             current_function: String::new(),
         }
     }
-    fn current_loop(&self) -> &str {
+    fn resolve_continue(&self) -> &str {
         if self.loops.len() == 0 {
-            panic!("Used Break/Continue outside Loop!");
+            panic!("Used continue outside loop!");
         }
         &self.loops[self.loops.len() - 1]
     }
+    fn resolve_break(&self) -> &str {
+        if self.break_scopes.len() == 0 {
+            panic!("Used break outside loop or switch!");
+        }
+        &self.break_scopes[self.break_scopes.len() - 1]
+    }
+    fn resolve_case(&mut self, matcher: Expression) -> String {
+        let stack_len = self.switches.len() - 1;
+        let case_label = case_name(&self.switches[stack_len].label);
+        let value = eval_constant_expr(&matcher);
+        assert!(self.switches.len() > 0, "Used case or default outside of switch!");
+        assert!(matches!(matcher, Expression::LITEXP(_)), "Case statement must be constant!");
+        assert!(!self.switches[stack_len].cases.contains_key(&value), "Duplicate case!");
+        self.switches[stack_len].cases.insert(value, case_label.clone());
+        case_label
+    }
+    fn resolve_default(&mut self) -> String {
+        if self.switches.len() == 0 {
+            panic!("Used case or default outside of switch!");
+        }
+        let stack_len = self.switches.len() - 1;
+        assert!(matches!(&self.switches[stack_len].default, None), "duplicate default label!");
+        let default_label = format!("{}.default", &self.switches[stack_len].label);
+        self.switches[stack_len].default = Some(default_label.clone());
+        default_label
+    }
     fn enter_scope(&mut self) {
         self.symbols.push(HashMap::new());
+    }
+    fn leave_scope(&mut self) {
+        self.symbols.pop();
+    }
+    fn enter_loop(&mut self, label: String) {
+        self.loops.push(label.clone());
+        self.break_scopes.push(label);
+    }
+    fn leave_loop(&mut self) {
+        self.loops.pop();
+        self.break_scopes.pop();
+    }
+    fn enter_switch(&mut self, switch: &SwitchStatement) {
+        self.break_scopes.push(switch.label.to_string());
+        self.switches.push(SwitchSymbol { label: switch.label.to_string(), cases: HashMap::new(), default: None });
+    }
+    fn leave_switch(&mut self) -> SwitchSymbol {
+        self.break_scopes.pop();
+        self.switches.pop().expect("Scope missing from symbol table")
     }
     fn enter_function(&mut self, name: String) {
         self.labels.push(HashSet::new());
         self.gotos.push(HashSet::new());
         self.current_function = name;
-    }
-    fn enter_loop(&mut self, label: String) {
-        self.loops.push(label)
-    }
-    fn leave_loop(&mut self) {
-        self.loops.pop();
-    }
-    fn leave_scope(&mut self) {
-        self.symbols.pop();
     }
     fn leave_function(&mut self) {
         let labels = self.labels.pop().expect("Scope missing from symbol table");
@@ -193,13 +240,30 @@ impl SymbolTable {
     }
 }
 
+fn case_name(name: &str) -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("{}.case_{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
+}
 fn variable_name(name: &str) -> String {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
 }
+pub fn eval_constant_expr(expr: &Expression) -> i32 {
+    match expr {
+        Expression::LITEXP(parser::Literal::INT(val)) => *val,
+        Expression::UNARY(UnaryOperator::NEGATE, litexpr) => {
+            if let parser::Expression::LITEXP(parser::Literal::INT(val)) = **litexpr {
+                -val
+            } else {
+                panic!("Expected constant expression!")
+            }
+        }
+        _ => panic!("Expected constant expression!")
+    }
+}
 #[derive(Debug)]
-pub struct ResolvedProgram<'a> {
-    pub program: Program<'a>,
+pub struct ResolvedProgram {
+    pub program: Program,
     pub globals: SymbolMap,
 }
 pub fn type_check(program: Program) -> ResolvedProgram {
@@ -213,10 +277,10 @@ pub fn type_check(program: Program) -> ResolvedProgram {
     }
 }
 
-pub fn resolve_function<'a>(
-    mut function: FunctionDeclaration<'a>,
+pub fn resolve_function(
+    mut function: FunctionDeclaration,
     symbols: &mut SymbolTable,
-) -> FunctionDeclaration<'a> {
+) -> FunctionDeclaration {
     symbols.declare_function(
         function.name.to_string(),
         &function.params,
@@ -240,7 +304,7 @@ pub fn resolve_function<'a>(
     symbols.leave_scope();
     function
 }
-fn resolve_block_item<'a>(block_item: BlockItem<'a>, symbols: &mut SymbolTable) -> BlockItem<'a> {
+fn resolve_block_item<'a>(block_item: BlockItem, symbols: &mut SymbolTable) -> BlockItem {
     match block_item {
         BlockItem::STATEMENT(statement) => {
             BlockItem::STATEMENT(resolve_statement(statement, symbols))
@@ -248,7 +312,7 @@ fn resolve_block_item<'a>(block_item: BlockItem<'a>, symbols: &mut SymbolTable) 
         BlockItem::DECLARATION(decl) => BlockItem::DECLARATION(resolve_declaration(decl, symbols)),
     }
 }
-pub fn resolve_statement<'a>(statement: Statement<'a>, symbols: &mut SymbolTable) -> Statement<'a> {
+pub fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Statement {
     use parser::Statement::*;
     match statement {
         RETURN(expr) => RETURN(resolve_expression(expr, symbols)),
@@ -269,8 +333,8 @@ pub fn resolve_statement<'a>(statement: Statement<'a>, symbols: &mut SymbolTable
             symbols.leave_scope();
             result
         }
-        BREAK(_) => BREAK(symbols.current_loop().to_string()),
-        CONTINUE(_) => CONTINUE(symbols.current_loop().to_string()),
+        BREAK(_) => BREAK(symbols.resolve_break().to_string()),
+        CONTINUE(_) => CONTINUE(symbols.resolve_continue().to_string()),
         COMPOUND(statements) => {
             symbols.enter_scope();
             let result = COMPOUND(
@@ -300,11 +364,30 @@ pub fn resolve_statement<'a>(statement: Statement<'a>, symbols: &mut SymbolTable
             symbols.leave_scope();
             FOR(init, loop_data, post)
         }
+        CASE(matcher, statement) => {
+            LABEL(symbols.resolve_case(matcher), resolve_statement(*statement, symbols).into())
+        }
+        DEFAULT(statement) => {
+            LABEL(symbols.resolve_default(), resolve_statement(*statement, symbols).into())
+        }
+        SWITCH(mut switch) => {
+            symbols.enter_switch(&switch);
+            switch.condition = resolve_expression(switch.condition, symbols);
+            switch.statement = resolve_statement(*switch.statement, symbols).into();
+            let switch_symbols = symbols.leave_switch();
+            switch.cases = switch_symbols.cases.into_iter().map(
+                |(val, label)| 
+                (label, Expression::LITEXP(parser::Literal::INT(val))))
+                .collect();
+            switch.label = switch_symbols.label;
+            switch.default = switch_symbols.default;
+            SWITCH(switch)
+        }
         NULL => NULL,
     }
 }
 
-fn resolve_declaration<'a>(decl: Declaration<'a>, symbols: &mut SymbolTable) -> Declaration<'a> {
+fn resolve_declaration(decl: Declaration, symbols: &mut SymbolTable) -> Declaration {
     match decl {
         Declaration::VARIABLE(var_decl) => {
             Declaration::VARIABLE(resolve_variable(var_decl, symbols))
@@ -334,6 +417,9 @@ fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression
             UNARY(operator, resolve_expression(*expr, symbols).into())
         }
         BINARY(mut binexpr) => {
+            if binexpr.is_assignment {
+                assert!(matches!(binexpr.left, Expression::VAR(_)), "Invalid lvalue!");
+            }
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
             BINARY(binexpr)
@@ -373,11 +459,11 @@ fn resolve_optional_expression(
     }
 }
 
-pub fn resolve_loop<'a>(
-    mut loop_data: Loop<'a>,
+pub fn resolve_loop(
+    mut loop_data: Loop,
     symbols: &mut SymbolTable,
     scoped: bool,
-) -> Loop<'a> {
+) -> Loop {
     symbols.enter_loop(loop_data.label.clone());
     if scoped {
         symbols.enter_scope();

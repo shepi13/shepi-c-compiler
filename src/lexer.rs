@@ -41,6 +41,16 @@ pub enum TokenType<'a> {
     GREATERTHANEQUAL,
     // Assignment
     EQUAL,
+    PLUSEQUAL,
+    HYPHENEQUAL,
+    STAREQUAL,
+    FORWARDSLASHEQUAL,
+    PERCENTEQUAL,
+    AMPERSANDEQUAL,
+    PIPEEQUAL,
+    CARETEQUAL,
+    LEFTSHIFTEQUAL,
+    RIGHTSHIFTEQUAL,
     //Conditional,
     QUESTIONMARK,
     COLON,
@@ -93,6 +103,16 @@ impl<'a> TokenType<'a> {
             TokenType::QUESTIONMARK => "?",
             TokenType::COLON => ":",
             TokenType::COMMA => ",",
+            TokenType::PLUSEQUAL => "+=",
+            TokenType::HYPHENEQUAL => "-=",
+            TokenType::STAREQUAL => "*=",
+            TokenType::FORWARDSLASHEQUAL => "/=",
+            TokenType::PERCENTEQUAL => "%=",
+            TokenType::AMPERSANDEQUAL => "&=",
+            TokenType::CARETEQUAL => "^=",
+            TokenType::PIPEEQUAL => "|=",
+            TokenType::LEFTSHIFTEQUAL => "<<=",
+            TokenType::RIGHTSHIFTEQUAL => ">>=",
         };
         str_val.to_string()
     }
@@ -114,6 +134,11 @@ lazy_static! {
             r"(^while\b)",
             r"(^break\b)",
             r"(^continue\b)",
+            r"(^static\b)",
+            r"(^extern\b)",
+            r"(^switch\b)",
+            r"(^case\b)",
+            r"(^default\b)",
         ].join("|")).unwrap()));
         // Identifiers and Constants
         regexes.push((
@@ -124,6 +149,9 @@ lazy_static! {
             TokenType::CONSTANT(""),
             Regex::new(r"^[0-9]+\b").unwrap(),
         ));
+        // 3 Character Symbols
+        regexes.push((TokenType::LEFTSHIFTEQUAL, Regex::new(r"^<<=").unwrap()));
+        regexes.push((TokenType::RIGHTSHIFTEQUAL, Regex::new(r"^>>=").unwrap()));
         // 2 Character Symbols
         regexes.push((TokenType::DECREMENT, Regex::new(r"^--").unwrap()));
         regexes.push((TokenType::INCREMENT, Regex::new(r"^\+\+").unwrap()));
@@ -135,6 +163,14 @@ lazy_static! {
         regexes.push((TokenType::NOTEQUAL, Regex::new(r"^\!=").unwrap()));
         regexes.push((TokenType::GREATERTHANEQUAL, Regex::new(r"^>=").unwrap()));
         regexes.push((TokenType::LESSTHANEQUAL, Regex::new(r"^<=").unwrap()));
+        regexes.push((TokenType::PLUSEQUAL, Regex::new(r"^\+\=").unwrap()));
+        regexes.push((TokenType::HYPHENEQUAL, Regex::new(r"^\-\=").unwrap()));
+        regexes.push((TokenType::STAREQUAL, Regex::new(r"^\*\=").unwrap()));
+        regexes.push((TokenType::FORWARDSLASHEQUAL, Regex::new(r"^\/\=").unwrap()));
+        regexes.push((TokenType::PERCENTEQUAL, Regex::new(r"^\%\=").unwrap()));
+        regexes.push((TokenType::AMPERSANDEQUAL, Regex::new(r"^\&\=").unwrap()));
+        regexes.push((TokenType::CARETEQUAL, Regex::new(r"^\^\=").unwrap()));
+        regexes.push((TokenType::PIPEEQUAL, Regex::new(r"^\|\=").unwrap()));
         // Single Character Symbols
         regexes.push((TokenType::HYPHEN, Regex::new(r"^-").unwrap()));
         regexes.push((TokenType::TILDE, Regex::new(r"^~").unwrap()));

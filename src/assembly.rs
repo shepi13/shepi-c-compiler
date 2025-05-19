@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use crate::generator;
 use crate::parser;
 
-pub type Program<'a> = Vec<Function<'a>>;
+pub type Program = Vec<Function>;
 #[derive(Debug)]
-pub struct Function<'a> {
-    pub name: &'a str,
+pub struct Function {
+    pub name: String,
     pub instructions: Vec<Instruction>,
 }
 
@@ -48,7 +48,7 @@ pub enum BinaryOperator {
 // Operands
 #[derive(Debug, Clone)]
 pub enum Operand {
-    IMM(u32),
+    IMM(i32),
     STACK(isize),
     REGISTER(Register),
 }
@@ -89,7 +89,7 @@ impl StackGen {
     }
 }
 
-pub fn gen_assembly_tree<'a>(ast: generator::Program<'a>) -> Program<'a> {
+pub fn gen_assembly_tree(ast: generator::Program) -> Program {
     let mut program: Program = Vec::new();
     for function in ast.into_iter() {
         if function.instructions.is_empty() {
