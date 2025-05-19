@@ -116,7 +116,7 @@ fn main() {
     }
 
     // Code emission
-    emission::emit_program(&assembly_file, assembly_ast);
+    emission::emit_program(&assembly_file, assembly_ast, &resolved_ast.globals);
 
     if args.assembler_only {
         // Print assembly?

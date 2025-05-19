@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::parser::{self, UnaryOperator};
 
-
 pub type Program<'a> = Vec<Function<'a>>;
 #[derive(Debug)]
 pub struct Function<'a> {
@@ -86,7 +85,7 @@ fn gen_block(block: &parser::Block, instructions: &mut Vec<Instruction>) {
             parser::BlockItem::DECLARATION(parser::Declaration::VARIABLE(decl)) => {
                 gen_declaration(decl, instructions);
             }
-            parser::BlockItem::DECLARATION(parser::Declaration::FUNCTION(_)) => ()
+            parser::BlockItem::DECLARATION(parser::Declaration::FUNCTION(_)) => (),
         }
     }
 }
@@ -274,9 +273,16 @@ fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instru
             dst
         }
         parser::Expression::FUNCTION(name, args) => {
-            let results = args.into_iter().map(|arg| gen_expression(arg, instructions)).collect();
+            let results = args
+                .into_iter()
+                .map(|arg| gen_expression(arg, instructions))
+                .collect();
             let dst = Value::VARIABLE(gen_temp_name());
-            instructions.push(Instruction::FUNCTION(name.to_string(), results, dst.clone()));
+            instructions.push(Instruction::FUNCTION(
+                name.to_string(),
+                results,
+                dst.clone(),
+            ));
             dst
         }
     }

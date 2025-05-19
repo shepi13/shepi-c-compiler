@@ -91,6 +91,10 @@ pub enum UnaryOperator {
     COMPLEMENT,
     NEGATE,
     LOGICALNOT,
+    POSTINCREMENT,
+    POSTDECREMENT,
+    PREINCREMENT,
+    PREDECREMENT,
 }
 #[derive(Debug, Clone)]
 pub enum BinaryOperator {
@@ -196,37 +200,58 @@ fn parse_argument_list(tokens: &mut &[TokenType]) -> Vec<Expression> {
     assert!(!comma, "Trailing comma not allowed in C arg list");
     args
 }
+fn parse_post_operator(tokens: &mut &[TokenType], expression: Expression) -> Expression {
+    if try_consume(tokens, TokenType::INCREMENT) {
+        parse_post_operator(
+            tokens,
+            Expression::UNARY(UnaryOperator::POSTINCREMENT, expression.into()),
+        )
+    } else if try_consume(tokens, TokenType::DECREMENT) {
+        parse_post_operator(
+            tokens,
+            Expression::UNARY(UnaryOperator::POSTDECREMENT, expression.into()),
+        )
+    } else {
+        expression
+    }
+}
 fn parse_factor(tokens: &mut &[TokenType]) -> Expression {
     // Parses a factor (unary value/operator) of a larger expression
     let token = &tokens[0];
     *tokens = &tokens[1..];
-    let result = match token {
+    match token {
         TokenType::CONSTANT(val) => Expression::LITEXP(Literal::INT(
             val.parse().expect("Failed to convert constant to int"),
         )),
-        TokenType::HYPHEN => Expression::UNARY(
-            UnaryOperator::NEGATE, parse_factor(tokens).into()),
-        TokenType::TILDE => Expression::UNARY(
-            UnaryOperator::COMPLEMENT, parse_factor(tokens).into()),
-        TokenType::EXCLAM => Expression::UNARY(
-            UnaryOperator::LOGICALNOT, parse_factor(tokens).into()),
+        TokenType::HYPHEN => Expression::UNARY(UnaryOperator::NEGATE, parse_factor(tokens).into()),
+        TokenType::TILDE => {
+            Expression::UNARY(UnaryOperator::COMPLEMENT, parse_factor(tokens).into())
+        }
+        TokenType::EXCLAM => {
+            Expression::UNARY(UnaryOperator::LOGICALNOT, parse_factor(tokens).into())
+        }
+        TokenType::INCREMENT => {
+            Expression::UNARY(UnaryOperator::PREINCREMENT, parse_factor(tokens).into())
+        }
+        TokenType::DECREMENT => {
+            Expression::UNARY(UnaryOperator::PREDECREMENT, parse_factor(tokens).into())
+        }
         TokenType::OPENPAREN => {
             let expr = parse_expression(tokens, 0);
             expect(tokens, TokenType::CLOSEPAREN);
-            expr
+            parse_post_operator(tokens, expr)
         }
         TokenType::IDENTIFIER(name) => {
             if try_consume(tokens, TokenType::OPENPAREN) {
                 let args = parse_argument_list(tokens);
                 expect(tokens, TokenType::CLOSEPAREN);
-                Expression::FUNCTION(name.to_string(), args)
+                parse_post_operator(tokens, Expression::FUNCTION(name.to_string(), args))
             } else {
-                Expression::VAR(name.to_string())
+                parse_post_operator(tokens, Expression::VAR(name.to_string()))
             }
         }
         _ => panic!("Expected factor, found {}", token.to_string()),
-    };
-    result
+    }
 }
 fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> Expression {
     // Parses an expression using precedence climbing
@@ -375,14 +400,15 @@ fn parse_variable_declaration<'a>(tokens: &mut &[TokenType<'a>]) -> VariableDecl
         _ => None,
     };
     expect(tokens, TokenType::SEMICOLON);
-    VariableDeclaration { name: name.to_string(), value }
+    VariableDeclaration {
+        name: name.to_string(),
+        value,
+    }
 }
 fn parse_block_item<'a>(tokens: &mut &[TokenType<'a>]) -> BlockItem<'a> {
     if tokens[0] == TokenType::KEYWORD("int") {
         let decl = match tokens[2] {
-            TokenType::OPENPAREN => {
-                Declaration::FUNCTION(parse_function_declaration(tokens))
-            }
+            TokenType::OPENPAREN => Declaration::FUNCTION(parse_function_declaration(tokens)),
             _ => Declaration::VARIABLE(parse_variable_declaration(tokens)),
         };
         BlockItem::DECLARATION(decl)
