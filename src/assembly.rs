@@ -142,9 +142,9 @@ fn gen_instructions(
             }
             generator::Instruction::UNARYOP(val) => {
                 let operator = match val.operator {
-                    parser::UnaryOperator::COMPLEMENT => UnaryOperator::NOT,
-                    parser::UnaryOperator::NEGATE => UnaryOperator::NEG,
-                    parser::UnaryOperator::LOGICALNOT => {
+                    generator::UnaryOperator::COMPLEMENT => UnaryOperator::NOT,
+                    generator::UnaryOperator::NEGATE => UnaryOperator::NEG,
+                    generator::UnaryOperator::LOGICALNOT => {
                         let src = gen_operand(val.src, stack);
                         let dst = gen_operand(val.dst, stack);
                         gen_compare(&mut assembly_instructions, &Operand::IMM(0), &src);
@@ -152,7 +152,6 @@ fn gen_instructions(
                         assembly_instructions.push(Instruction::SetCond(Condition::EQUAL, dst));
                         continue;
                     }
-                    _ => panic!("Not implemented!"),
                 };
                 let src = gen_operand(val.src, stack);
                 let dst = gen_operand(val.dst, stack);

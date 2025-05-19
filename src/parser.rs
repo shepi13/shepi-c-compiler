@@ -86,15 +86,19 @@ pub struct ConditionExpression {
     pub if_true: Expression,
     pub if_false: Expression,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum UnaryOperator {
     COMPLEMENT,
     NEGATE,
     LOGICALNOT,
-    POSTINCREMENT,
-    POSTDECREMENT,
+    INCREMENT(Increment),
+}
+#[derive(Debug)]
+pub enum Increment {
     PREINCREMENT,
+    POSTINCREMENT,
     PREDECREMENT,
+    POSTDECREMENT,
 }
 #[derive(Debug, Clone)]
 pub enum BinaryOperator {
@@ -204,12 +208,12 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: Expression) -> Exp
     if try_consume(tokens, TokenType::INCREMENT) {
         parse_post_operator(
             tokens,
-            Expression::UNARY(UnaryOperator::POSTINCREMENT, expression.into()),
+            Expression::UNARY(UnaryOperator::INCREMENT(Increment::POSTINCREMENT), expression.into()),
         )
     } else if try_consume(tokens, TokenType::DECREMENT) {
         parse_post_operator(
             tokens,
-            Expression::UNARY(UnaryOperator::POSTDECREMENT, expression.into()),
+            Expression::UNARY(UnaryOperator::INCREMENT(Increment::POSTDECREMENT), expression.into()),
         )
     } else {
         expression
@@ -231,10 +235,10 @@ fn parse_factor(tokens: &mut &[TokenType]) -> Expression {
             Expression::UNARY(UnaryOperator::LOGICALNOT, parse_factor(tokens).into())
         }
         TokenType::INCREMENT => {
-            Expression::UNARY(UnaryOperator::PREINCREMENT, parse_factor(tokens).into())
+            Expression::UNARY(UnaryOperator::INCREMENT(Increment::PREINCREMENT), parse_factor(tokens).into())
         }
         TokenType::DECREMENT => {
-            Expression::UNARY(UnaryOperator::PREDECREMENT, parse_factor(tokens).into())
+            Expression::UNARY(UnaryOperator::INCREMENT(Increment::PREDECREMENT), parse_factor(tokens).into())
         }
         TokenType::OPENPAREN => {
             let expr = parse_expression(tokens, 0);

@@ -328,13 +328,7 @@ fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression
     use parser::Expression::*;
     match expr {
         UNARY(operator, expr) => {
-            if matches!(
-                operator,
-                parser::UnaryOperator::POSTDECREMENT
-                    | parser::UnaryOperator::POSTINCREMENT
-                    | parser::UnaryOperator::PREDECREMENT
-                    | parser::UnaryOperator::PREINCREMENT
-            ) {
+            if matches!(operator, parser::UnaryOperator::INCREMENT(_)) {
                 assert!(matches!(*expr, Expression::VAR(_)), "Invalid lvalue!");
             }
             UNARY(operator, resolve_expression(*expr, symbols).into())
