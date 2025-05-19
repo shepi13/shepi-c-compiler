@@ -107,14 +107,19 @@ pub fn gen_assembly_tree<'a>(ast: generator::Program<'a>) -> Program<'a> {
                 3 => gen_move(&mut instructions, &Operand::REGISTER(Register::CX), &param),
                 4 => gen_move(&mut instructions, &Operand::REGISTER(Register::R8), &param),
                 5 => gen_move(&mut instructions, &Operand::REGISTER(Register::R9), &param),
-                _ => gen_move(&mut instructions, &Operand::STACK((4-i as isize)*8), &param),
+                _ => gen_move(
+                    &mut instructions,
+                    &Operand::STACK((4 - i as isize) * 8),
+                    &param,
+                ),
             }
         }
         instructions.append(&mut gen_instructions(function.instructions, stack));
-        instructions[0] = Instruction::STACKALLOCATE(stack.stack_offset + 16 - stack.stack_offset%16);
+        instructions[0] =
+            Instruction::STACKALLOCATE(stack.stack_offset + 16 - stack.stack_offset % 16);
         program.push(Function {
             name: function.name,
-            instructions
+            instructions,
         });
     }
     program
@@ -137,9 +142,9 @@ fn gen_instructions(
             }
             generator::Instruction::UNARYOP(val) => {
                 let operator = match val.operator {
-                    parser::UnaryOperator::COMPLEMENT => UnaryOperator::NOT,
-                    parser::UnaryOperator::NEGATE => UnaryOperator::NEG,
-                    parser::UnaryOperator::LOGICALNOT => {
+                    generator::UnaryOperator::COMPLEMENT => UnaryOperator::NOT,
+                    generator::UnaryOperator::NEGATE => UnaryOperator::NEG,
+                    generator::UnaryOperator::LOGICALNOT => {
                         let src = gen_operand(val.src, stack);
                         let dst = gen_operand(val.dst, stack);
                         gen_compare(&mut assembly_instructions, &Operand::IMM(0), &src);
@@ -245,9 +250,26 @@ fn gen_instructions(
     }
     assembly_instructions
 }
-fn gen_func_call(instructions: &mut Vec<Instruction>, stack: &mut StackGen, name: String, args: Vec<generator::Value>, dst: generator::Value) {
-    let arg_registers = [Register::DI, Register::SI, Register::DX, Register::CX, Register::R8, Register::R9];
-    let stack_padding = if args.len() > 6 && args.len() % 2 != 0 {8} else {0};
+fn gen_func_call(
+    instructions: &mut Vec<Instruction>,
+    stack: &mut StackGen,
+    name: String,
+    args: Vec<generator::Value>,
+    dst: generator::Value,
+) {
+    let arg_registers = [
+        Register::DI,
+        Register::SI,
+        Register::DX,
+        Register::CX,
+        Register::R8,
+        Register::R9,
+    ];
+    let stack_padding = if args.len() > 6 && args.len() % 2 != 0 {
+        8
+    } else {
+        0
+    };
     if stack_padding != 0 {
         instructions.push(Instruction::STACKALLOCATE(stack_padding));
     }
@@ -255,13 +277,17 @@ fn gen_func_call(instructions: &mut Vec<Instruction>, stack: &mut StackGen, name
         if i >= 6 {
             break;
         }
-        gen_move(instructions, &gen_operand(arg.clone(), stack), &Operand::REGISTER(arg_registers[i].clone()));
+        gen_move(
+            instructions,
+            &gen_operand(arg.clone(), stack),
+            &Operand::REGISTER(arg_registers[i].clone()),
+        );
     }
-    let mut i  = args.len() as isize - 1;
+    let mut i = args.len() as isize - 1;
     while i >= 6 {
         let operand = gen_operand(args[i as usize].clone(), stack);
         match operand {
-            Operand::IMM(_) | Operand::REGISTER(_) => { 
+            Operand::IMM(_) | Operand::REGISTER(_) => {
                 instructions.push(Instruction::PUSH(operand));
             }
             _ => {
@@ -272,11 +298,19 @@ fn gen_func_call(instructions: &mut Vec<Instruction>, stack: &mut StackGen, name
         i -= 1;
     }
     instructions.push(Instruction::CALL(name));
-    let extra_bytes = if args.len() > 6 {8 * (args.len() - 6) + stack_padding} else {stack_padding};
+    let extra_bytes = if args.len() > 6 {
+        8 * (args.len() - 6) + stack_padding
+    } else {
+        stack_padding
+    };
     if extra_bytes != 0 {
         instructions.push(Instruction::STACKDEALLOCATE(extra_bytes));
     }
-    gen_move(instructions, &Operand::REGISTER(Register::AX), &gen_operand(dst, stack))
+    gen_move(
+        instructions,
+        &Operand::REGISTER(Register::AX),
+        &gen_operand(dst, stack),
+    )
 }
 fn gen_move(instructions: &mut Vec<Instruction>, src: &Operand, dst: &Operand) {
     match (src, dst) {

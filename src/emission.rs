@@ -1,21 +1,28 @@
-use crate::assembly::{self, Condition};
+use crate::{
+    assembly::{self, Condition},
+    type_check::SymbolMap,
+};
 use std::{fs::File, io::Write};
 
-pub fn emit_program(output_filename: &str, program: assembly::Program) {
+pub fn emit_program(output_filename: &str, program: assembly::Program, globals: &SymbolMap) {
     let mut file = File::create(output_filename).expect("Failed to create file!");
     for function in program {
-        emit_function(&mut file, function);
+        emit_function(&mut file, function, globals);
     }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
 }
-fn emit_function(file: &mut File, function: assembly::Function) {
+fn emit_function(file: &mut File, function: assembly::Function, globals: &SymbolMap) {
     writeln!(file, "    .globl {}", function.name).unwrap();
     writeln!(file, "{}:", function.name).unwrap();
     writeln!(file, "    pushq %rbp").unwrap();
     writeln!(file, "    movq %rsp, %rbp").unwrap();
-    emit_instructions(file, &function.instructions);
+    emit_instructions(file, &function.instructions, globals);
 }
-fn emit_instructions(file: &mut File, instructions: &Vec<assembly::Instruction>) {
+fn emit_instructions(
+    file: &mut File,
+    instructions: &Vec<assembly::Instruction>,
+    globals: &SymbolMap,
+) {
     for instruction in instructions {
         match instruction {
             assembly::Instruction::MOV(src, dst) => {
@@ -74,7 +81,11 @@ fn emit_instructions(file: &mut File, instructions: &Vec<assembly::Instruction>)
                 writeln!(file, "    pushq {}", get_long_reg(operand)).unwrap();
             }
             assembly::Instruction::CALL(label) => {
-                writeln!(file, "    call {}", label).unwrap();
+                if globals[label].defined {
+                    writeln!(file, "    call {}", label).unwrap();
+                } else {
+                    writeln!(file, "    call {}@PLT", label).unwrap();
+                }
             }
         }
     }
@@ -119,7 +130,7 @@ fn get_short_reg(operand: &assembly::Operand) -> String {
         assembly::Operand::IMM(val) => format!("${val}"),
         assembly::Operand::REGISTER(assembly::Register::AX) => String::from("%al"),
         assembly::Operand::REGISTER(assembly::Register::CX) => String::from("%cl"),
-        assembly::Operand::REGISTER(assembly::Register::DX) => String::from("%dl"), 
+        assembly::Operand::REGISTER(assembly::Register::DX) => String::from("%dl"),
         assembly::Operand::REGISTER(assembly::Register::DI) => String::from("%dil"),
         assembly::Operand::REGISTER(assembly::Register::SI) => String::from("%sil"),
         assembly::Operand::REGISTER(assembly::Register::R8) => String::from("%r8b"),

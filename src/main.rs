@@ -99,7 +99,7 @@ fn main() {
     }
 
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(&resolved_ast.program);
+    let tac_ast = generator::gen_tac_ast(resolved_ast.program);
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);
@@ -116,7 +116,7 @@ fn main() {
     }
 
     // Code emission
-    emission::emit_program(&assembly_file, assembly_ast);
+    emission::emit_program(&assembly_file, assembly_ast, &resolved_ast.globals);
 
     if args.assembler_only {
         // Print assembly?

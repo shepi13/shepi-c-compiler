@@ -1,5 +1,6 @@
 use crate::parser::{
-    self, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Loop, Program, Statement, VariableDeclaration
+    self, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Loop, Program,
+    Statement, VariableDeclaration,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -14,10 +15,10 @@ pub enum CType {
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    name: String,
-    ctype: CType,
-    external: bool,
-    defined: bool,
+    pub name: String,
+    pub ctype: CType,
+    pub external: bool,
+    pub defined: bool,
 }
 
 pub type SymbolMap = HashMap<String, Symbol>;
@@ -98,10 +99,7 @@ impl SymbolTable {
     fn resolve_variable(&self, name: &str) -> String {
         for table in self.symbols.iter().rev() {
             if table.contains_key(name) {
-                assert!(
-                    table[name].ctype == CType::INT,
-                    "Expected a variable!"
-                );
+                assert!(table[name].ctype == CType::INT, "Expected a variable!");
                 return table[name].name.clone();
             }
         }
@@ -110,7 +108,10 @@ impl SymbolTable {
     fn declare_function(&mut self, name: String, params: &Vec<String>, defined: bool) {
         let stacklen = self.symbols.len() - 1;
         let table = &mut self.symbols[stacklen];
-        assert!(stacklen == 0 || !defined, "Nested functin definitions not allowed");
+        assert!(
+            stacklen == 0 || !defined,
+            "Nested functin definitions not allowed"
+        );
         match self.extern_symbols.get(&name) {
             Some(symbol) => {
                 assert!(
@@ -166,7 +167,10 @@ impl SymbolTable {
         panic!("Undeclared function: {}", name);
     }
     fn resolve_label(&mut self, target: String) -> String {
-        assert!(!self.current_function.is_empty(), "Labels must be in functions!");
+        assert!(
+            !self.current_function.is_empty(),
+            "Labels must be in functions!"
+        );
         for table in &self.labels {
             if table.contains(&target) {
                 panic!("Duplicate label: {}", target);
@@ -178,7 +182,10 @@ impl SymbolTable {
         mangled_label
     }
     fn resolve_goto(&mut self, target: String) -> String {
-        assert!(!self.current_function.is_empty(), "Can only use goto inside function!");
+        assert!(
+            !self.current_function.is_empty(),
+            "Can only use goto inside function!"
+        );
         let mangled_label = format!("{}_{}_{}", target, self.current_function, target);
         let stacklen = &self.gotos.len() - 1;
         self.gotos[stacklen].insert(target);
@@ -210,16 +217,24 @@ pub fn resolve_function<'a>(
     mut function: FunctionDeclaration<'a>,
     symbols: &mut SymbolTable,
 ) -> FunctionDeclaration<'a> {
-    symbols.declare_function(function.name.to_string(), &function.params, function.body.is_some());
+    symbols.declare_function(
+        function.name.to_string(),
+        &function.params,
+        function.body.is_some(),
+    );
     symbols.enter_scope();
-    function.params = function.params.into_iter().map(|param| symbols.declare_variable(param)).collect();
+    function.params = function
+        .params
+        .into_iter()
+        .map(|param| symbols.declare_variable(param))
+        .collect();
     if let Some(body) = function.body {
         symbols.enter_function(function.name.to_string());
         function.body = Some(
             body.into_iter()
                 .map(|item| resolve_block_item(item, symbols))
                 .collect(),
-        ); 
+        );
         symbols.leave_function();
     }
     symbols.leave_scope();
@@ -258,14 +273,16 @@ pub fn resolve_statement<'a>(statement: Statement<'a>, symbols: &mut SymbolTable
         CONTINUE(_) => CONTINUE(symbols.current_loop().to_string()),
         COMPOUND(statements) => {
             symbols.enter_scope();
-            let result = COMPOUND(statements.into_iter()
-                .map(|item| resolve_block_item(item, symbols)).collect());
+            let result = COMPOUND(
+                statements
+                    .into_iter()
+                    .map(|item| resolve_block_item(item, symbols))
+                    .collect(),
+            );
             symbols.leave_scope();
             result
         }
-        GOTO(label) => {
-            GOTO(symbols.resolve_goto(label))
-        },
+        GOTO(label) => GOTO(symbols.resolve_goto(label)),
         LABEL(label, statement) => LABEL(
             symbols.resolve_label(label),
             resolve_statement(*statement, symbols).into(),
@@ -298,7 +315,10 @@ fn resolve_declaration<'a>(decl: Declaration<'a>, symbols: &mut SymbolTable) -> 
     }
 }
 
-fn resolve_variable(mut decl: VariableDeclaration, symbols: &mut SymbolTable) -> VariableDeclaration {
+fn resolve_variable(
+    mut decl: VariableDeclaration,
+    symbols: &mut SymbolTable,
+) -> VariableDeclaration {
     decl.name = symbols.declare_variable(decl.name);
     decl.value = resolve_optional_expression(decl.value, symbols);
     decl
@@ -307,7 +327,12 @@ fn resolve_variable(mut decl: VariableDeclaration, symbols: &mut SymbolTable) ->
 fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression {
     use parser::Expression::*;
     match expr {
-        UNARY(operator, expr) => UNARY(operator, resolve_expression(*expr, symbols).into()),
+        UNARY(operator, expr) => {
+            if matches!(operator, parser::UnaryOperator::INCREMENT(_)) {
+                assert!(matches!(*expr, Expression::VAR(_)), "Invalid lvalue!");
+            }
+            UNARY(operator, resolve_expression(*expr, symbols).into())
+        }
         BINARY(mut binexpr) => {
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
@@ -318,7 +343,7 @@ fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression
             cond.if_true = resolve_expression(cond.if_true, symbols);
             cond.if_false = resolve_expression(cond.if_false, symbols);
             CONDITION(cond)
-        },
+        }
         ASSIGNMENT(mut assign) => {
             assert!(matches!(assign.left, Expression::VAR(_)), "Invalid lvalue!");
             assign.left = resolve_expression(assign.left, symbols);
@@ -329,7 +354,10 @@ fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression
         LITEXP(_) => expr,
         FUNCTION(name, args) => {
             let name = symbols.resolve_function(name, &args);
-            let args = args.into_iter().map(|arg| resolve_expression(arg, symbols)).collect();
+            let args = args
+                .into_iter()
+                .map(|arg| resolve_expression(arg, symbols))
+                .collect();
             FUNCTION(name, args)
         }
     }
@@ -345,7 +373,11 @@ fn resolve_optional_expression(
     }
 }
 
-pub fn resolve_loop<'a>(mut loop_data: Loop<'a>, symbols: &mut SymbolTable, scoped: bool) -> Loop<'a> {
+pub fn resolve_loop<'a>(
+    mut loop_data: Loop<'a>,
+    symbols: &mut SymbolTable,
+    scoped: bool,
+) -> Loop<'a> {
     symbols.enter_loop(loop_data.label.clone());
     if scoped {
         symbols.enter_scope();

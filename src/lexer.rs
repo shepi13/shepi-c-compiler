@@ -179,6 +179,7 @@ pub fn parse<'a>(mut data: &'a str) -> Vec<TokenType<'a>> {
                 data = &data[result.len()..];
                 tokens.push(TokenType::from(result, token));
                 success = true;
+                break;
             }
         }
         if !success {
