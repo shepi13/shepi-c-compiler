@@ -3,13 +3,14 @@ mod emission;
 mod generator;
 mod lexer;
 mod parser;
+mod type_check;
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
 use clap::Parser;
-use parser::SymbolTable;
+use type_check::type_check;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -82,16 +83,23 @@ fn main() {
     }
 
     // Run Parser
-    let mut symbol_table = SymbolTable::new();
-    let parser_ast = parser::parse(&mut &tokens[..], &mut symbol_table);
+    let parser_ast = parser::parse(&mut &tokens[..]);
 
-    if args.parse || args.validate {
+    if args.parse {
         println!("Parser AST: {:#?}", parser_ast);
         return;
     }
 
+    // Run type checking
+    let resolved_ast = type_check(parser_ast);
+    if args.validate {
+        println!("Resolved AST: {:#?}", resolved_ast.program);
+        println!("Global Symbols: {:#?}", resolved_ast.globals);
+        return;
+    }
+
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(&parser_ast);
+    let tac_ast = generator::gen_tac_ast(&resolved_ast.program);
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);

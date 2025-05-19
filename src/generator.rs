@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::parser;
+use crate::parser::{self, UnaryOperator};
 
 
 pub type Program<'a> = Vec<Function<'a>>;
@@ -52,12 +52,6 @@ pub struct InstructionJump {
 pub enum JumpType {
     JUMPIFZERO,
     JUMPIFNOTZERO,
-}
-#[derive(Debug)]
-pub enum UnaryOperator {
-    NEGATE,
-    COMPLEMENT,
-    LOGICALNOT,
 }
 
 #[derive(Debug, Clone)]
@@ -207,15 +201,11 @@ fn gen_instructions(statement: &parser::Statement, instructions: &mut Vec<Instru
 fn gen_expression(expression: &parser::Expression, instructions: &mut Vec<Instruction>) -> Value {
     match expression {
         parser::Expression::LITEXP(parser::Literal::INT(val)) => Value::CONSTANT(*val),
-        parser::Expression::UNARY(operator) => {
-            let src = match operator.as_ref() {
-                parser::UnaryExpression::COMPLEMENT(expr)
-                | parser::UnaryExpression::NEGATE(expr)
-                | parser::UnaryExpression::LOGICALNOT(expr) => gen_expression(expr, instructions),
-            };
+        parser::Expression::UNARY(operator, expr) => {
+            let src = gen_expression(expr, instructions);
             let dst = Value::VARIABLE(gen_temp_name());
             instructions.push(Instruction::UNARYOP(InstructionUnary {
-                operator: gen_operator(operator.as_ref()),
+                operator: operator.clone(),
                 src,
                 dst: dst.clone(),
             }));
@@ -330,14 +320,6 @@ fn gen_short_circuit(
     }));
     instructions.push(Instruction::LABEL(end));
     dst
-}
-
-fn gen_operator(operator: &parser::UnaryExpression) -> UnaryOperator {
-    match operator {
-        parser::UnaryExpression::COMPLEMENT(_) => UnaryOperator::COMPLEMENT,
-        parser::UnaryExpression::NEGATE(_) => UnaryOperator::NEGATE,
-        parser::UnaryExpression::LOGICALNOT(_) => UnaryOperator::LOGICALNOT,
-    }
 }
 
 fn gen_temp_name() -> String {

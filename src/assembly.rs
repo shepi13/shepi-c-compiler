@@ -137,9 +137,9 @@ fn gen_instructions(
             }
             generator::Instruction::UNARYOP(val) => {
                 let operator = match val.operator {
-                    generator::UnaryOperator::COMPLEMENT => UnaryOperator::NOT,
-                    generator::UnaryOperator::NEGATE => UnaryOperator::NEG,
-                    generator::UnaryOperator::LOGICALNOT => {
+                    parser::UnaryOperator::COMPLEMENT => UnaryOperator::NOT,
+                    parser::UnaryOperator::NEGATE => UnaryOperator::NEG,
+                    parser::UnaryOperator::LOGICALNOT => {
                         let src = gen_operand(val.src, stack);
                         let dst = gen_operand(val.dst, stack);
                         gen_compare(&mut assembly_instructions, &Operand::IMM(0), &src);
