@@ -4,10 +4,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::parser::{self, BinaryOperator};
 
-pub type Program<'a> = Vec<Function<'a>>;
+pub type Program = Vec<Function>;
 #[derive(Debug)]
-pub struct Function<'a> {
-    pub name: &'a str,
+pub struct Function {
+    pub name: String,
     pub params: Vec<String>,
     pub instructions: Vec<Instruction>,
 }
@@ -72,18 +72,18 @@ pub enum JumpType {
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    CONSTANT(u32),
+    CONSTANT(i32),
     VARIABLE(String),
 }
 
-pub fn gen_tac_ast<'a>(parser_ast: parser::Program<'a>) -> Program<'a> {
+pub fn gen_tac_ast(parser_ast: parser::Program) -> Program {
     let mut program: Program = Vec::new();
     for function in parser_ast {
         program.push(gen_function(function));
     }
     program
 }
-fn gen_function<'a>(function: parser::FunctionDeclaration<'a>) -> Function<'a> {
+fn gen_function(function: parser::FunctionDeclaration) -> Function {
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions);
@@ -212,6 +212,34 @@ fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruc
             instructions.push(Instruction::JUMP(start_label));
             instructions.push(Instruction::LABEL(break_label));
         }
+        parser::Statement::SWITCH(switch) => {
+            let src1 = gen_expression(switch.condition, instructions);
+            let dst = Value::VARIABLE(gen_temp_name());
+            for case in switch.cases {
+                let src2 = gen_expression(case.1, instructions);
+                instructions.push(Instruction::BINARYOP(InstructionBinary { 
+                    operator: BinaryOperator::ISEQUAL, 
+                    src1: src1.clone(),
+                    src2: src2.clone(), 
+                    dst: dst.clone(),
+                }));
+                instructions.push(Instruction::JUMPCOND(InstructionJump { 
+                    jump_type: JumpType::JUMPIFNOTZERO, 
+                    condition: dst.clone(), 
+                    target: case.0,
+                }));
+            }
+            if let Some(target) = switch.default {
+                instructions.push(Instruction::JUMP(target));
+            } else {
+                instructions.push(Instruction::JUMP(format!("break_{}", switch.label)));
+            }
+            gen_instructions(*switch.statement, instructions);
+            instructions.push(Instruction::LABEL(format!("break_{}", switch.label)));
+        }
+        parser::Statement::CASE(_, _) | parser::Statement::DEFAULT(_) => {
+            panic!("Compiler error: case/default should be replaced in typecheck pass")
+        }
     }
 }
 fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruction>) -> Value {
@@ -263,7 +291,11 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
             };
             let src1 = gen_expression(operator.left, instructions);
             let src2 = gen_expression(operator.right, instructions);
-            let dst = Value::VARIABLE(gen_temp_name());
+            let dst = if operator.is_assignment {
+                src1.clone()
+            } else {
+                Value::VARIABLE(gen_temp_name())
+            };
             instructions.push(Instruction::BINARYOP(InstructionBinary {
                 operator: operator.operator.clone(),
                 src1,
@@ -354,13 +386,13 @@ fn gen_short_circuit(
         target: target.clone(),
     }));
     instructions.push(Instruction::COPY(InstructionCopy {
-        src: Value::CONSTANT(!label_type as u32),
+        src: Value::CONSTANT(!label_type as i32),
         dst: dst.clone(),
     }));
     instructions.push(Instruction::JUMP(end.clone()));
     instructions.push(Instruction::LABEL(target));
     instructions.push(Instruction::COPY(InstructionCopy {
-        src: Value::CONSTANT(label_type as u32),
+        src: Value::CONSTANT(label_type as i32),
         dst: dst.clone(),
     }));
     instructions.push(Instruction::LABEL(end));
