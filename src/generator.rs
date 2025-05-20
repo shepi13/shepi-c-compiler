@@ -41,9 +41,9 @@ impl InstructionUnary {
             parser::UnaryOperator::COMPLEMENT => UnaryOperator::COMPLEMENT,
             parser::UnaryOperator::LOGICALNOT => UnaryOperator::LOGICALNOT,
             parser::UnaryOperator::NEGATE => UnaryOperator::NEGATE,
-            _ => panic!("Invalid TAC operator")
+            _ => panic!("Invalid TAC operator"),
         };
-        Self{ operator, src, dst }
+        Self { operator, src, dst }
     }
 }
 #[derive(Debug)]
@@ -78,8 +78,10 @@ pub enum Value {
 
 pub fn gen_tac_ast(parser_ast: parser::Program) -> Program {
     let mut program: Program = Vec::new();
-    for function in parser_ast {
-        program.push(gen_function(function));
+    for decl in parser_ast {
+        if let parser::Declaration::FUNCTION(function) = decl {
+            program.push(gen_function(function));
+        }
     }
     program
 }
@@ -217,15 +219,15 @@ fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruc
             let dst = Value::VARIABLE(gen_temp_name());
             for case in switch.cases {
                 let src2 = gen_expression(case.1, instructions);
-                instructions.push(Instruction::BINARYOP(InstructionBinary { 
-                    operator: BinaryOperator::ISEQUAL, 
+                instructions.push(Instruction::BINARYOP(InstructionBinary {
+                    operator: BinaryOperator::ISEQUAL,
                     src1: src1.clone(),
-                    src2: src2.clone(), 
+                    src2: src2.clone(),
                     dst: dst.clone(),
                 }));
-                instructions.push(Instruction::JUMPCOND(InstructionJump { 
-                    jump_type: JumpType::JUMPIFNOTZERO, 
-                    condition: dst.clone(), 
+                instructions.push(Instruction::JUMPCOND(InstructionJump {
+                    jump_type: JumpType::JUMPIFNOTZERO,
+                    condition: dst.clone(),
                     target: case.0,
                 }));
             }
@@ -252,10 +254,10 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
                 PREINCREMENT | POSTINCREMENT => BinaryOperator::ADD,
                 PREDECREMENT | POSTDECREMENT => BinaryOperator::SUBTRACT,
             };
-            let bin_instruction = Instruction::BINARYOP(InstructionBinary { 
-                operator, 
-                src1: dst.clone(), 
-                src2: Value::CONSTANT(1), 
+            let bin_instruction = Instruction::BINARYOP(InstructionBinary {
+                operator,
+                src1: dst.clone(),
+                src2: Value::CONSTANT(1),
                 dst: dst.clone(),
             });
             match increment_type {
@@ -265,7 +267,10 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
                 }
                 POSTDECREMENT | POSTINCREMENT => {
                     let old_value = Value::VARIABLE(gen_temp_name());
-                    instructions.push(Instruction::COPY(InstructionCopy { src: dst.clone(), dst: old_value.clone() }));
+                    instructions.push(Instruction::COPY(InstructionCopy {
+                        src: dst.clone(),
+                        dst: old_value.clone(),
+                    }));
                     instructions.push(bin_instruction);
                     old_value
                 }
@@ -274,7 +279,11 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
         parser::Expression::UNARY(operator, expr) => {
             let src = gen_expression(*expr, instructions);
             let dst = Value::VARIABLE(gen_temp_name());
-            instructions.push(Instruction::UNARYOP(InstructionUnary::from(operator, src, dst.clone())));
+            instructions.push(Instruction::UNARYOP(InstructionUnary::from(
+                operator,
+                src,
+                dst.clone(),
+            )));
             dst
         }
         parser::Expression::BINARY(operator) => {

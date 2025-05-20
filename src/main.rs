@@ -3,6 +3,7 @@ mod emission;
 mod generator;
 mod lexer;
 mod parser;
+mod semantics;
 mod type_check;
 
 use std::fs;
@@ -10,7 +11,6 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use clap::Parser;
-use type_check::type_check;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -25,6 +25,8 @@ struct Args {
     /// Run the parser and lexer
     #[arg(short, long)]
     parse: bool,
+
+    /// Run the parser, lexer, and type checking
     #[arg(short, long)]
     validate: bool,
 
@@ -37,7 +39,7 @@ struct Args {
     codegen: bool,
 
     /// Output assembly, but don't run linker
-    #[arg(short = 's')]
+    #[arg(short = 'S')]
     assembler_only: bool,
 
     /// Output assembly and run assembler to generate object file, but not linker,
@@ -90,16 +92,18 @@ fn main() {
         return;
     }
 
+    // Run Semantics Analysis Pass
+    let resolved_ast = semantics::resolve_program(parser_ast);
     // Run type checking
-    let resolved_ast = type_check(parser_ast);
+    let symbol_table = type_check::type_check_program(&resolved_ast);
+
     if args.validate {
-        println!("Resolved AST: {:#?}", resolved_ast.program);
-        println!("Global Symbols: {:#?}", resolved_ast.globals);
+        println!("Resolved AST: {:#?}", resolved_ast);
         return;
     }
 
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(resolved_ast.program);
+    let tac_ast = generator::gen_tac_ast(resolved_ast);
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);
@@ -116,7 +120,7 @@ fn main() {
     }
 
     // Code emission
-    emission::emit_program(&assembly_file, assembly_ast, &resolved_ast.globals);
+    emission::emit_program(&assembly_file, assembly_ast, &symbol_table);
 
     if args.assembler_only {
         // Print assembly?

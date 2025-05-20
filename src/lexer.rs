@@ -3,6 +3,7 @@ use regex::Regex;
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub enum TokenType<'a> {
+    SPECIFIER(&'a str),
     KEYWORD(&'a str),
     IDENTIFIER(&'a str),
     CONSTANT(&'a str),
@@ -64,57 +65,9 @@ impl<'a> TokenType<'a> {
             TokenType::KEYWORD(_) => TokenType::KEYWORD(data),
             TokenType::IDENTIFIER(_) => TokenType::IDENTIFIER(data),
             TokenType::CONSTANT(_) => TokenType::CONSTANT(data),
+            TokenType::SPECIFIER(_) => TokenType::SPECIFIER(data),
             _ => token_type.clone(),
         }
-    }
-    pub fn to_string(&self) -> String {
-        let str_val = match &self {
-            TokenType::KEYWORD(val) | TokenType::CONSTANT(val) | TokenType::IDENTIFIER(val) => val,
-            TokenType::OPENBRACE => "{",
-            TokenType::CLOSEBRACE => "}",
-            TokenType::OPENBRACKET => "[",
-            TokenType::CLOSEBRACKET => "]",
-            TokenType::OPENPAREN => "(",
-            TokenType::CLOSEPAREN => ")",
-            TokenType::SEMICOLON => ";",
-            TokenType::DECREMENT => "--",
-            TokenType::INCREMENT => "++",
-            TokenType::HYPHEN => "-",
-            TokenType::TILDE => "~",
-            TokenType::PLUS => "+",
-            TokenType::PERCENT => "%",
-            TokenType::FORWARDSLASH => "/",
-            TokenType::STAR => "*",
-            TokenType::LEFTSHIFT => "<<",
-            TokenType::RIGHTSHIFT => ">>",
-            TokenType::AMPERSAND => "&",
-            TokenType::PIPE => "|",
-            TokenType::CARET => "^",
-            TokenType::EXCLAM => "!",
-            TokenType::DOUBLEAMPERSAND => "&&",
-            TokenType::DOUBLEPIPE => "||",
-            TokenType::DOUBLEEQUAL => "==",
-            TokenType::NOTEQUAL => "!=",
-            TokenType::LESSTHAN => "<",
-            TokenType::LESSTHANEQUAL => "<=",
-            TokenType::GREATERTHAN => ">",
-            TokenType::GREATERTHANEQUAL => ">=",
-            TokenType::EQUAL => "=",
-            TokenType::QUESTIONMARK => "?",
-            TokenType::COLON => ":",
-            TokenType::COMMA => ",",
-            TokenType::PLUSEQUAL => "+=",
-            TokenType::HYPHENEQUAL => "-=",
-            TokenType::STAREQUAL => "*=",
-            TokenType::FORWARDSLASHEQUAL => "/=",
-            TokenType::PERCENTEQUAL => "%=",
-            TokenType::AMPERSANDEQUAL => "&=",
-            TokenType::CARETEQUAL => "^=",
-            TokenType::PIPEEQUAL => "|=",
-            TokenType::LEFTSHIFTEQUAL => "<<=",
-            TokenType::RIGHTSHIFTEQUAL => ">>=",
-        };
-        str_val.to_string()
     }
 }
 
@@ -122,8 +75,12 @@ lazy_static! {
     static ref token_regexes: Vec<(TokenType<'static>, Regex)> = {
         let mut regexes: Vec<(TokenType, Regex)> = Vec::new();
         // Keywords
-        regexes.push((TokenType::KEYWORD(""), Regex::new(&[
+        regexes.push((TokenType::SPECIFIER(""), Regex::new(&[
             r"(^int\b)",
+            r"(^static\b)",
+            r"(^extern\b)",
+        ].join("|")).unwrap()));
+        regexes.push((TokenType::KEYWORD(""), Regex::new(&[
             r"(^void\b)",
             r"(^return\b)",
             r"(^if\b)",
@@ -134,8 +91,6 @@ lazy_static! {
             r"(^while\b)",
             r"(^break\b)",
             r"(^continue\b)",
-            r"(^static\b)",
-            r"(^extern\b)",
             r"(^switch\b)",
             r"(^case\b)",
             r"(^default\b)",
