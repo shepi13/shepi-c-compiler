@@ -1,27 +1,27 @@
 use crate::{
     assembly::{self, Condition},
-    type_check::SymbolMap,
+    type_check::{SymbolAttr, Symbols},
 };
 use std::{fs::File, io::Write};
 
-pub fn emit_program(output_filename: &str, program: assembly::Program, globals: &SymbolMap) {
+pub fn emit_program(output_filename: &str, program: assembly::Program, symbols: &Symbols) {
     let mut file = File::create(output_filename).expect("Failed to create file!");
     for function in program {
-        emit_function(&mut file, function, globals);
+        emit_function(&mut file, function, symbols);
     }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
 }
-fn emit_function(file: &mut File, function: assembly::Function, globals: &SymbolMap) {
+fn emit_function(file: &mut File, function: assembly::Function, symbols: &Symbols) {
     writeln!(file, "    .globl {}", function.name).unwrap();
     writeln!(file, "{}:", function.name).unwrap();
     writeln!(file, "    pushq %rbp").unwrap();
     writeln!(file, "    movq %rsp, %rbp").unwrap();
-    emit_instructions(file, &function.instructions, globals);
+    emit_instructions(file, &function.instructions, symbols);
 }
 fn emit_instructions(
     file: &mut File,
     instructions: &Vec<assembly::Instruction>,
-    globals: &SymbolMap,
+    symbols: &Symbols,
 ) {
     for instruction in instructions {
         match instruction {
@@ -81,10 +81,14 @@ fn emit_instructions(
                 writeln!(file, "    pushq {}", get_long_reg(operand)).unwrap();
             }
             assembly::Instruction::CALL(label) => {
-                if globals[label].defined {
-                    writeln!(file, "    call {}", label).unwrap();
+                if let SymbolAttr::FUNCTION(attrs) = &symbols[label].attrs {
+                    if attrs.defined {
+                        writeln!(file, "    call {}", label).unwrap();
+                    } else {
+                        writeln!(file, "    call {}@PLT", label).unwrap();
+                    }
                 } else {
-                    writeln!(file, "    call {}@PLT", label).unwrap();
+                    panic!("Expected function attributes!")
                 }
             }
         }
