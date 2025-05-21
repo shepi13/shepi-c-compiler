@@ -1,6 +1,5 @@
 use crate::parser::{
-    self, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Loop, Program,
-    Statement, StorageClass, SwitchStatement, UnaryOperator, VariableDeclaration,
+    self, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Loop, Program, Statement, StorageClass, SwitchStatement, TypedExpression, UnaryOperator, VariableDeclaration
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -58,14 +57,14 @@ impl SymbolTable {
         }
         &self.break_scopes[self.break_scopes.len() - 1]
     }
-    fn resolve_case(&mut self, matcher: Expression) -> String {
+    fn resolve_case(&mut self, matcher: TypedExpression) -> String {
         let stack_len = self.switches.len() - 1;
         let case_label = case_name(&self.switches[stack_len].label);
         let value = eval_constant_expr(&matcher);
 
         assert!(self.switches.len() > 0, "Used case outside of switch!");
         assert!(
-            matches!(matcher, Expression::Constant(_)),
+            matches!(matcher.expr, Expression::Constant(_)),
             "Case statement must be constant!"
         );
         assert!(
@@ -252,11 +251,11 @@ fn variable_name(name: &str) -> String {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
 }
-pub fn eval_constant_expr(expr: &Expression) -> i32 {
-    match expr {
+pub fn eval_constant_expr(expr: &TypedExpression) -> i32 {
+    match &expr.expr {
         Expression::Constant(parser::Constant::Int(val)) => *val,
         Expression::Unary(UnaryOperator::Negate, litexpr) => {
-            if let parser::Expression::Constant(parser::Constant::Int(val)) = **litexpr {
+            if let parser::Expression::Constant(parser::Constant::Int(val)) = litexpr.expr {
                 -val
             } else {
                 panic!("Expected constant expression!")
@@ -379,7 +378,7 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             switch.cases = switch_symbols
                 .cases
                 .into_iter()
-                .map(|(val, label)| (label, Expression::Constant(parser::Constant::Int(val))))
+                .map(|(val, label)| (label, Expression::Constant(parser::Constant::Int(val)).into()))
                 .collect();
             switch.label = switch_symbols.label;
             switch.default = switch_symbols.default;
@@ -414,59 +413,60 @@ fn resolve_variable_declaration(
     decl
 }
 
-fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression {
+fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> TypedExpression {
     use parser::Expression::*;
+    let expr = expr.expr;
     match expr {
         Unary(operator, expr) => {
             if matches!(operator, parser::UnaryOperator::Increment(_)) {
-                assert!(matches!(*expr, Expression::Variable(_)), "Invalid lvalue!");
+                assert!(matches!(expr.expr, Variable(_)), "Invalid lvalue!");
             }
-            Unary(operator, resolve_expression(*expr, symbols).into())
+            Unary(operator, resolve_expression(*expr, symbols).into()).into()
         }
         Binary(mut binexpr) => {
             if binexpr.is_assignment {
                 assert!(
-                    matches!(binexpr.left, Expression::Variable(_)),
+                    matches!(binexpr.left.expr, Variable(_)),
                     "Invalid lvalue!"
                 );
             }
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
-            Binary(binexpr)
+            Binary(binexpr).into()
         }
         Condition(mut cond) => {
             cond.condition = resolve_expression(cond.condition, symbols);
             cond.if_true = resolve_expression(cond.if_true, symbols);
             cond.if_false = resolve_expression(cond.if_false, symbols);
-            Condition(cond)
+            Condition(cond).into()
         }
         Assignment(mut assign) => {
             assert!(
-                matches!(assign.left, Expression::Variable(_)),
+                matches!(assign.left.expr, Variable(_)),
                 "Invalid lvalue!"
             );
             assign.left = resolve_expression(assign.left, symbols);
             assign.right = resolve_expression(assign.right, symbols);
-            Assignment(assign)
+            Assignment(assign).into()
         }
-        Variable(name) => Variable(symbols.resolve_identifier(&name)),
-        Constant(_) => expr,
+        Variable(name) => Variable(symbols.resolve_identifier(&name)).into(),
+        Constant(_) => expr.into(),
         FunctionCall(name, args) => {
             let name = symbols.resolve_identifier(&name);
             let args = args
                 .into_iter()
                 .map(|arg| resolve_expression(arg, symbols))
                 .collect();
-            FunctionCall(name, args)
+            FunctionCall(name, args).into()
         }
-        Cast(_, _) => panic!("Not implemented!"),
+        Cast(_, expr) => resolve_expression(*expr, symbols),
     }
 }
 
 fn resolve_optional_expression(
-    expr: Option<Expression>,
+    expr: Option<TypedExpression>,
     symbols: &mut SymbolTable,
-) -> Option<Expression> {
+) -> Option<TypedExpression> {
     match expr {
         Some(expr) => Some(resolve_expression(expr, symbols)),
         None => None,

@@ -17,14 +17,14 @@ pub enum BlockItem {
 }
 #[derive(Debug)]
 pub enum Statement {
-    Return(Expression),
-    ExprStmt(Expression),
-    If(Expression, Box<Statement>, Box<Option<Statement>>),
+    Return(TypedExpression),
+    ExprStmt(TypedExpression),
+    If(TypedExpression, Box<Statement>, Box<Option<Statement>>),
     While(Loop),
     DoWhile(Loop),
-    For(ForInit, Loop, Option<Expression>),
+    For(ForInit, Loop, Option<TypedExpression>),
     Switch(SwitchStatement),
-    Case(Expression, Box<Statement>),
+    Case(TypedExpression, Box<Statement>),
     Default(Box<Statement>),
     Break(String),
     Continue(String),
@@ -36,21 +36,21 @@ pub enum Statement {
 #[derive(Debug)]
 pub struct SwitchStatement {
     pub label: String,
-    pub condition: Expression,
-    pub cases: Vec<(String, Expression)>,
+    pub condition: TypedExpression,
+    pub cases: Vec<(String, TypedExpression)>,
     pub statement: Box<Statement>,
     pub default: Option<String>,
 }
 #[derive(Debug)]
 pub struct Loop {
     pub label: String,
-    pub condition: Expression,
+    pub condition: TypedExpression,
     pub body: Box<Statement>,
 }
 #[derive(Debug)]
 pub enum ForInit {
     Decl(VariableDeclaration),
-    Expr(Option<Expression>),
+    Expr(Option<TypedExpression>),
 }
 #[derive(Debug)]
 pub enum Declaration {
@@ -66,7 +66,7 @@ pub enum CType {
 #[derive(Debug)]
 pub struct VariableDeclaration {
     pub name: String,
-    pub value: Option<Expression>,
+    pub value: Option<TypedExpression>,
     pub ctype: CType,
     pub storage: Option<StorageClass>,
 }
@@ -94,34 +94,49 @@ impl StorageClass {
 }
 // Expressions
 #[derive(Debug)]
+pub struct TypedExpression {
+    pub ctype: Option<CType>,
+    pub expr: Expression,
+}
+impl From<Expression> for TypedExpression {
+    fn from(value: Expression) -> Self {
+        Self {ctype: None, expr: value}
+    }
+}
+impl From<Expression> for Box<TypedExpression> {
+    fn from(value: Expression) -> Self {
+        TypedExpression { ctype: None, expr: value }.into()
+    }
+}
+#[derive(Debug)]
 pub enum Expression {
     Constant(Constant),
     Variable(String),
-    Unary(UnaryOperator, Box<Expression>),
+    Unary(UnaryOperator, Box<TypedExpression>),
     Binary(Box<BinaryExpression>),
     Assignment(Box<AssignmentExpression>),
     Condition(Box<ConditionExpression>),
-    FunctionCall(String, Vec<Expression>),
-    Cast(CType, Box<Expression>),
+    FunctionCall(String, Vec<TypedExpression>),
+    Cast(CType, Box<TypedExpression>),
 }
 #[derive(Debug)]
 pub struct BinaryExpression {
     pub operator: BinaryOperator,
-    pub left: Expression,
-    pub right: Expression,
+    pub left: TypedExpression,
+    pub right: TypedExpression,
     pub is_assignment: bool,
 }
 #[derive(Debug)]
 pub struct AssignmentExpression {
-    pub left: Expression,
-    pub right: Expression,
+    pub left: TypedExpression,
+    pub right: TypedExpression,
 }
 #[derive(Debug)]
 
 pub struct ConditionExpression {
-    pub condition: Expression,
-    pub if_true: Expression,
-    pub if_false: Expression,
+    pub condition: TypedExpression,
+    pub if_true: TypedExpression,
+    pub if_false: TypedExpression,
 }
 #[derive(Debug)]
 pub enum UnaryOperator {
@@ -329,8 +344,8 @@ fn parse_binop(tokens: &mut &[TokenType]) -> BinaryOperator {
         _ => panic!("Expected binary operator"),
     }
 }
-fn parse_argument_list(tokens: &mut &[TokenType]) -> Vec<Expression> {
-    let mut args: Vec<Expression> = Vec::new();
+fn parse_argument_list(tokens: &mut &[TokenType]) -> Vec<TypedExpression> {
+    let mut args: Vec<TypedExpression> = Vec::new();
     let mut comma = false;
     while tokens[0] != TokenType::CloseParen {
         args.push(parse_expression(tokens, 0));
@@ -339,14 +354,14 @@ fn parse_argument_list(tokens: &mut &[TokenType]) -> Vec<Expression> {
     assert!(!comma, "Trailing comma not allowed in C arg list");
     args
 }
-fn parse_post_operator(tokens: &mut &[TokenType], expression: Expression) -> Expression {
+fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -> TypedExpression {
     if try_consume(tokens, TokenType::Increment) {
         parse_post_operator(
             tokens,
             Expression::Unary(
                 UnaryOperator::Increment(Increment::PostIncrement),
                 expression.into(),
-            ),
+            ).into(),
         )
     } else if try_consume(tokens, TokenType::Decrement) {
         parse_post_operator(
@@ -354,46 +369,46 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: Expression) -> Exp
             Expression::Unary(
                 UnaryOperator::Increment(Increment::PostDecrement),
                 expression.into(),
-            ),
+            ).into(),
         )
     } else {
         expression
     }
 }
-fn parse_factor(tokens: &mut &[TokenType]) -> Expression {
+fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
     // Parses a factor (unary value/operator) of a larger expression
     let token = &tokens[0];
     *tokens = &tokens[1..];
     match token {
         TokenType::Constant(val) => match val.parse::<i32>() {
-            Ok(val) => Expression::Constant(Constant::Int(val)),
+            Ok(val) => Expression::Constant(Constant::Int(val)).into(),
             Err(_) => Expression::Constant(Constant::Long(
                 val.parse().expect("Failed to convert constant to int"),
-            )),
+            )).into(),
         },
         TokenType::LongConstant(val) => Expression::Constant(Constant::Long(
             val.parse().expect("Failed to convert constant to long"),
-        )),
-        TokenType::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()),
+        )).into(),
+        TokenType::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()).into(),
         TokenType::Tilde => {
-            Expression::Unary(UnaryOperator::Complement, parse_factor(tokens).into())
+            Expression::Unary(UnaryOperator::Complement, parse_factor(tokens).into()).into()
         }
         TokenType::Exclam => {
-            Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens).into())
+            Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens).into()).into()
         }
         TokenType::Increment => Expression::Unary(
             UnaryOperator::Increment(Increment::PreIncrement),
             parse_factor(tokens).into(),
-        ),
+        ).into(),
         TokenType::Decrement => Expression::Unary(
             UnaryOperator::Increment(Increment::PreDecrement),
             parse_factor(tokens).into(),
-        ),
+        ).into(),
         TokenType::OpenParen => {
             if is_type_specifier(&tokens[0]) {
                 let ctype = parse_type(tokens);
                 expect(tokens, TokenType::CloseParen);
-                Expression::Cast(ctype, parse_factor(tokens).into())
+                Expression::Cast(ctype, parse_factor(tokens).into()).into()
             } else {
                 let expr = parse_expression(tokens, 0);
                 expect(tokens, TokenType::CloseParen);
@@ -404,22 +419,22 @@ fn parse_factor(tokens: &mut &[TokenType]) -> Expression {
             if try_consume(tokens, TokenType::OpenParen) {
                 let args = parse_argument_list(tokens);
                 expect(tokens, TokenType::CloseParen);
-                parse_post_operator(tokens, Expression::FunctionCall(name.to_string(), args))
+                parse_post_operator(tokens, Expression::FunctionCall(name.to_string(), args).into())
             } else {
-                parse_post_operator(tokens, Expression::Variable(name.to_string()))
+                parse_post_operator(tokens, Expression::Variable(name.to_string()).into())
             }
         }
         _ => panic!("Expected factor, found {:?}", token),
     }
 }
-fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> Expression {
+fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> TypedExpression {
     // Parses an expression using precedence climbing
     let mut left = parse_factor(tokens);
     while precedence_table.contains_key(&tokens[0]) && precedence_table[&tokens[0]] >= min_prec {
         let token_prec = precedence_table[&tokens[0]];
         if try_consume(tokens, TokenType::Equal) {
             let right = parse_expression(tokens, token_prec);
-            left = Expression::Assignment(AssignmentExpression { left, right }.into());
+            left = Expression::Assignment(AssignmentExpression { left, right }.into()).into();
         } else if try_consume(tokens, TokenType::QuestionMark) {
             let if_true = parse_expression(tokens, 0);
             expect(tokens, TokenType::Colon);
@@ -431,7 +446,7 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> Expression {
                     if_false,
                 }
                 .into(),
-            );
+            ).into();
         } else {
             let is_assignment = is_assignment_token(&tokens[0]);
             let operator = parse_binop(tokens);
@@ -448,12 +463,12 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> Expression {
                     is_assignment,
                 }
                 .into(),
-            );
+            ).into();
         }
     }
     left
 }
-fn parse_optional_expression(tokens: &mut &[TokenType]) -> Option<Expression> {
+fn parse_optional_expression(tokens: &mut &[TokenType]) -> Option<TypedExpression> {
     match tokens[0] {
         TokenType::Constant(_)
         | TokenType::Hyphen
@@ -527,7 +542,7 @@ fn parse_statement(tokens: &mut &[TokenType]) -> Statement {
         };
         let condition = match parse_optional_expression(tokens) {
             Some(expr) => expr,
-            None => Expression::Constant(Constant::Int(1)),
+            None => Expression::Constant(Constant::Int(1)).into(),
         };
         expect(tokens, TokenType::SemiColon);
         let post_loop = parse_optional_expression(tokens);
