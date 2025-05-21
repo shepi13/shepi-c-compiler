@@ -60,7 +60,8 @@ pub enum Declaration {
 #[derive(Debug, PartialEq, Clone)]
 pub enum CType {
     Int,
-    Function(usize),
+    Long,
+    Function(Vec<CType>, Box<CType>),
 }
 #[derive(Debug)]
 pub struct VariableDeclaration {
@@ -72,6 +73,7 @@ pub struct VariableDeclaration {
 #[derive(Debug)]
 pub struct FunctionDeclaration {
     pub name: String,
+    pub ctype: CType,
     pub params: Vec<String>,
     pub body: Option<Block>,
     pub storage: Option<StorageClass>,
@@ -93,13 +95,14 @@ impl StorageClass {
 // Expressions
 #[derive(Debug)]
 pub enum Expression {
-    LitExpr(Literal),
+    Constant(Constant),
     Variable(String),
     Unary(UnaryOperator, Box<Expression>),
     Binary(Box<BinaryExpression>),
     Assignment(Box<AssignmentExpression>),
     Condition(Box<ConditionExpression>),
     FunctionCall(String, Vec<Expression>),
+    Cast(CType, Box<Expression>),
 }
 #[derive(Debug)]
 pub struct BinaryExpression {
@@ -159,8 +162,9 @@ pub enum BinaryOperator {
     GreaterThanEqual,
 }
 #[derive(Debug, Clone)]
-pub enum Literal {
+pub enum Constant {
     Int(i32),
+    Long(i64),
 }
 
 lazy_static! {
@@ -225,7 +229,10 @@ fn switch_name() -> String {
 }
 
 fn is_type_specifier(token: &TokenType) -> bool {
-    *token == TokenType::Specifier("int")
+    matches!(
+        *token,
+        TokenType::Specifier("int") | TokenType::Specifier("long")
+    )
 }
 fn is_assignment_token(token: &TokenType) -> bool {
     use TokenType::*;
@@ -244,24 +251,42 @@ fn is_assignment_token(token: &TokenType) -> bool {
     )
 }
 
+fn parse_type(tokens: &mut &[TokenType]) -> CType {
+    use TokenType::Specifier;
+    let index = tokens.iter().position(|token| !is_type_specifier(token));
+    let index = index.unwrap_or(tokens.len());
+    let type_tokens = &tokens[..index];
+    *tokens = &tokens[index..];
+
+    let count_token = |token| type_tokens.iter().filter(|elem| **elem == token).count();
+    let int_count = count_token(Specifier("int"));
+    let long_count = count_token(Specifier("long"));
+    if int_count == 1 && long_count == 0 {
+        CType::Int
+    } else if (int_count == 0 || int_count == 1) && long_count == 1 {
+        CType::Long
+    } else if (int_count == 0 || int_count == 1) && long_count == 2 {
+        CType::Long // Long Long but we represent it the same as they are both 8 bits
+    } else {
+        panic!("Invalid type!")
+    }
+}
+
 fn parse_specifiers(tokens: &mut &[TokenType]) -> (CType, Option<StorageClass>) {
     let mut types = Vec::new();
     let mut storage_classes = Vec::new();
     while matches!(tokens[0], TokenType::Specifier(_)) {
         if is_type_specifier(&tokens[0]) {
-            types.push(&tokens[0]);
+            types.push(tokens[0].clone());
         } else {
             storage_classes.push(StorageClass::from(&tokens[0]));
         }
         *tokens = &tokens[1..];
     }
-    if types.len() != 1 {
-        panic!("Invalid type specifier!")
-    }
     if storage_classes.len() > 1 {
         panic!("Invalid storage class!")
     }
-    let c_type = CType::Int;
+    let c_type = parse_type(&mut &types[..]);
     let storage_class = storage_classes.pop();
     (c_type, storage_class)
 }
@@ -340,8 +365,14 @@ fn parse_factor(tokens: &mut &[TokenType]) -> Expression {
     let token = &tokens[0];
     *tokens = &tokens[1..];
     match token {
-        TokenType::Constant(val) => Expression::LitExpr(Literal::Int(
-            val.parse().expect("Failed to convert constant to int"),
+        TokenType::Constant(val) => match val.parse::<i32>() {
+            Ok(val) => Expression::Constant(Constant::Int(val)),
+            Err(_) => Expression::Constant(Constant::Long(
+                val.parse().expect("Failed to convert constant to int"),
+            )),
+        },
+        TokenType::LongConstant(val) => Expression::Constant(Constant::Long(
+            val.parse().expect("Failed to convert constant to long"),
         )),
         TokenType::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()),
         TokenType::Tilde => {
@@ -359,9 +390,15 @@ fn parse_factor(tokens: &mut &[TokenType]) -> Expression {
             parse_factor(tokens).into(),
         ),
         TokenType::OpenParen => {
-            let expr = parse_expression(tokens, 0);
-            expect(tokens, TokenType::CloseParen);
-            parse_post_operator(tokens, expr)
+            if is_type_specifier(&tokens[0]) {
+                let ctype = parse_type(tokens);
+                expect(tokens, TokenType::CloseParen);
+                Expression::Cast(ctype, parse_factor(tokens).into())
+            } else {
+                let expr = parse_expression(tokens, 0);
+                expect(tokens, TokenType::CloseParen);
+                parse_post_operator(tokens, expr)
+            }
         }
         TokenType::Identifier(name) => {
             if try_consume(tokens, TokenType::OpenParen) {
@@ -490,7 +527,7 @@ fn parse_statement(tokens: &mut &[TokenType]) -> Statement {
         };
         let condition = match parse_optional_expression(tokens) {
             Some(expr) => expr,
-            None => Expression::LitExpr(Literal::Int(1)),
+            None => Expression::Constant(Constant::Int(1)),
         };
         expect(tokens, TokenType::SemiColon);
         let post_loop = parse_optional_expression(tokens);
@@ -551,7 +588,7 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
     let (ctype, storage) = parse_specifiers(tokens);
     let name = parse_identifier(tokens);
     if try_consume(tokens, TokenType::OpenParen) {
-        let params = parse_param_list(tokens);
+        let (params, param_types) = parse_param_list(tokens);
         expect(tokens, TokenType::CloseParen);
         let body = if try_consume(tokens, TokenType::SemiColon) {
             None
@@ -565,6 +602,7 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
             params,
             body,
             storage,
+            ctype: CType::Function(param_types, ctype.into()),
         })
     } else {
         let value = match tokens[0] {
@@ -599,19 +637,20 @@ fn parse_block(tokens: &mut &[TokenType]) -> Block {
     expect(tokens, TokenType::CloseBrace);
     body
 }
-fn parse_param_list(tokens: &mut &[TokenType]) -> Vec<String> {
+fn parse_param_list(tokens: &mut &[TokenType]) -> (Vec<String>, Vec<CType>) {
     if try_consume(tokens, TokenType::Keyword("void")) {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
-    let mut params: Vec<String> = Vec::new();
+    let mut params = Vec::new();
+    let mut param_types = Vec::new();
     loop {
-        expect(tokens, TokenType::Specifier("int"));
+        param_types.push(parse_type(tokens));
         params.push(parse_identifier(tokens).to_string());
         if !try_consume(tokens, TokenType::Comma) {
             break;
         }
     }
-    params
+    (params, param_types)
 }
 pub fn parse(tokens: &mut &[TokenType]) -> Program {
     // Parses entire program

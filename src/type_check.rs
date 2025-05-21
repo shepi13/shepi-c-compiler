@@ -149,19 +149,24 @@ fn type_check_expression(expr: &Expression, symbols: &mut Symbols) {
             type_check_expression(&cond.if_true, symbols);
             type_check_expression(&cond.if_false, symbols);
         }
-        Expression::LitExpr(_) => (),
+        Expression::Constant(_) => (),
+        Expression::Cast(_, _) => panic!("Not implemented!"),
     }
 }
 
 // Type Checking
 
 fn type_check_function(function: &FunctionDeclaration, symbols: &mut Symbols) {
-    let ctype = CType::Function(function.params.len());
+    //let ctype = CType::Function(function.params.len());
+    let ctype = &function.ctype;
     let mut defined = function.body.is_some();
     let mut global = function.storage != Some(StorageClass::Static);
     if let Some(symbol) = symbols.get(&function.name) {
         let attrs = symbol.get_function_attrs();
-        assert!(symbol.ctype == ctype, "Incompatible function declarations!");
+        assert!(
+            symbol.ctype == *ctype,
+            "Incompatible function declarations!"
+        );
         assert!(!attrs.defined || !defined, "Function redefinition!");
         assert!(
             !attrs.global || global,
@@ -173,7 +178,7 @@ fn type_check_function(function: &FunctionDeclaration, symbols: &mut Symbols) {
     symbols.insert(
         function.name.clone(),
         Symbol {
-            ctype,
+            ctype: ctype.clone(),
             attrs: SymbolAttr::Function(FunctionAttributes { defined, global }),
         },
     );
@@ -195,10 +200,14 @@ fn type_check_call(name: &str, args: &Vec<Expression>, symbols: &mut Symbols) {
     for arg in args {
         type_check_expression(arg, symbols);
     }
-    assert!(
-        symbols[name].ctype == CType::Function(args.len()),
-        "Function call has invalid type"
-    );
+    if let CType::Function(param_types, return_type) = &symbols[name].ctype {
+        assert!(
+            args.len() == param_types.len(),
+            "Incorrect number of arguments"
+        );
+    } else {
+        panic!("Not a function!");
+    }
 }
 
 fn type_check_var_declaration(var: &VariableDeclaration, symbols: &mut Symbols) {

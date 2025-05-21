@@ -139,7 +139,9 @@ fn gen_function(function: parser::FunctionDeclaration, symbols: &Symbols) -> Fun
 fn gen_block(block: parser::Block, instructions: &mut Vec<Instruction>) {
     for block_item in block {
         match block_item {
-            parser::BlockItem::StatementItem(statement) => gen_instructions(statement, instructions),
+            parser::BlockItem::StatementItem(statement) => {
+                gen_instructions(statement, instructions)
+            }
             parser::BlockItem::DeclareItem(parser::Declaration::Variable(decl)) => {
                 gen_declaration(decl, instructions);
             }
@@ -290,7 +292,8 @@ fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruc
 }
 fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruction>) -> Value {
     match expression {
-        parser::Expression::LitExpr(parser::Literal::Int(val)) => Value::CONSTANT(val),
+        parser::Expression::Constant(parser::Constant::Int(val)) => Value::CONSTANT(val),
+        parser::Expression::Constant(parser::Constant::Long(val)) => panic!("Not implemented!"),
         parser::Expression::Unary(parser::UnaryOperator::Increment(increment_type), expr) => {
             use parser::Increment::*;
             let dst = gen_expression(*expr, instructions);
@@ -409,6 +412,7 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
             ));
             dst
         }
+        parser::Expression::Cast(_, _) => panic!("Not implemented!"),
     }
 }
 

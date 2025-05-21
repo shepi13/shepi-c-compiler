@@ -7,6 +7,7 @@ pub enum TokenType<'a> {
     Keyword(&'a str),
     Identifier(&'a str),
     Constant(&'a str),
+    LongConstant(&'a str),
     // Symbols
     OpenParen,
     CloseParen,
@@ -65,6 +66,7 @@ impl<'a> TokenType<'a> {
             TokenType::Keyword(_) => TokenType::Keyword(data),
             TokenType::Identifier(_) => TokenType::Identifier(data),
             TokenType::Constant(_) => TokenType::Constant(data),
+            TokenType::LongConstant(_) => TokenType::LongConstant(&data[..data.len() - 1]),
             TokenType::Specifier(_) => TokenType::Specifier(data),
             _ => token_type.clone(),
         }
@@ -77,6 +79,7 @@ lazy_static! {
         // Keywords
         regexes.push((TokenType::Specifier(""), Regex::new(&[
             r"(^int\b)",
+            r"(^long\b)",
             r"(^static\b)",
             r"(^extern\b)",
         ].join("|")).unwrap()));
@@ -99,6 +102,10 @@ lazy_static! {
         regexes.push((
             TokenType::Identifier(""),
             Regex::new(r"^[a-zA-Z_]\w*\b").unwrap(),
+        ));
+        regexes.push((
+            TokenType::LongConstant(""),
+            Regex::new(r"^[0-9]+[lL]\b").unwrap(),
         ));
         regexes.push((
             TokenType::Constant(""),

@@ -65,7 +65,7 @@ impl SymbolTable {
 
         assert!(self.switches.len() > 0, "Used case outside of switch!");
         assert!(
-            matches!(matcher, Expression::LitExpr(_)),
+            matches!(matcher, Expression::Constant(_)),
             "Case statement must be constant!"
         );
         assert!(
@@ -254,9 +254,9 @@ fn variable_name(name: &str) -> String {
 }
 pub fn eval_constant_expr(expr: &Expression) -> i32 {
     match expr {
-        Expression::LitExpr(parser::Literal::Int(val)) => *val,
+        Expression::Constant(parser::Constant::Int(val)) => *val,
         Expression::Unary(UnaryOperator::Negate, litexpr) => {
-            if let parser::Expression::LitExpr(parser::Literal::Int(val)) = **litexpr {
+            if let parser::Expression::Constant(parser::Constant::Int(val)) = **litexpr {
                 -val
             } else {
                 panic!("Expected constant expression!")
@@ -356,9 +356,7 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
                     );
                     ForInit::Decl(resolve_variable_declaration(decl, symbols, false))
                 }
-                ForInit::Expr(expr) => {
-                    ForInit::Expr(resolve_optional_expression(expr, symbols))
-                }
+                ForInit::Expr(expr) => ForInit::Expr(resolve_optional_expression(expr, symbols)),
             };
             let post = resolve_optional_expression(post, symbols);
             let loop_data = resolve_loop(loop_data, symbols, false);
@@ -381,7 +379,7 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             switch.cases = switch_symbols
                 .cases
                 .into_iter()
-                .map(|(val, label)| (label, Expression::LitExpr(parser::Literal::Int(val))))
+                .map(|(val, label)| (label, Expression::Constant(parser::Constant::Int(val))))
                 .collect();
             switch.label = switch_symbols.label;
             switch.default = switch_symbols.default;
@@ -443,13 +441,16 @@ fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression
             Condition(cond)
         }
         Assignment(mut assign) => {
-            assert!(matches!(assign.left, Expression::Variable(_)), "Invalid lvalue!");
+            assert!(
+                matches!(assign.left, Expression::Variable(_)),
+                "Invalid lvalue!"
+            );
             assign.left = resolve_expression(assign.left, symbols);
             assign.right = resolve_expression(assign.right, symbols);
             Assignment(assign)
         }
         Variable(name) => Variable(symbols.resolve_identifier(&name)),
-        LitExpr(_) => expr,
+        Constant(_) => expr,
         FunctionCall(name, args) => {
             let name = symbols.resolve_identifier(&name);
             let args = args
@@ -458,6 +459,7 @@ fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression
                 .collect();
             FunctionCall(name, args)
         }
+        Cast(_, _) => panic!("Not implemented!"),
     }
 }
 
