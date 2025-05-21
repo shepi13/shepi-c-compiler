@@ -99,11 +99,12 @@ fn main() {
 
     if args.validate {
         println!("Resolved AST: {:#?}", resolved_ast);
+        println!("Symbols: {:#?}", symbol_table);
         return;
     }
 
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(resolved_ast);
+    let tac_ast = generator::gen_tac_ast(resolved_ast, &symbol_table);
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);
@@ -111,7 +112,7 @@ fn main() {
     }
 
     // Run Full codegen
-    let assembly_ast = assembly::gen_assembly_tree(tac_ast);
+    let assembly_ast = assembly::gen_assembly_tree(tac_ast, &symbol_table);
 
     if args.codegen {
         // Print generated code?

@@ -16,13 +16,13 @@ pub struct Symbol {
 }
 
 impl Symbol {
-    fn get_function_attrs(&self) -> &FunctionAttributes {
+    pub fn get_function_attrs(&self) -> &FunctionAttributes {
         match &self.attrs {
             SymbolAttr::FUNCTION(attrs) => attrs,
             _ => panic!("Not a function!"),
         }
     }
-    fn get_static_attrs(&self) -> &StaticAttributes {
+    pub fn get_static_attrs(&self) -> &StaticAttributes {
         match &self.attrs {
             SymbolAttr::STATIC(attrs) => attrs,
             _ => panic!("Not a static variable: {:#?}", self),
@@ -44,8 +44,8 @@ pub struct FunctionAttributes {
 }
 #[derive(Debug)]
 pub struct StaticAttributes {
-    init: StaticInitializer,
-    global: bool,
+    pub init: StaticInitializer,
+    pub global: bool,
 }
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum StaticInitializer {
@@ -261,9 +261,9 @@ fn type_check_var_declaration(var: &VariableDeclaration, symbols: &mut Symbols) 
 fn type_check_var_filescope(var: &VariableDeclaration, symbols: &mut Symbols) {
     let mut init_value = if var.value.is_none() {
         if var.storage == Some(StorageClass::EXTERN) {
-            StaticInitializer::TENTATIVE
-        } else {
             StaticInitializer::NONE
+        } else {
+            StaticInitializer::TENTATIVE
         }
     } else {
         StaticInitializer::INITIALIZER(eval_constant_expr(var.value.as_ref().unwrap()))

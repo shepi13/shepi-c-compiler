@@ -1,18 +1,41 @@
 use crate::{
     assembly::{self, Condition},
+    generator::StaticVariable,
     type_check::{SymbolAttr, Symbols},
 };
 use std::{fs::File, io::Write};
 
 pub fn emit_program(output_filename: &str, program: assembly::Program, symbols: &Symbols) {
     let mut file = File::create(output_filename).expect("Failed to create file!");
-    for function in program {
-        emit_function(&mut file, function, symbols);
+    for top_level in program {
+        match top_level {
+            assembly::TopLevelDecl::FUNCTION(function) => {
+                emit_function(&mut file, function, symbols);
+            }
+            assembly::TopLevelDecl::STATICVAR(var) => emit_static_var(&mut file, var),
+        }
     }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
 }
+fn emit_static_var(file: &mut File, var: StaticVariable) {
+    if var.global {
+        writeln!(file, "    .globl {}", var.identifier).unwrap();
+    }
+    let (section, data_type) = if var.initializer == 0 {
+        (".bss", ".zero 4".to_string())
+    } else {
+        (".data", format!(".long {}", var.initializer))
+    };
+    writeln!(file, "    {}", section).unwrap();
+    writeln!(file, "    .align 4").unwrap();
+    writeln!(file, "{}:", var.identifier).unwrap();
+    writeln!(file, "    {}", data_type).unwrap();
+}
 fn emit_function(file: &mut File, function: assembly::Function, symbols: &Symbols) {
-    writeln!(file, "    .globl {}", function.name).unwrap();
+    if function.global {
+        writeln!(file, "    .globl {}", function.name).unwrap()
+    }
+    writeln!(file, "    .text").unwrap();
     writeln!(file, "{}:", function.name).unwrap();
     writeln!(file, "    pushq %rbp").unwrap();
     writeln!(file, "    movq %rsp, %rbp").unwrap();
@@ -109,6 +132,7 @@ fn get_long_reg(operand: &assembly::Operand) -> String {
         assembly::Operand::REGISTER(assembly::Register::R11) => String::from("%r11"),
         assembly::Operand::REGISTER(assembly::Register::CL) => String::from("%cl"),
         assembly::Operand::STACK(val) => format!("-{val}(%rbp)"),
+        assembly::Operand::DATA(name) => format!("{name}(%rip)"),
     }
 }
 
@@ -126,6 +150,7 @@ fn get_operand(operand: &assembly::Operand) -> String {
         assembly::Operand::REGISTER(assembly::Register::R11) => String::from("%r11d"),
         assembly::Operand::REGISTER(assembly::Register::CL) => String::from("%cl"),
         assembly::Operand::STACK(val) => format!("-{val}(%rbp)"),
+        assembly::Operand::DATA(name) => format!("{name}(%rip)"),
     }
 }
 
@@ -143,6 +168,7 @@ fn get_short_reg(operand: &assembly::Operand) -> String {
         assembly::Operand::REGISTER(assembly::Register::R11) => String::from("%r11b"),
         assembly::Operand::REGISTER(assembly::Register::CL) => String::from("%cl"),
         assembly::Operand::STACK(val) => format!("-{val}(%rbp)"),
+        assembly::Operand::DATA(name) => format!("{name}(%rip)"),
     }
 }
 
