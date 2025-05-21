@@ -290,8 +290,8 @@ fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruc
         }
     }
 }
-fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruction>) -> Value {
-    match expression {
+fn gen_expression(expression: parser::TypedExpression, instructions: &mut Vec<Instruction>) -> Value {
+    match expression.expr {
         parser::Expression::Constant(parser::Constant::Int(val)) => Value::CONSTANT(val),
         parser::Expression::Constant(parser::Constant::Long(val)) => panic!("Not implemented!"),
         parser::Expression::Unary(parser::UnaryOperator::Increment(increment_type), expr) => {
@@ -363,7 +363,7 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
         parser::Expression::Variable(name) => Value::VARIABLE(name.to_string()),
         parser::Expression::Assignment(assignment) => {
             let result = gen_expression(assignment.right, instructions);
-            match &assignment.left {
+            match &assignment.left.expr {
                 parser::Expression::Variable(name) => {
                     instructions.push(Instruction::Copy(InstructionCopy {
                         src: result,
@@ -419,8 +419,8 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
 fn gen_short_circuit(
     instructions: &mut Vec<Instruction>,
     operator: parser::BinaryOperator,
-    left: parser::Expression,
-    right: parser::Expression,
+    left: parser::TypedExpression,
+    right: parser::TypedExpression,
 ) -> Value {
     let (jump_type, label_type) = match operator {
         parser::BinaryOperator::LogicalAnd => (JumpType::JUMPIFZERO, false),

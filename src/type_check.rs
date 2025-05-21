@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     parser::{
-        Block, BlockItem, CType, Declaration, Expression, ForInit, FunctionDeclaration, Program,
-        Statement, StorageClass, VariableDeclaration,
+        Block, BlockItem, CType, Declaration, Expression, ForInit, FunctionDeclaration, Program, Statement, StorageClass, TypedExpression, VariableDeclaration
     },
     semantics::eval_constant_expr,
 };
@@ -131,8 +130,8 @@ fn type_check_statement(statement: &Statement, symbols: &mut Symbols) {
     }
 }
 
-fn type_check_expression(expr: &Expression, symbols: &mut Symbols) {
-    match expr {
+fn type_check_expression(expr: &TypedExpression, symbols: &mut Symbols) {
+    match &expr.expr {
         Expression::Unary(_, expr) => type_check_expression(expr, symbols),
         Expression::Variable(name) => type_check_variable(&name, symbols),
         Expression::FunctionCall(name, args) => type_check_call(&name, args, symbols),
@@ -196,7 +195,7 @@ fn type_check_function(function: &FunctionDeclaration, symbols: &mut Symbols) {
     }
 }
 
-fn type_check_call(name: &str, args: &Vec<Expression>, symbols: &mut Symbols) {
+fn type_check_call(name: &str, args: &Vec<TypedExpression>, symbols: &mut Symbols) {
     for arg in args {
         type_check_expression(arg, symbols);
     }
