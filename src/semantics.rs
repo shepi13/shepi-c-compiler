@@ -65,7 +65,7 @@ impl SymbolTable {
 
         assert!(self.switches.len() > 0, "Used case outside of switch!");
         assert!(
-            matches!(matcher, Expression::LITEXP(_)),
+            matches!(matcher, Expression::LitExpr(_)),
             "Case statement must be constant!"
         );
         assert!(
@@ -157,7 +157,7 @@ impl SymbolTable {
         let decl = self.declare_local_variable(VariableDeclaration {
             name: name.clone(),
             value: None,
-            ctype: parser::CType::INT,
+            ctype: parser::CType::Int,
             storage: None,
         });
         decl.name
@@ -168,12 +168,12 @@ impl SymbolTable {
         if let Some(prev_declaration) = self.identifiers[stack_len].get(name) {
             println!("{:?} and {:?}", prev_declaration.external, decl.storage);
             assert!(
-                prev_declaration.external && decl.storage == Some(StorageClass::EXTERN),
+                prev_declaration.external && decl.storage == Some(StorageClass::Extern),
                 "Duplicate variable name in current scope: {}",
                 name
             )
         }
-        if decl.storage == Some(StorageClass::EXTERN) {
+        if decl.storage == Some(StorageClass::Extern) {
             self.declare_global_variable(decl.name.clone());
             decl
         } else {
@@ -195,7 +195,7 @@ impl SymbolTable {
         if self.current_function.is_some() {
             assert!(!defined, "Nested function definitions not allowed");
             assert!(
-                function.storage != Some(StorageClass::STATIC),
+                function.storage != Some(StorageClass::Static),
                 "static only allowed at top level scope"
             );
         }
@@ -254,9 +254,9 @@ fn variable_name(name: &str) -> String {
 }
 pub fn eval_constant_expr(expr: &Expression) -> i32 {
     match expr {
-        Expression::LITEXP(parser::Literal::INT(val)) => *val,
-        Expression::UNARY(UnaryOperator::NEGATE, litexpr) => {
-            if let parser::Expression::LITEXP(parser::Literal::INT(val)) = **litexpr {
+        Expression::LitExpr(parser::Literal::Int(val)) => *val,
+        Expression::Unary(UnaryOperator::Negate, litexpr) => {
+            if let parser::Expression::LitExpr(parser::Literal::Int(val)) = **litexpr {
                 -val
             } else {
                 panic!("Expected constant expression!")
@@ -299,24 +299,24 @@ fn resolve_function(
 }
 fn resolve_block_item<'a>(block_item: BlockItem, symbols: &mut SymbolTable) -> BlockItem {
     match block_item {
-        BlockItem::STATEMENT(statement) => {
-            BlockItem::STATEMENT(resolve_statement(statement, symbols))
+        BlockItem::StatementItem(statement) => {
+            BlockItem::StatementItem(resolve_statement(statement, symbols))
         }
-        BlockItem::DECLARATION(decl) => {
-            BlockItem::DECLARATION(resolve_declaration(decl, symbols, false))
+        BlockItem::DeclareItem(decl) => {
+            BlockItem::DeclareItem(resolve_declaration(decl, symbols, false))
         }
     }
 }
 fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Statement {
     use parser::Statement::*;
     match statement {
-        RETURN(expr) => RETURN(resolve_expression(expr, symbols)),
-        EXPRESSION(expr) => EXPRESSION(resolve_expression(expr, symbols)),
-        WHILE(loop_data) => WHILE(resolve_loop(loop_data, symbols, true)),
-        DOWHILE(loop_data) => DOWHILE(resolve_loop(loop_data, symbols, true)),
-        IF(cond, if_true, if_false) => {
+        Return(expr) => Return(resolve_expression(expr, symbols)),
+        ExprStmt(expr) => ExprStmt(resolve_expression(expr, symbols)),
+        While(loop_data) => While(resolve_loop(loop_data, symbols, true)),
+        DoWhile(loop_data) => DoWhile(resolve_loop(loop_data, symbols, true)),
+        If(cond, if_true, if_false) => {
             symbols.enter_scope();
-            let result = IF(
+            let result = If(
                 resolve_expression(cond, symbols),
                 resolve_statement(*if_true, symbols).into(),
                 match *if_false {
@@ -328,11 +328,11 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             symbols.leave_scope();
             result
         }
-        BREAK(_) => BREAK(symbols.resolve_break().to_string()),
-        CONTINUE(_) => CONTINUE(symbols.resolve_continue().to_string()),
-        COMPOUND(statements) => {
+        Break(_) => Break(symbols.resolve_break().to_string()),
+        Continue(_) => Continue(symbols.resolve_continue().to_string()),
+        Compound(statements) => {
             symbols.enter_scope();
-            let result = COMPOUND(
+            let result = Compound(
                 statements
                     .into_iter()
                     .map(|item| resolve_block_item(item, symbols))
@@ -341,39 +341,39 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             symbols.leave_scope();
             result
         }
-        GOTO(label) => GOTO(symbols.resolve_goto(label)),
-        LABEL(label, statement) => LABEL(
+        Goto(label) => Goto(symbols.resolve_goto(label)),
+        Label(label, statement) => Label(
             symbols.resolve_label(label),
             resolve_statement(*statement, symbols).into(),
         ),
-        FOR(init, loop_data, post) => {
+        For(init, loop_data, post) => {
             symbols.enter_scope();
             let init = match init {
-                ForInit::INITDECL(decl) => {
+                ForInit::Decl(decl) => {
                     assert!(
                         decl.storage.is_none(),
                         "For loop initializer cannot be static or extern"
                     );
-                    ForInit::INITDECL(resolve_variable_declaration(decl, symbols, false))
+                    ForInit::Decl(resolve_variable_declaration(decl, symbols, false))
                 }
-                ForInit::INITEXP(expr) => {
-                    ForInit::INITEXP(resolve_optional_expression(expr, symbols))
+                ForInit::Expr(expr) => {
+                    ForInit::Expr(resolve_optional_expression(expr, symbols))
                 }
             };
             let post = resolve_optional_expression(post, symbols);
             let loop_data = resolve_loop(loop_data, symbols, false);
             symbols.leave_scope();
-            FOR(init, loop_data, post)
+            For(init, loop_data, post)
         }
-        CASE(matcher, statement) => LABEL(
+        Case(matcher, statement) => Label(
             symbols.resolve_case(matcher),
             resolve_statement(*statement, symbols).into(),
         ),
-        DEFAULT(statement) => LABEL(
+        Default(statement) => Label(
             symbols.resolve_default(),
             resolve_statement(*statement, symbols).into(),
         ),
-        SWITCH(mut switch) => {
+        Switch(mut switch) => {
             symbols.enter_switch(&switch);
             switch.condition = resolve_expression(switch.condition, symbols);
             switch.statement = resolve_statement(*switch.statement, symbols).into();
@@ -381,23 +381,23 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             switch.cases = switch_symbols
                 .cases
                 .into_iter()
-                .map(|(val, label)| (label, Expression::LITEXP(parser::Literal::INT(val))))
+                .map(|(val, label)| (label, Expression::LitExpr(parser::Literal::Int(val))))
                 .collect();
             switch.label = switch_symbols.label;
             switch.default = switch_symbols.default;
-            SWITCH(switch)
+            Switch(switch)
         }
-        NULL => NULL,
+        Null => Null,
     }
 }
 
 fn resolve_declaration(decl: Declaration, symbols: &mut SymbolTable, global: bool) -> Declaration {
     match decl {
-        Declaration::VARIABLE(var_decl) => {
-            Declaration::VARIABLE(resolve_variable_declaration(var_decl, symbols, global))
+        Declaration::Variable(var_decl) => {
+            Declaration::Variable(resolve_variable_declaration(var_decl, symbols, global))
         }
-        Declaration::FUNCTION(func_decl) => {
-            Declaration::FUNCTION(resolve_function(func_decl, symbols))
+        Declaration::Function(func_decl) => {
+            Declaration::Function(resolve_function(func_decl, symbols))
         }
     }
 }
@@ -419,44 +419,44 @@ fn resolve_variable_declaration(
 fn resolve_expression(expr: Expression, symbols: &mut SymbolTable) -> Expression {
     use parser::Expression::*;
     match expr {
-        UNARY(operator, expr) => {
-            if matches!(operator, parser::UnaryOperator::INCREMENT(_)) {
-                assert!(matches!(*expr, Expression::VAR(_)), "Invalid lvalue!");
+        Unary(operator, expr) => {
+            if matches!(operator, parser::UnaryOperator::Increment(_)) {
+                assert!(matches!(*expr, Expression::Variable(_)), "Invalid lvalue!");
             }
-            UNARY(operator, resolve_expression(*expr, symbols).into())
+            Unary(operator, resolve_expression(*expr, symbols).into())
         }
-        BINARY(mut binexpr) => {
+        Binary(mut binexpr) => {
             if binexpr.is_assignment {
                 assert!(
-                    matches!(binexpr.left, Expression::VAR(_)),
+                    matches!(binexpr.left, Expression::Variable(_)),
                     "Invalid lvalue!"
                 );
             }
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
-            BINARY(binexpr)
+            Binary(binexpr)
         }
-        CONDITION(mut cond) => {
+        Condition(mut cond) => {
             cond.condition = resolve_expression(cond.condition, symbols);
             cond.if_true = resolve_expression(cond.if_true, symbols);
             cond.if_false = resolve_expression(cond.if_false, symbols);
-            CONDITION(cond)
+            Condition(cond)
         }
-        ASSIGNMENT(mut assign) => {
-            assert!(matches!(assign.left, Expression::VAR(_)), "Invalid lvalue!");
+        Assignment(mut assign) => {
+            assert!(matches!(assign.left, Expression::Variable(_)), "Invalid lvalue!");
             assign.left = resolve_expression(assign.left, symbols);
             assign.right = resolve_expression(assign.right, symbols);
-            ASSIGNMENT(assign)
+            Assignment(assign)
         }
-        VAR(name) => VAR(symbols.resolve_identifier(&name)),
-        LITEXP(_) => expr,
-        FUNCTION(name, args) => {
+        Variable(name) => Variable(symbols.resolve_identifier(&name)),
+        LitExpr(_) => expr,
+        FunctionCall(name, args) => {
             let name = symbols.resolve_identifier(&name);
             let args = args
                 .into_iter()
                 .map(|arg| resolve_expression(arg, symbols))
                 .collect();
-            FUNCTION(name, args)
+            FunctionCall(name, args)
         }
     }
 }

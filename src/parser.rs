@@ -12,26 +12,26 @@ pub type Block = Vec<BlockItem>;
 // Statements and Declarations
 #[derive(Debug)]
 pub enum BlockItem {
-    STATEMENT(Statement),
-    DECLARATION(Declaration),
+    StatementItem(Statement),
+    DeclareItem(Declaration),
 }
 #[derive(Debug)]
 pub enum Statement {
-    RETURN(Expression),
-    EXPRESSION(Expression),
-    IF(Expression, Box<Statement>, Box<Option<Statement>>),
-    WHILE(Loop),
-    DOWHILE(Loop),
-    FOR(ForInit, Loop, Option<Expression>),
-    SWITCH(SwitchStatement),
-    CASE(Expression, Box<Statement>),
-    DEFAULT(Box<Statement>),
-    BREAK(String),
-    CONTINUE(String),
-    COMPOUND(Block),
-    LABEL(String, Box<Statement>),
-    GOTO(String),
-    NULL,
+    Return(Expression),
+    ExprStmt(Expression),
+    If(Expression, Box<Statement>, Box<Option<Statement>>),
+    While(Loop),
+    DoWhile(Loop),
+    For(ForInit, Loop, Option<Expression>),
+    Switch(SwitchStatement),
+    Case(Expression, Box<Statement>),
+    Default(Box<Statement>),
+    Break(String),
+    Continue(String),
+    Compound(Block),
+    Label(String, Box<Statement>),
+    Goto(String),
+    Null,
 }
 #[derive(Debug)]
 pub struct SwitchStatement {
@@ -49,18 +49,18 @@ pub struct Loop {
 }
 #[derive(Debug)]
 pub enum ForInit {
-    INITDECL(VariableDeclaration),
-    INITEXP(Option<Expression>),
+    Decl(VariableDeclaration),
+    Expr(Option<Expression>),
 }
 #[derive(Debug)]
 pub enum Declaration {
-    VARIABLE(VariableDeclaration),
-    FUNCTION(FunctionDeclaration),
+    Variable(VariableDeclaration),
+    Function(FunctionDeclaration),
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum CType {
-    INT,
-    FUNCTION(usize),
+    Int,
+    Function(usize),
 }
 #[derive(Debug)]
 pub struct VariableDeclaration {
@@ -78,14 +78,14 @@ pub struct FunctionDeclaration {
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum StorageClass {
-    STATIC,
-    EXTERN,
+    Static,
+    Extern,
 }
 impl StorageClass {
     fn from(token: &TokenType) -> Self {
         match token {
-            TokenType::SPECIFIER("static") => Self::STATIC,
-            TokenType::SPECIFIER("extern") => Self::EXTERN,
+            TokenType::Specifier("static") => Self::Static,
+            TokenType::Specifier("extern") => Self::Extern,
             _ => panic!("Invalid storage class!"),
         }
     }
@@ -93,13 +93,13 @@ impl StorageClass {
 // Expressions
 #[derive(Debug)]
 pub enum Expression {
-    LITEXP(Literal),
-    VAR(String),
-    UNARY(UnaryOperator, Box<Expression>),
-    BINARY(Box<BinaryExpression>),
-    ASSIGNMENT(Box<AssignmentExpression>),
-    CONDITION(Box<ConditionExpression>),
-    FUNCTION(String, Vec<Expression>),
+    LitExpr(Literal),
+    Variable(String),
+    Unary(UnaryOperator, Box<Expression>),
+    Binary(Box<BinaryExpression>),
+    Assignment(Box<AssignmentExpression>),
+    Condition(Box<ConditionExpression>),
+    FunctionCall(String, Vec<Expression>),
 }
 #[derive(Debug)]
 pub struct BinaryExpression {
@@ -122,79 +122,79 @@ pub struct ConditionExpression {
 }
 #[derive(Debug)]
 pub enum UnaryOperator {
-    COMPLEMENT,
-    NEGATE,
-    LOGICALNOT,
-    INCREMENT(Increment),
+    Complement,
+    Negate,
+    LogicalNot,
+    Increment(Increment),
 }
 #[derive(Debug)]
 pub enum Increment {
-    PREINCREMENT,
-    POSTINCREMENT,
-    PREDECREMENT,
-    POSTDECREMENT,
+    PreIncrement,
+    PostIncrement,
+    PreDecrement,
+    PostDecrement,
 }
 #[derive(Debug, Clone)]
 pub enum BinaryOperator {
     // Numeric
-    ADD,
-    SUBTRACT,
-    MULTIPLY,
-    DIVIDE,
-    REMAINDER,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
     // Bitwise
-    LEFTSHIFT,
-    RIGHTSHIFT,
-    BITXOR,
-    BITOR,
-    BITAND,
+    LeftShift,
+    RightShift,
+    BitXor,
+    BitOr,
+    BitAnd,
     // Logical/Relational
-    LOGICALAND,
-    LOGICALOR,
-    ISEQUAL,
-    NOTEQUAL,
-    LESSTHAN,
-    LESSTHANEQUAL,
-    GREATERTHAN,
-    GREATERTHANEQUAL,
+    LogicalAnd,
+    LogicalOr,
+    IsEqual,
+    NotEqual,
+    LessThan,
+    LessThanEqual,
+    GreaterThan,
+    GreaterThanEqual,
 }
 #[derive(Debug, Clone)]
 pub enum Literal {
-    INT(i32),
+    Int(i32),
 }
 
 lazy_static! {
     static ref precedence_table: HashMap<TokenType<'static>, usize> = HashMap::from([
-        (TokenType::STAR, 50),
-        (TokenType::FORWARDSLASH, 50),
-        (TokenType::PERCENT, 50),
-        (TokenType::PLUS, 45),
-        (TokenType::HYPHEN, 45),
-        (TokenType::LEFTSHIFT, 40),
-        (TokenType::RIGHTSHIFT, 40),
-        (TokenType::LESSTHAN, 35),
-        (TokenType::LESSTHANEQUAL, 35),
-        (TokenType::GREATERTHAN, 35),
-        (TokenType::GREATERTHANEQUAL, 35),
-        (TokenType::DOUBLEEQUAL, 30),
-        (TokenType::NOTEQUAL, 30),
-        (TokenType::AMPERSAND, 25),
-        (TokenType::CARET, 20),
-        (TokenType::PIPE, 15),
-        (TokenType::DOUBLEAMPERSAND, 10),
-        (TokenType::DOUBLEPIPE, 5),
-        (TokenType::QUESTIONMARK, 3),
-        (TokenType::EQUAL, 1),
-        (TokenType::PLUSEQUAL, 1),
-        (TokenType::HYPHENEQUAL, 1),
-        (TokenType::STAREQUAL, 1),
-        (TokenType::FORWARDSLASHEQUAL, 1),
-        (TokenType::PERCENTEQUAL, 1),
-        (TokenType::AMPERSANDEQUAL, 1),
-        (TokenType::PIPEEQUAL, 1),
-        (TokenType::CARETEQUAL, 1),
-        (TokenType::LEFTSHIFTEQUAL, 1),
-        (TokenType::RIGHTSHIFTEQUAL, 1),
+        (TokenType::Star, 50),
+        (TokenType::ForwardSlash, 50),
+        (TokenType::Percent, 50),
+        (TokenType::Plus, 45),
+        (TokenType::Hyphen, 45),
+        (TokenType::LeftShift, 40),
+        (TokenType::RightShift, 40),
+        (TokenType::LessThan, 35),
+        (TokenType::LessThanEqual, 35),
+        (TokenType::GreaterThan, 35),
+        (TokenType::GreaterThanEqual, 35),
+        (TokenType::DoubleEqual, 30),
+        (TokenType::ExclamEqual, 30),
+        (TokenType::Ampersand, 25),
+        (TokenType::Caret, 20),
+        (TokenType::Pipe, 15),
+        (TokenType::DoubleAmpersand, 10),
+        (TokenType::DoublePipe, 5),
+        (TokenType::QuestionMark, 3),
+        (TokenType::Equal, 1),
+        (TokenType::PlusEqual, 1),
+        (TokenType::HyphenEqual, 1),
+        (TokenType::StarEqual, 1),
+        (TokenType::ForwardSlashEqual, 1),
+        (TokenType::PercentEqual, 1),
+        (TokenType::AmpersandEqual, 1),
+        (TokenType::PipeEqual, 1),
+        (TokenType::CaretEqual, 1),
+        (TokenType::LeftShiftEqual, 1),
+        (TokenType::RightShiftEqual, 1),
     ]);
 }
 
@@ -225,29 +225,29 @@ fn switch_name() -> String {
 }
 
 fn is_type_specifier(token: &TokenType) -> bool {
-    *token == TokenType::SPECIFIER("int")
+    *token == TokenType::Specifier("int")
 }
 fn is_assignment_token(token: &TokenType) -> bool {
     use TokenType::*;
     matches!(
         token,
-        PLUSEQUAL
-            | HYPHENEQUAL
-            | STAREQUAL
-            | FORWARDSLASHEQUAL
-            | PERCENTEQUAL
-            | AMPERSANDEQUAL
-            | PIPEEQUAL
-            | CARETEQUAL
-            | LEFTSHIFTEQUAL
-            | RIGHTSHIFTEQUAL
+        PlusEqual
+            | HyphenEqual
+            | StarEqual
+            | ForwardSlashEqual
+            | PercentEqual
+            | AmpersandEqual
+            | PipeEqual
+            | CaretEqual
+            | LeftShiftEqual
+            | RightShiftEqual
     )
 }
 
 fn parse_specifiers(tokens: &mut &[TokenType]) -> (CType, Option<StorageClass>) {
     let mut types = Vec::new();
     let mut storage_classes = Vec::new();
-    while matches!(tokens[0], TokenType::SPECIFIER(_)) {
+    while matches!(tokens[0], TokenType::Specifier(_)) {
         if is_type_specifier(&tokens[0]) {
             types.push(&tokens[0]);
         } else {
@@ -261,7 +261,7 @@ fn parse_specifiers(tokens: &mut &[TokenType]) -> (CType, Option<StorageClass>) 
     if storage_classes.len() > 1 {
         panic!("Invalid storage class!")
     }
-    let c_type = CType::INT;
+    let c_type = CType::Int;
     let storage_class = storage_classes.pop();
     (c_type, storage_class)
 }
@@ -271,7 +271,7 @@ fn parse_identifier<'a>(tokens: &mut &[TokenType<'a>]) -> &'a str {
     let next_token = &tokens[0];
     *tokens = &tokens[1..];
     match next_token {
-        TokenType::IDENTIFIER(name) => name,
+        TokenType::Identifier(name) => name,
         _ => panic!("Expected identifier"),
     }
 }
@@ -282,52 +282,52 @@ fn parse_binop(tokens: &mut &[TokenType]) -> BinaryOperator {
     *tokens = &tokens[1..];
     match next_token {
         // Math or Assignment
-        PLUS | PLUSEQUAL => BinaryOperator::ADD,
-        HYPHEN | HYPHENEQUAL => BinaryOperator::SUBTRACT,
-        STAR | STAREQUAL => BinaryOperator::MULTIPLY,
-        FORWARDSLASH | FORWARDSLASHEQUAL => BinaryOperator::DIVIDE,
-        PERCENT | PERCENTEQUAL => BinaryOperator::REMAINDER,
-        LEFTSHIFT | LEFTSHIFTEQUAL => BinaryOperator::LEFTSHIFT,
-        RIGHTSHIFT | RIGHTSHIFTEQUAL => BinaryOperator::RIGHTSHIFT,
-        PIPE | PIPEEQUAL => BinaryOperator::BITOR,
-        CARET | CARETEQUAL => BinaryOperator::BITXOR,
-        AMPERSAND | AMPERSANDEQUAL => BinaryOperator::BITAND,
+        Plus | PlusEqual => BinaryOperator::Add,
+        Hyphen | HyphenEqual => BinaryOperator::Subtract,
+        Star | StarEqual => BinaryOperator::Multiply,
+        ForwardSlash | ForwardSlashEqual => BinaryOperator::Divide,
+        Percent | PercentEqual => BinaryOperator::Remainder,
+        LeftShift | LeftShiftEqual => BinaryOperator::LeftShift,
+        RightShift | RightShiftEqual => BinaryOperator::RightShift,
+        Pipe | PipeEqual => BinaryOperator::BitOr,
+        Caret | CaretEqual => BinaryOperator::BitXor,
+        Ampersand | AmpersandEqual => BinaryOperator::BitAnd,
         // Relational
-        LESSTHAN => BinaryOperator::LESSTHAN,
-        LESSTHANEQUAL => BinaryOperator::LESSTHANEQUAL,
-        GREATERTHAN => BinaryOperator::GREATERTHAN,
-        GREATERTHANEQUAL => BinaryOperator::GREATERTHANEQUAL,
-        DOUBLEEQUAL => BinaryOperator::ISEQUAL,
-        NOTEQUAL => BinaryOperator::NOTEQUAL,
-        DOUBLEAMPERSAND => BinaryOperator::LOGICALAND,
-        DOUBLEPIPE => BinaryOperator::LOGICALOR,
+        LessThan => BinaryOperator::LessThan,
+        LessThanEqual => BinaryOperator::LessThanEqual,
+        GreaterThan => BinaryOperator::GreaterThan,
+        GreaterThanEqual => BinaryOperator::GreaterThanEqual,
+        DoubleEqual => BinaryOperator::IsEqual,
+        ExclamEqual => BinaryOperator::NotEqual,
+        DoubleAmpersand => BinaryOperator::LogicalAnd,
+        DoublePipe => BinaryOperator::LogicalOr,
         _ => panic!("Expected binary operator"),
     }
 }
 fn parse_argument_list(tokens: &mut &[TokenType]) -> Vec<Expression> {
     let mut args: Vec<Expression> = Vec::new();
     let mut comma = false;
-    while tokens[0] != TokenType::CLOSEPAREN {
+    while tokens[0] != TokenType::CloseParen {
         args.push(parse_expression(tokens, 0));
-        comma = try_consume(tokens, TokenType::COMMA);
+        comma = try_consume(tokens, TokenType::Comma);
     }
     assert!(!comma, "Trailing comma not allowed in C arg list");
     args
 }
 fn parse_post_operator(tokens: &mut &[TokenType], expression: Expression) -> Expression {
-    if try_consume(tokens, TokenType::INCREMENT) {
+    if try_consume(tokens, TokenType::Increment) {
         parse_post_operator(
             tokens,
-            Expression::UNARY(
-                UnaryOperator::INCREMENT(Increment::POSTINCREMENT),
+            Expression::Unary(
+                UnaryOperator::Increment(Increment::PostIncrement),
                 expression.into(),
             ),
         )
-    } else if try_consume(tokens, TokenType::DECREMENT) {
+    } else if try_consume(tokens, TokenType::Decrement) {
         parse_post_operator(
             tokens,
-            Expression::UNARY(
-                UnaryOperator::INCREMENT(Increment::POSTDECREMENT),
+            Expression::Unary(
+                UnaryOperator::Increment(Increment::PostDecrement),
                 expression.into(),
             ),
         )
@@ -340,36 +340,36 @@ fn parse_factor(tokens: &mut &[TokenType]) -> Expression {
     let token = &tokens[0];
     *tokens = &tokens[1..];
     match token {
-        TokenType::CONSTANT(val) => Expression::LITEXP(Literal::INT(
+        TokenType::Constant(val) => Expression::LitExpr(Literal::Int(
             val.parse().expect("Failed to convert constant to int"),
         )),
-        TokenType::HYPHEN => Expression::UNARY(UnaryOperator::NEGATE, parse_factor(tokens).into()),
-        TokenType::TILDE => {
-            Expression::UNARY(UnaryOperator::COMPLEMENT, parse_factor(tokens).into())
+        TokenType::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()),
+        TokenType::Tilde => {
+            Expression::Unary(UnaryOperator::Complement, parse_factor(tokens).into())
         }
-        TokenType::EXCLAM => {
-            Expression::UNARY(UnaryOperator::LOGICALNOT, parse_factor(tokens).into())
+        TokenType::Exclam => {
+            Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens).into())
         }
-        TokenType::INCREMENT => Expression::UNARY(
-            UnaryOperator::INCREMENT(Increment::PREINCREMENT),
+        TokenType::Increment => Expression::Unary(
+            UnaryOperator::Increment(Increment::PreIncrement),
             parse_factor(tokens).into(),
         ),
-        TokenType::DECREMENT => Expression::UNARY(
-            UnaryOperator::INCREMENT(Increment::PREDECREMENT),
+        TokenType::Decrement => Expression::Unary(
+            UnaryOperator::Increment(Increment::PreDecrement),
             parse_factor(tokens).into(),
         ),
-        TokenType::OPENPAREN => {
+        TokenType::OpenParen => {
             let expr = parse_expression(tokens, 0);
-            expect(tokens, TokenType::CLOSEPAREN);
+            expect(tokens, TokenType::CloseParen);
             parse_post_operator(tokens, expr)
         }
-        TokenType::IDENTIFIER(name) => {
-            if try_consume(tokens, TokenType::OPENPAREN) {
+        TokenType::Identifier(name) => {
+            if try_consume(tokens, TokenType::OpenParen) {
                 let args = parse_argument_list(tokens);
-                expect(tokens, TokenType::CLOSEPAREN);
-                parse_post_operator(tokens, Expression::FUNCTION(name.to_string(), args))
+                expect(tokens, TokenType::CloseParen);
+                parse_post_operator(tokens, Expression::FunctionCall(name.to_string(), args))
             } else {
-                parse_post_operator(tokens, Expression::VAR(name.to_string()))
+                parse_post_operator(tokens, Expression::Variable(name.to_string()))
             }
         }
         _ => panic!("Expected factor, found {:?}", token),
@@ -380,14 +380,14 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> Expression {
     let mut left = parse_factor(tokens);
     while precedence_table.contains_key(&tokens[0]) && precedence_table[&tokens[0]] >= min_prec {
         let token_prec = precedence_table[&tokens[0]];
-        if try_consume(tokens, TokenType::EQUAL) {
+        if try_consume(tokens, TokenType::Equal) {
             let right = parse_expression(tokens, token_prec);
-            left = Expression::ASSIGNMENT(AssignmentExpression { left, right }.into());
-        } else if try_consume(tokens, TokenType::QUESTIONMARK) {
+            left = Expression::Assignment(AssignmentExpression { left, right }.into());
+        } else if try_consume(tokens, TokenType::QuestionMark) {
             let if_true = parse_expression(tokens, 0);
-            expect(tokens, TokenType::COLON);
+            expect(tokens, TokenType::Colon);
             let if_false = parse_expression(tokens, token_prec);
-            left = Expression::CONDITION(
+            left = Expression::Condition(
                 ConditionExpression {
                     condition: left,
                     if_true,
@@ -403,7 +403,7 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> Expression {
             } else {
                 parse_expression(tokens, token_prec + 1)
             };
-            left = Expression::BINARY(
+            left = Expression::Binary(
                 BinaryExpression {
                     operator,
                     left,
@@ -418,84 +418,84 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> Expression {
 }
 fn parse_optional_expression(tokens: &mut &[TokenType]) -> Option<Expression> {
     match tokens[0] {
-        TokenType::CONSTANT(_)
-        | TokenType::HYPHEN
-        | TokenType::TILDE
-        | TokenType::EXCLAM
-        | TokenType::OPENPAREN
-        | TokenType::IDENTIFIER(_) => Some(parse_expression(tokens, 0)),
+        TokenType::Constant(_)
+        | TokenType::Hyphen
+        | TokenType::Tilde
+        | TokenType::Exclam
+        | TokenType::OpenParen
+        | TokenType::Identifier(_) => Some(parse_expression(tokens, 0)),
         _ => None,
     }
 }
 fn parse_statement(tokens: &mut &[TokenType]) -> Statement {
     // Parses a statement
-    if try_consume(tokens, TokenType::KEYWORD("return")) {
+    if try_consume(tokens, TokenType::Keyword("return")) {
         let return_value = parse_expression(tokens, 0);
-        expect(tokens, TokenType::SEMICOLON);
-        Statement::RETURN(return_value)
-    } else if try_consume(tokens, TokenType::SEMICOLON) {
-        Statement::NULL
-    } else if try_consume(tokens, TokenType::KEYWORD("if")) {
-        expect(tokens, TokenType::OPENPAREN);
+        expect(tokens, TokenType::SemiColon);
+        Statement::Return(return_value)
+    } else if try_consume(tokens, TokenType::SemiColon) {
+        Statement::Null
+    } else if try_consume(tokens, TokenType::Keyword("if")) {
+        expect(tokens, TokenType::OpenParen);
         let cond = parse_expression(tokens, 0);
-        expect(tokens, TokenType::CLOSEPAREN);
+        expect(tokens, TokenType::CloseParen);
         let then = parse_statement(tokens);
-        let otherwise = if try_consume(tokens, TokenType::KEYWORD("else")) {
+        let otherwise = if try_consume(tokens, TokenType::Keyword("else")) {
             Some(parse_statement(tokens))
         } else {
             None
         };
-        Statement::IF(cond, then.into(), otherwise.into())
-    } else if try_consume(tokens, TokenType::KEYWORD("goto")) {
+        Statement::If(cond, then.into(), otherwise.into())
+    } else if try_consume(tokens, TokenType::Keyword("goto")) {
         let target = parse_identifier(tokens);
-        expect(tokens, TokenType::SEMICOLON);
-        Statement::GOTO(target.to_string())
-    } else if try_consume(tokens, TokenType::OPENBRACE) {
-        Statement::COMPOUND(parse_block(tokens))
-    } else if try_consume(tokens, TokenType::KEYWORD("break")) {
-        expect(tokens, TokenType::SEMICOLON);
-        Statement::BREAK(String::new())
-    } else if try_consume(tokens, TokenType::KEYWORD("continue")) {
-        expect(tokens, TokenType::SEMICOLON);
-        Statement::CONTINUE(String::new())
-    } else if try_consume(tokens, TokenType::KEYWORD("while")) {
-        expect(tokens, TokenType::OPENPAREN);
+        expect(tokens, TokenType::SemiColon);
+        Statement::Goto(target.to_string())
+    } else if try_consume(tokens, TokenType::OpenBrace) {
+        Statement::Compound(parse_block(tokens))
+    } else if try_consume(tokens, TokenType::Keyword("break")) {
+        expect(tokens, TokenType::SemiColon);
+        Statement::Break(String::new())
+    } else if try_consume(tokens, TokenType::Keyword("continue")) {
+        expect(tokens, TokenType::SemiColon);
+        Statement::Continue(String::new())
+    } else if try_consume(tokens, TokenType::Keyword("while")) {
+        expect(tokens, TokenType::OpenParen);
         let condition = parse_expression(tokens, 0);
-        expect(tokens, TokenType::CLOSEPAREN);
-        Statement::WHILE(Loop {
+        expect(tokens, TokenType::CloseParen);
+        Statement::While(Loop {
             label: loop_name(),
             condition,
             body: parse_statement(tokens).into(),
         })
-    } else if try_consume(tokens, TokenType::KEYWORD("do")) {
+    } else if try_consume(tokens, TokenType::Keyword("do")) {
         let body = parse_statement(tokens);
-        expect(tokens, TokenType::KEYWORD("while"));
-        expect(tokens, TokenType::OPENPAREN);
+        expect(tokens, TokenType::Keyword("while"));
+        expect(tokens, TokenType::OpenParen);
         let condition = parse_expression(tokens, 0);
-        expect(tokens, TokenType::CLOSEPAREN);
-        expect(tokens, TokenType::SEMICOLON);
-        Statement::DOWHILE(Loop {
+        expect(tokens, TokenType::CloseParen);
+        expect(tokens, TokenType::SemiColon);
+        Statement::DoWhile(Loop {
             label: loop_name(),
             condition,
             body: body.into(),
         })
-    } else if try_consume(tokens, TokenType::KEYWORD("for")) {
-        expect(tokens, TokenType::OPENPAREN);
-        let init = if matches!(tokens[0], TokenType::SPECIFIER(_)) {
-            ForInit::INITDECL(parse_variable_declaration(tokens))
+    } else if try_consume(tokens, TokenType::Keyword("for")) {
+        expect(tokens, TokenType::OpenParen);
+        let init = if matches!(tokens[0], TokenType::Specifier(_)) {
+            ForInit::Decl(parse_variable_declaration(tokens))
         } else {
-            let init = ForInit::INITEXP(parse_optional_expression(tokens));
-            expect(tokens, TokenType::SEMICOLON);
+            let init = ForInit::Expr(parse_optional_expression(tokens));
+            expect(tokens, TokenType::SemiColon);
             init
         };
         let condition = match parse_optional_expression(tokens) {
             Some(expr) => expr,
-            None => Expression::LITEXP(Literal::INT(1)),
+            None => Expression::LitExpr(Literal::Int(1)),
         };
-        expect(tokens, TokenType::SEMICOLON);
+        expect(tokens, TokenType::SemiColon);
         let post_loop = parse_optional_expression(tokens);
-        expect(tokens, TokenType::CLOSEPAREN);
-        Statement::FOR(
+        expect(tokens, TokenType::CloseParen);
+        Statement::For(
             init,
             Loop {
                 label: loop_name(),
@@ -504,45 +504,45 @@ fn parse_statement(tokens: &mut &[TokenType]) -> Statement {
             },
             post_loop,
         )
-    } else if try_consume(tokens, TokenType::KEYWORD("switch")) {
+    } else if try_consume(tokens, TokenType::Keyword("switch")) {
         let label = switch_name();
-        expect(tokens, TokenType::OPENPAREN);
+        expect(tokens, TokenType::OpenParen);
         let condition = parse_expression(tokens, 0);
-        expect(tokens, TokenType::CLOSEPAREN);
+        expect(tokens, TokenType::CloseParen);
         let cases = Vec::new();
         let statement = parse_statement(tokens).into();
-        Statement::SWITCH(SwitchStatement {
+        Statement::Switch(SwitchStatement {
             label,
             condition,
             cases,
             statement,
             default: None,
         })
-    } else if try_consume(tokens, TokenType::KEYWORD("default")) {
-        expect(tokens, TokenType::COLON);
-        Statement::DEFAULT(parse_statement(tokens).into())
-    } else if try_consume(tokens, TokenType::KEYWORD("case")) {
+    } else if try_consume(tokens, TokenType::Keyword("default")) {
+        expect(tokens, TokenType::Colon);
+        Statement::Default(parse_statement(tokens).into())
+    } else if try_consume(tokens, TokenType::Keyword("case")) {
         let matcher = parse_expression(tokens, 0);
-        expect(tokens, TokenType::COLON);
+        expect(tokens, TokenType::Colon);
         let statement = parse_statement(tokens).into();
-        Statement::CASE(matcher, statement)
-    } else if matches!(tokens[0], TokenType::IDENTIFIER(_)) && tokens[1] == TokenType::COLON {
-        if let TokenType::IDENTIFIER(name) = tokens[0] {
+        Statement::Case(matcher, statement)
+    } else if matches!(tokens[0], TokenType::Identifier(_)) && tokens[1] == TokenType::Colon {
+        if let TokenType::Identifier(name) = tokens[0] {
             *tokens = &tokens[2..];
-            Statement::LABEL(name.to_string(), parse_statement(tokens).into())
+            Statement::Label(name.to_string(), parse_statement(tokens).into())
         } else {
             panic!("Token 0 must be identifier");
         }
     } else {
         let expr = parse_expression(tokens, 0);
-        expect(tokens, TokenType::SEMICOLON);
-        Statement::EXPRESSION(expr)
+        expect(tokens, TokenType::SemiColon);
+        Statement::ExprStmt(expr)
     }
 }
 fn parse_variable_declaration(tokens: &mut &[TokenType]) -> VariableDeclaration {
     let decl = parse_declaration(tokens);
     match decl {
-        Declaration::VARIABLE(var_decl) => var_decl,
+        Declaration::Variable(var_decl) => var_decl,
         _ => panic!("Expected variable declaration"),
     }
 }
@@ -550,17 +550,17 @@ fn parse_variable_declaration(tokens: &mut &[TokenType]) -> VariableDeclaration 
 fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
     let (ctype, storage) = parse_specifiers(tokens);
     let name = parse_identifier(tokens);
-    if try_consume(tokens, TokenType::OPENPAREN) {
+    if try_consume(tokens, TokenType::OpenParen) {
         let params = parse_param_list(tokens);
-        expect(tokens, TokenType::CLOSEPAREN);
-        let body = if try_consume(tokens, TokenType::SEMICOLON) {
+        expect(tokens, TokenType::CloseParen);
+        let body = if try_consume(tokens, TokenType::SemiColon) {
             None
-        } else if try_consume(tokens, TokenType::OPENBRACE) {
+        } else if try_consume(tokens, TokenType::OpenBrace) {
             Some(parse_block(tokens))
         } else {
             panic!("Function declaration must be followed by definition or semicolon");
         };
-        Declaration::FUNCTION(FunctionDeclaration {
+        Declaration::Function(FunctionDeclaration {
             name: name.to_string(),
             params,
             body,
@@ -568,14 +568,14 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
         })
     } else {
         let value = match tokens[0] {
-            TokenType::EQUAL => {
+            TokenType::Equal => {
                 *tokens = &tokens[1..];
                 Some(parse_expression(tokens, 0))
             }
             _ => None,
         };
-        expect(tokens, TokenType::SEMICOLON);
-        Declaration::VARIABLE(VariableDeclaration {
+        expect(tokens, TokenType::SemiColon);
+        Declaration::Variable(VariableDeclaration {
             name: name.to_string(),
             value,
             ctype,
@@ -585,29 +585,29 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
 }
 
 fn parse_block_item(tokens: &mut &[TokenType]) -> BlockItem {
-    if matches!(tokens[0], TokenType::SPECIFIER(_)) {
-        BlockItem::DECLARATION(parse_declaration(tokens))
+    if matches!(tokens[0], TokenType::Specifier(_)) {
+        BlockItem::DeclareItem(parse_declaration(tokens))
     } else {
-        BlockItem::STATEMENT(parse_statement(tokens))
+        BlockItem::StatementItem(parse_statement(tokens))
     }
 }
 fn parse_block(tokens: &mut &[TokenType]) -> Block {
     let mut body: Block = Vec::new();
-    while tokens[0] != TokenType::CLOSEBRACE {
+    while tokens[0] != TokenType::CloseBrace {
         body.push(parse_block_item(tokens));
     }
-    expect(tokens, TokenType::CLOSEBRACE);
+    expect(tokens, TokenType::CloseBrace);
     body
 }
 fn parse_param_list(tokens: &mut &[TokenType]) -> Vec<String> {
-    if try_consume(tokens, TokenType::KEYWORD("void")) {
+    if try_consume(tokens, TokenType::Keyword("void")) {
         return Vec::new();
     }
     let mut params: Vec<String> = Vec::new();
     loop {
-        expect(tokens, TokenType::SPECIFIER("int"));
+        expect(tokens, TokenType::Specifier("int"));
         params.push(parse_identifier(tokens).to_string());
-        if !try_consume(tokens, TokenType::COMMA) {
+        if !try_consume(tokens, TokenType::Comma) {
             break;
         }
     }
