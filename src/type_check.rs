@@ -18,13 +18,13 @@ pub struct Symbol {
 impl Symbol {
     pub fn get_function_attrs(&self) -> &FunctionAttributes {
         match &self.attrs {
-            SymbolAttr::FUNCTION(attrs) => attrs,
+            SymbolAttr::Function(attrs) => attrs,
             _ => panic!("Not a function!"),
         }
     }
     pub fn get_static_attrs(&self) -> &StaticAttributes {
         match &self.attrs {
-            SymbolAttr::STATIC(attrs) => attrs,
+            SymbolAttr::Static(attrs) => attrs,
             _ => panic!("Not a static variable: {:#?}", self),
         }
     }
@@ -32,9 +32,9 @@ impl Symbol {
 
 #[derive(Debug)]
 pub enum SymbolAttr {
-    FUNCTION(FunctionAttributes),
-    STATIC(StaticAttributes),
-    LOCAL,
+    Function(FunctionAttributes),
+    Static(StaticAttributes),
+    Local,
 }
 
 #[derive(Debug)]
@@ -49,9 +49,9 @@ pub struct StaticAttributes {
 }
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum StaticInitializer {
-    TENTATIVE,
-    INITIALIZER(i32),
-    NONE,
+    Tentative,
+    Initialized(i32),
+    None,
 }
 
 // Tree traversal functions
@@ -65,8 +65,8 @@ pub fn type_check_program(program: &Program) -> Symbols {
 
 fn type_check_declaration(decl: &Declaration, symbols: &mut Symbols, global: bool) {
     match decl {
-        Declaration::FUNCTION(func) => type_check_function(func, symbols),
-        Declaration::VARIABLE(var) => {
+        Declaration::Function(func) => type_check_function(func, symbols),
+        Declaration::Variable(var) => {
             if global {
                 type_check_var_filescope(var, symbols);
             } else {
@@ -83,42 +83,42 @@ fn type_check_block(block: &Block, symbols: &mut Symbols) {
 }
 fn type_check_block_item(block_item: &BlockItem, symbols: &mut Symbols) {
     match block_item {
-        BlockItem::STATEMENT(statement) => type_check_statement(statement, symbols),
-        BlockItem::DECLARATION(decl) => type_check_declaration(decl, symbols, false),
+        BlockItem::StatementItem(statement) => type_check_statement(statement, symbols),
+        BlockItem::DeclareItem(decl) => type_check_declaration(decl, symbols, false),
     }
 }
 fn type_check_statement(statement: &Statement, symbols: &mut Symbols) {
     match statement {
-        Statement::RETURN(expr) | Statement::EXPRESSION(expr) => {
+        Statement::Return(expr) | Statement::ExprStmt(expr) => {
             type_check_expression(expr, symbols);
         }
-        Statement::LABEL(_, statement)
-        | Statement::DEFAULT(statement)
-        | Statement::CASE(_, statement) => {
+        Statement::Label(_, statement)
+        | Statement::Default(statement)
+        | Statement::Case(_, statement) => {
             type_check_statement(statement, symbols);
         }
-        Statement::IF(expr, if_true, if_false) => {
+        Statement::If(expr, if_true, if_false) => {
             type_check_expression(expr, symbols);
             type_check_statement(if_true, symbols);
             if let Some(false_statement) = &**if_false {
                 type_check_statement(false_statement, symbols);
             }
         }
-        Statement::WHILE(loop_data) | Statement::DOWHILE(loop_data) => {
+        Statement::While(loop_data) | Statement::DoWhile(loop_data) => {
             type_check_expression(&loop_data.condition, symbols);
             type_check_statement(&loop_data.body, symbols);
         }
-        Statement::COMPOUND(block) => {
+        Statement::Compound(block) => {
             type_check_block(block, symbols);
         }
-        Statement::SWITCH(switch) => {
+        Statement::Switch(switch) => {
             type_check_expression(&switch.condition, symbols);
             type_check_statement(&switch.statement, symbols)
         }
-        Statement::FOR(init, loop_data, post) => {
+        Statement::For(init, loop_data, post) => {
             match init {
-                ForInit::INITDECL(decl) => type_check_var_declaration(decl, symbols),
-                ForInit::INITEXP(Some(expr)) => type_check_expression(expr, symbols),
+                ForInit::Decl(decl) => type_check_var_declaration(decl, symbols),
+                ForInit::Expr(Some(expr)) => type_check_expression(expr, symbols),
                 _ => (),
             }
             type_check_expression(&loop_data.condition, symbols);
@@ -127,38 +127,38 @@ fn type_check_statement(statement: &Statement, symbols: &mut Symbols) {
             }
             type_check_statement(&loop_data.body, symbols);
         }
-        Statement::BREAK(_) | Statement::CONTINUE(_) | Statement::GOTO(_) | Statement::NULL => (),
+        Statement::Break(_) | Statement::Continue(_) | Statement::Goto(_) | Statement::Null => (),
     }
 }
 
 fn type_check_expression(expr: &Expression, symbols: &mut Symbols) {
     match expr {
-        Expression::UNARY(_, expr) => type_check_expression(expr, symbols),
-        Expression::VAR(name) => type_check_variable(&name, symbols),
-        Expression::FUNCTION(name, args) => type_check_call(&name, args, symbols),
-        Expression::BINARY(exprs) => {
+        Expression::Unary(_, expr) => type_check_expression(expr, symbols),
+        Expression::Variable(name) => type_check_variable(&name, symbols),
+        Expression::FunctionCall(name, args) => type_check_call(&name, args, symbols),
+        Expression::Binary(exprs) => {
             type_check_expression(&exprs.left, symbols);
             type_check_expression(&exprs.right, symbols);
         }
-        Expression::ASSIGNMENT(exprs) => {
+        Expression::Assignment(exprs) => {
             type_check_expression(&exprs.left, symbols);
             type_check_expression(&exprs.right, symbols);
         }
-        Expression::CONDITION(cond) => {
+        Expression::Condition(cond) => {
             type_check_expression(&cond.condition, symbols);
             type_check_expression(&cond.if_true, symbols);
             type_check_expression(&cond.if_false, symbols);
         }
-        Expression::LITEXP(_) => (),
+        Expression::LitExpr(_) => (),
     }
 }
 
 // Type Checking
 
 fn type_check_function(function: &FunctionDeclaration, symbols: &mut Symbols) {
-    let ctype = CType::FUNCTION(function.params.len());
+    let ctype = CType::Function(function.params.len());
     let mut defined = function.body.is_some();
-    let mut global = function.storage != Some(StorageClass::STATIC);
+    let mut global = function.storage != Some(StorageClass::Static);
     if let Some(symbol) = symbols.get(&function.name) {
         let attrs = symbol.get_function_attrs();
         assert!(symbol.ctype == ctype, "Incompatible function declarations!");
@@ -174,7 +174,7 @@ fn type_check_function(function: &FunctionDeclaration, symbols: &mut Symbols) {
         function.name.clone(),
         Symbol {
             ctype,
-            attrs: SymbolAttr::FUNCTION(FunctionAttributes { defined, global }),
+            attrs: SymbolAttr::Function(FunctionAttributes { defined, global }),
         },
     );
     if let Some(body) = &function.body {
@@ -182,8 +182,8 @@ fn type_check_function(function: &FunctionDeclaration, symbols: &mut Symbols) {
             symbols.insert(
                 param.clone(),
                 Symbol {
-                    ctype: CType::INT,
-                    attrs: SymbolAttr::LOCAL,
+                    ctype: CType::Int,
+                    attrs: SymbolAttr::Local,
                 },
             );
         }
@@ -196,21 +196,21 @@ fn type_check_call(name: &str, args: &Vec<Expression>, symbols: &mut Symbols) {
         type_check_expression(arg, symbols);
     }
     assert!(
-        symbols[name].ctype == CType::FUNCTION(args.len()),
+        symbols[name].ctype == CType::Function(args.len()),
         "Function call has invalid type"
     );
 }
 
 fn type_check_var_declaration(var: &VariableDeclaration, symbols: &mut Symbols) {
     match var.storage {
-        Some(StorageClass::EXTERN) => {
+        Some(StorageClass::Extern) => {
             assert!(
                 var.value.is_none(),
                 "Local extern variable cannot have initializer!"
             );
             if let Some(symbol) = symbols.get(&var.name) {
                 assert!(
-                    symbol.ctype == CType::INT,
+                    symbol.ctype == CType::Int,
                     "Function redeclared as variable!"
                 );
             } else {
@@ -218,25 +218,25 @@ fn type_check_var_declaration(var: &VariableDeclaration, symbols: &mut Symbols) 
                     var.name.clone(),
                     Symbol {
                         ctype: var.ctype.clone(),
-                        attrs: SymbolAttr::STATIC(StaticAttributes {
-                            init: StaticInitializer::NONE,
+                        attrs: SymbolAttr::Static(StaticAttributes {
+                            init: StaticInitializer::None,
                             global: true,
                         }),
                     },
                 );
             }
         }
-        Some(StorageClass::STATIC) => {
+        Some(StorageClass::Static) => {
             let init_value = if var.value.is_none() {
-                StaticInitializer::INITIALIZER(0)
+                StaticInitializer::Initialized(0)
             } else {
-                StaticInitializer::INITIALIZER(eval_constant_expr(var.value.as_ref().unwrap()))
+                StaticInitializer::Initialized(eval_constant_expr(var.value.as_ref().unwrap()))
             };
             symbols.insert(
                 var.name.clone(),
                 Symbol {
                     ctype: var.ctype.clone(),
-                    attrs: SymbolAttr::STATIC(StaticAttributes {
+                    attrs: SymbolAttr::Static(StaticAttributes {
                         init: init_value,
                         global: false,
                     }),
@@ -248,7 +248,7 @@ fn type_check_var_declaration(var: &VariableDeclaration, symbols: &mut Symbols) 
                 var.name.clone(),
                 Symbol {
                     ctype: var.ctype.clone(),
-                    attrs: SymbolAttr::LOCAL,
+                    attrs: SymbolAttr::Local,
                 },
             );
             if let Some(init) = &var.value {
@@ -260,45 +260,45 @@ fn type_check_var_declaration(var: &VariableDeclaration, symbols: &mut Symbols) 
 
 fn type_check_var_filescope(var: &VariableDeclaration, symbols: &mut Symbols) {
     let mut init_value = if var.value.is_none() {
-        if var.storage == Some(StorageClass::EXTERN) {
-            StaticInitializer::NONE
+        if var.storage == Some(StorageClass::Extern) {
+            StaticInitializer::None
         } else {
-            StaticInitializer::TENTATIVE
+            StaticInitializer::Tentative
         }
     } else {
-        StaticInitializer::INITIALIZER(eval_constant_expr(var.value.as_ref().unwrap()))
+        StaticInitializer::Initialized(eval_constant_expr(var.value.as_ref().unwrap()))
     };
 
-    let mut global = var.storage != Some(StorageClass::STATIC);
+    let mut global = var.storage != Some(StorageClass::Static);
     if let Some(symbol) = symbols.get(&var.name) {
         let attrs = symbol.get_static_attrs();
         assert!(
-            symbol.ctype == CType::INT,
+            symbol.ctype == CType::Int,
             "Function redeclared as variable!"
         );
-        if var.storage == Some(StorageClass::EXTERN) {
+        if var.storage == Some(StorageClass::Extern) {
             global = attrs.global;
         } else if attrs.global != global {
             panic!("Conflicting linkage!");
         }
 
-        if matches!(attrs.init, StaticInitializer::INITIALIZER(_)) {
+        if matches!(attrs.init, StaticInitializer::Initialized(_)) {
             assert!(
-                !matches!(init_value, StaticInitializer::INITIALIZER(_)),
+                !matches!(init_value, StaticInitializer::Initialized(_)),
                 "Conflicting static initializers!"
             );
             init_value = attrs.init.clone();
-        } else if attrs.init == StaticInitializer::TENTATIVE
-            && !matches!(init_value, StaticInitializer::INITIALIZER(_))
+        } else if attrs.init == StaticInitializer::Tentative
+            && !matches!(init_value, StaticInitializer::Initialized(_))
         {
-            init_value = StaticInitializer::TENTATIVE
+            init_value = StaticInitializer::Tentative
         }
     }
     symbols.insert(
         var.name.clone(),
         Symbol {
             ctype: var.ctype.clone(),
-            attrs: SymbolAttr::STATIC(StaticAttributes {
+            attrs: SymbolAttr::Static(StaticAttributes {
                 init: init_value,
                 global,
             }),
@@ -308,7 +308,7 @@ fn type_check_var_filescope(var: &VariableDeclaration, symbols: &mut Symbols) {
 
 fn type_check_variable(name: &str, symbols: &mut Symbols) {
     assert!(
-        symbols[name].ctype == CType::INT,
+        symbols[name].ctype == CType::Int,
         "Found function, not variable!"
     );
 }

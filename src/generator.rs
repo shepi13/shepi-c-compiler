@@ -10,8 +10,8 @@ use crate::{
 pub type Program = Vec<TopLevelDecl>;
 #[derive(Debug)]
 pub enum TopLevelDecl {
-    FUNCTION(Function),
-    STATICVAR(StaticVariable),
+    Function(Function),
+    StaticDecl(StaticVariable),
 }
 #[derive(Debug)]
 pub struct Function {
@@ -29,14 +29,14 @@ pub struct StaticVariable {
 
 #[derive(Debug)]
 pub enum Instruction {
-    RETURN(Value),
-    UNARYOP(InstructionUnary),
-    BINARYOP(InstructionBinary),
-    COPY(InstructionCopy),
-    LABEL(String),
-    JUMP(String),
-    JUMPCOND(InstructionJump),
-    FUNCTION(String, Vec<Value>, Value),
+    Return(Value),
+    UnaryOp(InstructionUnary),
+    BinaryOp(InstructionBinary),
+    Copy(InstructionCopy),
+    Label(String),
+    Jump(String),
+    JumpCond(InstructionJump),
+    Function(String, Vec<Value>, Value),
 }
 #[derive(Debug)]
 pub struct InstructionUnary {
@@ -46,16 +46,16 @@ pub struct InstructionUnary {
 }
 #[derive(Debug)]
 pub enum UnaryOperator {
-    COMPLEMENT,
-    NEGATE,
-    LOGICALNOT,
+    Complement,
+    Negate,
+    LogicalNot,
 }
 impl InstructionUnary {
     fn from(operator: parser::UnaryOperator, src: Value, dst: Value) -> Self {
         let operator = match operator {
-            parser::UnaryOperator::COMPLEMENT => UnaryOperator::COMPLEMENT,
-            parser::UnaryOperator::LOGICALNOT => UnaryOperator::LOGICALNOT,
-            parser::UnaryOperator::NEGATE => UnaryOperator::NEGATE,
+            parser::UnaryOperator::Complement => UnaryOperator::Complement,
+            parser::UnaryOperator::LogicalNot => UnaryOperator::LogicalNot,
+            parser::UnaryOperator::Negate => UnaryOperator::Negate,
             _ => panic!("Invalid TAC operator"),
         };
         Self { operator, src, dst }
@@ -95,28 +95,28 @@ pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &Symbols) -> Program {
     let mut program: Program = Vec::new();
 
     for decl in parser_ast {
-        if let parser::Declaration::FUNCTION(function) = decl {
-            program.push(TopLevelDecl::FUNCTION(gen_function(function, symbols)));
+        if let parser::Declaration::Function(function) = decl {
+            program.push(TopLevelDecl::Function(gen_function(function, symbols)));
         }
     }
     for (name, entry) in symbols {
-        if let SymbolAttr::STATIC(var_attrs) = &entry.attrs {
+        if let SymbolAttr::Static(var_attrs) = &entry.attrs {
             match &var_attrs.init {
-                StaticInitializer::INITIALIZER(val) => {
-                    program.push(TopLevelDecl::STATICVAR(StaticVariable {
+                StaticInitializer::Initialized(val) => {
+                    program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
                         initializer: *val,
                     }));
                 }
-                StaticInitializer::TENTATIVE => {
-                    program.push(TopLevelDecl::STATICVAR(StaticVariable {
+                StaticInitializer::Tentative => {
+                    program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
                         initializer: 0,
                     }));
                 }
-                StaticInitializer::NONE => (),
+                StaticInitializer::None => (),
             }
         }
     }
@@ -126,7 +126,7 @@ fn gen_function(function: parser::FunctionDeclaration, symbols: &Symbols) -> Fun
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions);
-        instructions.push(Instruction::RETURN(Value::CONSTANT(0)));
+        instructions.push(Instruction::Return(Value::CONSTANT(0)));
     }
     let global = symbols[&function.name].get_function_attrs().global;
     Function {
@@ -139,23 +139,23 @@ fn gen_function(function: parser::FunctionDeclaration, symbols: &Symbols) -> Fun
 fn gen_block(block: parser::Block, instructions: &mut Vec<Instruction>) {
     for block_item in block {
         match block_item {
-            parser::BlockItem::STATEMENT(statement) => gen_instructions(statement, instructions),
-            parser::BlockItem::DECLARATION(parser::Declaration::VARIABLE(decl)) => {
+            parser::BlockItem::StatementItem(statement) => gen_instructions(statement, instructions),
+            parser::BlockItem::DeclareItem(parser::Declaration::Variable(decl)) => {
                 gen_declaration(decl, instructions);
             }
-            parser::BlockItem::DECLARATION(parser::Declaration::FUNCTION(_)) => (),
+            parser::BlockItem::DeclareItem(parser::Declaration::Function(_)) => (),
         }
     }
 }
 fn gen_declaration(declaration: parser::VariableDeclaration, instructions: &mut Vec<Instruction>) {
-    if declaration.storage == Some(StorageClass::EXTERN)
-        || declaration.storage == Some(StorageClass::STATIC)
+    if declaration.storage == Some(StorageClass::Extern)
+        || declaration.storage == Some(StorageClass::Static)
     {
         return;
     }
     if let Some(value) = declaration.value {
         let result = gen_expression(value, instructions);
-        instructions.push(Instruction::COPY(InstructionCopy {
+        instructions.push(Instruction::Copy(InstructionCopy {
             src: result,
             dst: Value::VARIABLE(declaration.name.to_string()),
         }));
@@ -163,155 +163,155 @@ fn gen_declaration(declaration: parser::VariableDeclaration, instructions: &mut 
 }
 fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruction>) {
     match statement {
-        parser::Statement::RETURN(value) => {
+        parser::Statement::Return(value) => {
             let dst = gen_expression(value, instructions);
-            instructions.push(Instruction::RETURN(dst));
+            instructions.push(Instruction::Return(dst));
         }
-        parser::Statement::NULL => (),
-        parser::Statement::EXPRESSION(value) => {
+        parser::Statement::Null => (),
+        parser::Statement::ExprStmt(value) => {
             gen_expression(value, instructions);
         }
-        parser::Statement::IF(condition, if_true, if_false) => {
+        parser::Statement::If(condition, if_true, if_false) => {
             let end_label = gen_label("end");
             let else_label = gen_label("else");
             let condition = gen_expression(condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump {
+            instructions.push(Instruction::JumpCond(InstructionJump {
                 jump_type: JumpType::JUMPIFZERO,
                 condition,
                 target: else_label.clone(),
             }));
             gen_instructions(*if_true, instructions);
-            instructions.push(Instruction::JUMP(end_label.clone()));
-            instructions.push(Instruction::LABEL(else_label));
+            instructions.push(Instruction::Jump(end_label.clone()));
+            instructions.push(Instruction::Label(else_label));
             if let Some(false_statement) = *if_false {
                 gen_instructions(false_statement, instructions);
             }
-            instructions.push(Instruction::LABEL(end_label));
+            instructions.push(Instruction::Label(end_label));
         }
-        parser::Statement::GOTO(target) => {
-            instructions.push(Instruction::JUMP(target.to_string()));
+        parser::Statement::Goto(target) => {
+            instructions.push(Instruction::Jump(target.to_string()));
         }
-        parser::Statement::LABEL(name, statement) => {
-            instructions.push(Instruction::LABEL(name.to_string()));
+        parser::Statement::Label(name, statement) => {
+            instructions.push(Instruction::Label(name.to_string()));
             gen_instructions(*statement, instructions);
         }
-        parser::Statement::COMPOUND(block) => gen_block(block, instructions),
-        parser::Statement::BREAK(name) => {
+        parser::Statement::Compound(block) => gen_block(block, instructions),
+        parser::Statement::Break(name) => {
             let target = format!("break_{}", name);
-            instructions.push(Instruction::JUMP(target));
+            instructions.push(Instruction::Jump(target));
         }
-        parser::Statement::CONTINUE(name) => {
+        parser::Statement::Continue(name) => {
             let target = format!("continue_{}", name);
-            instructions.push(Instruction::JUMP(target));
+            instructions.push(Instruction::Jump(target));
         }
-        parser::Statement::DOWHILE(loop_data) => {
+        parser::Statement::DoWhile(loop_data) => {
             let start = format!("start_{}", loop_data.label);
-            instructions.push(Instruction::LABEL(start.clone()));
+            instructions.push(Instruction::Label(start.clone()));
             gen_instructions(*loop_data.body, instructions);
-            instructions.push(Instruction::LABEL(format!("continue_{}", loop_data.label)));
+            instructions.push(Instruction::Label(format!("continue_{}", loop_data.label)));
             let result = gen_expression(loop_data.condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump {
+            instructions.push(Instruction::JumpCond(InstructionJump {
                 jump_type: JumpType::JUMPIFNOTZERO,
                 condition: result,
                 target: start,
             }));
-            instructions.push(Instruction::LABEL(format!("break_{}", loop_data.label)));
+            instructions.push(Instruction::Label(format!("break_{}", loop_data.label)));
         }
-        parser::Statement::WHILE(loop_data) => {
+        parser::Statement::While(loop_data) => {
             let break_label = format!("break_{}", loop_data.label);
             let continue_label = format!("continue_{}", loop_data.label);
-            instructions.push(Instruction::LABEL(continue_label.clone()));
+            instructions.push(Instruction::Label(continue_label.clone()));
             let result = gen_expression(loop_data.condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump {
+            instructions.push(Instruction::JumpCond(InstructionJump {
                 jump_type: JumpType::JUMPIFZERO,
                 condition: result,
                 target: break_label.clone(),
             }));
             gen_instructions(*loop_data.body, instructions);
-            instructions.push(Instruction::JUMP(continue_label));
-            instructions.push(Instruction::LABEL(break_label));
+            instructions.push(Instruction::Jump(continue_label));
+            instructions.push(Instruction::Label(break_label));
         }
-        parser::Statement::FOR(init, loop_data, post_loop) => {
+        parser::Statement::For(init, loop_data, post_loop) => {
             match init {
-                parser::ForInit::INITDECL(decl) => {
+                parser::ForInit::Decl(decl) => {
                     gen_declaration(decl, instructions);
                 }
-                parser::ForInit::INITEXP(Some(expr)) => {
+                parser::ForInit::Expr(Some(expr)) => {
                     gen_expression(expr, instructions);
                 }
                 _ => (),
             };
             let break_label = format!("break_{}", loop_data.label);
             let start_label = format!("start_{}", loop_data.label);
-            instructions.push(Instruction::LABEL(start_label.clone()));
+            instructions.push(Instruction::Label(start_label.clone()));
             let condition = gen_expression(loop_data.condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump {
+            instructions.push(Instruction::JumpCond(InstructionJump {
                 jump_type: JumpType::JUMPIFZERO,
                 condition,
                 target: break_label.clone(),
             }));
             gen_instructions(*loop_data.body, instructions);
-            instructions.push(Instruction::LABEL(format!("continue_{}", loop_data.label)));
+            instructions.push(Instruction::Label(format!("continue_{}", loop_data.label)));
             if let Some(post) = post_loop {
                 gen_expression(post, instructions);
             }
-            instructions.push(Instruction::JUMP(start_label));
-            instructions.push(Instruction::LABEL(break_label));
+            instructions.push(Instruction::Jump(start_label));
+            instructions.push(Instruction::Label(break_label));
         }
-        parser::Statement::SWITCH(switch) => {
+        parser::Statement::Switch(switch) => {
             let src1 = gen_expression(switch.condition, instructions);
             let dst = Value::VARIABLE(gen_temp_name());
             for case in switch.cases {
                 let src2 = gen_expression(case.1, instructions);
-                instructions.push(Instruction::BINARYOP(InstructionBinary {
-                    operator: BinaryOperator::ISEQUAL,
+                instructions.push(Instruction::BinaryOp(InstructionBinary {
+                    operator: BinaryOperator::IsEqual,
                     src1: src1.clone(),
                     src2: src2.clone(),
                     dst: dst.clone(),
                 }));
-                instructions.push(Instruction::JUMPCOND(InstructionJump {
+                instructions.push(Instruction::JumpCond(InstructionJump {
                     jump_type: JumpType::JUMPIFNOTZERO,
                     condition: dst.clone(),
                     target: case.0,
                 }));
             }
             if let Some(target) = switch.default {
-                instructions.push(Instruction::JUMP(target));
+                instructions.push(Instruction::Jump(target));
             } else {
-                instructions.push(Instruction::JUMP(format!("break_{}", switch.label)));
+                instructions.push(Instruction::Jump(format!("break_{}", switch.label)));
             }
             gen_instructions(*switch.statement, instructions);
-            instructions.push(Instruction::LABEL(format!("break_{}", switch.label)));
+            instructions.push(Instruction::Label(format!("break_{}", switch.label)));
         }
-        parser::Statement::CASE(_, _) | parser::Statement::DEFAULT(_) => {
+        parser::Statement::Case(_, _) | parser::Statement::Default(_) => {
             panic!("Compiler error: case/default should be replaced in typecheck pass")
         }
     }
 }
 fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruction>) -> Value {
     match expression {
-        parser::Expression::LITEXP(parser::Literal::INT(val)) => Value::CONSTANT(val),
-        parser::Expression::UNARY(parser::UnaryOperator::INCREMENT(increment_type), expr) => {
+        parser::Expression::LitExpr(parser::Literal::Int(val)) => Value::CONSTANT(val),
+        parser::Expression::Unary(parser::UnaryOperator::Increment(increment_type), expr) => {
             use parser::Increment::*;
             let dst = gen_expression(*expr, instructions);
             let operator = match increment_type {
-                PREINCREMENT | POSTINCREMENT => BinaryOperator::ADD,
-                PREDECREMENT | POSTDECREMENT => BinaryOperator::SUBTRACT,
+                PreIncrement | PostIncrement => BinaryOperator::Add,
+                PreDecrement | PostDecrement => BinaryOperator::Subtract,
             };
-            let bin_instruction = Instruction::BINARYOP(InstructionBinary {
+            let bin_instruction = Instruction::BinaryOp(InstructionBinary {
                 operator,
                 src1: dst.clone(),
                 src2: Value::CONSTANT(1),
                 dst: dst.clone(),
             });
             match increment_type {
-                PREDECREMENT | PREINCREMENT => {
+                PreDecrement | PreIncrement => {
                     instructions.push(bin_instruction);
                     dst
                 }
-                POSTDECREMENT | POSTINCREMENT => {
+                PostDecrement | PostIncrement => {
                     let old_value = Value::VARIABLE(gen_temp_name());
-                    instructions.push(Instruction::COPY(InstructionCopy {
+                    instructions.push(Instruction::Copy(InstructionCopy {
                         src: dst.clone(),
                         dst: old_value.clone(),
                     }));
@@ -320,19 +320,19 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
                 }
             }
         }
-        parser::Expression::UNARY(operator, expr) => {
+        parser::Expression::Unary(operator, expr) => {
             let src = gen_expression(*expr, instructions);
             let dst = Value::VARIABLE(gen_temp_name());
-            instructions.push(Instruction::UNARYOP(InstructionUnary::from(
+            instructions.push(Instruction::UnaryOp(InstructionUnary::from(
                 operator,
                 src,
                 dst.clone(),
             )));
             dst
         }
-        parser::Expression::BINARY(operator) => {
+        parser::Expression::Binary(operator) => {
             // Short circuiting needs special handling
-            if let parser::BinaryOperator::LOGICALAND | parser::BinaryOperator::LOGICALOR =
+            if let parser::BinaryOperator::LogicalAnd | parser::BinaryOperator::LogicalOr =
                 operator.operator
             {
                 return gen_short_circuit(
@@ -349,7 +349,7 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
             } else {
                 Value::VARIABLE(gen_temp_name())
             };
-            instructions.push(Instruction::BINARYOP(InstructionBinary {
+            instructions.push(Instruction::BinaryOp(InstructionBinary {
                 operator: operator.operator.clone(),
                 src1,
                 src2,
@@ -357,12 +357,12 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
             }));
             dst
         }
-        parser::Expression::VAR(name) => Value::VARIABLE(name.to_string()),
-        parser::Expression::ASSIGNMENT(assignment) => {
+        parser::Expression::Variable(name) => Value::VARIABLE(name.to_string()),
+        parser::Expression::Assignment(assignment) => {
             let result = gen_expression(assignment.right, instructions);
             match &assignment.left {
-                parser::Expression::VAR(name) => {
-                    instructions.push(Instruction::COPY(InstructionCopy {
+                parser::Expression::Variable(name) => {
+                    instructions.push(Instruction::Copy(InstructionCopy {
                         src: result,
                         dst: Value::VARIABLE(name.to_string()),
                     }));
@@ -371,38 +371,38 @@ fn gen_expression(expression: parser::Expression, instructions: &mut Vec<Instruc
                 _ => panic!("Left hand side of assignment should be variable!"),
             }
         }
-        parser::Expression::CONDITION(condition) => {
+        parser::Expression::Condition(condition) => {
             let dst = Value::VARIABLE(gen_temp_name());
             let end_label = gen_label("cond_end");
             let e2_label = gen_label("cond_e2");
             let cond = gen_expression(condition.condition, instructions);
-            instructions.push(Instruction::JUMPCOND(InstructionJump {
+            instructions.push(Instruction::JumpCond(InstructionJump {
                 jump_type: JumpType::JUMPIFZERO,
                 condition: cond,
                 target: e2_label.clone(),
             }));
             let e1 = gen_expression(condition.if_true, instructions);
-            instructions.push(Instruction::COPY(InstructionCopy {
+            instructions.push(Instruction::Copy(InstructionCopy {
                 src: e1,
                 dst: dst.clone(),
             }));
-            instructions.push(Instruction::JUMP(end_label.clone()));
-            instructions.push(Instruction::LABEL(e2_label));
+            instructions.push(Instruction::Jump(end_label.clone()));
+            instructions.push(Instruction::Label(e2_label));
             let e2 = gen_expression(condition.if_false, instructions);
-            instructions.push(Instruction::COPY(InstructionCopy {
+            instructions.push(Instruction::Copy(InstructionCopy {
                 src: e2,
                 dst: dst.clone(),
             }));
-            instructions.push(Instruction::LABEL(end_label));
+            instructions.push(Instruction::Label(end_label));
             dst
         }
-        parser::Expression::FUNCTION(name, args) => {
+        parser::Expression::FunctionCall(name, args) => {
             let results = args
                 .into_iter()
                 .map(|arg| gen_expression(arg, instructions))
                 .collect();
             let dst = Value::VARIABLE(gen_temp_name());
-            instructions.push(Instruction::FUNCTION(
+            instructions.push(Instruction::Function(
                 name.to_string(),
                 results,
                 dst.clone(),
@@ -419,36 +419,36 @@ fn gen_short_circuit(
     right: parser::Expression,
 ) -> Value {
     let (jump_type, label_type) = match operator {
-        parser::BinaryOperator::LOGICALAND => (JumpType::JUMPIFZERO, false),
-        parser::BinaryOperator::LOGICALOR => (JumpType::JUMPIFNOTZERO, true),
+        parser::BinaryOperator::LogicalAnd => (JumpType::JUMPIFZERO, false),
+        parser::BinaryOperator::LogicalOr => (JumpType::JUMPIFNOTZERO, true),
         _ => panic!("Expected a short circuiting operator!"),
     };
     let target = gen_label(&label_type.to_string());
     let end = gen_label("end");
     let dst = Value::VARIABLE(gen_temp_name());
     let v1 = gen_expression(left, instructions);
-    instructions.push(Instruction::JUMPCOND(InstructionJump {
+    instructions.push(Instruction::JumpCond(InstructionJump {
         jump_type: jump_type.clone(),
         condition: v1,
         target: target.clone(),
     }));
     let v2 = gen_expression(right, instructions);
-    instructions.push(Instruction::JUMPCOND(InstructionJump {
+    instructions.push(Instruction::JumpCond(InstructionJump {
         jump_type,
         condition: v2,
         target: target.clone(),
     }));
-    instructions.push(Instruction::COPY(InstructionCopy {
+    instructions.push(Instruction::Copy(InstructionCopy {
         src: Value::CONSTANT(!label_type as i32),
         dst: dst.clone(),
     }));
-    instructions.push(Instruction::JUMP(end.clone()));
-    instructions.push(Instruction::LABEL(target));
-    instructions.push(Instruction::COPY(InstructionCopy {
+    instructions.push(Instruction::Jump(end.clone()));
+    instructions.push(Instruction::Label(target));
+    instructions.push(Instruction::Copy(InstructionCopy {
         src: Value::CONSTANT(label_type as i32),
         dst: dst.clone(),
     }));
-    instructions.push(Instruction::LABEL(end));
+    instructions.push(Instruction::Label(end));
     dst
 }
 
