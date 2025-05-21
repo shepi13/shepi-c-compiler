@@ -1,15 +1,22 @@
 use std::collections::HashMap;
 
 use crate::generator;
+use crate::generator::StaticVariable;
 use crate::parser;
+use crate::type_check::{Symbol, SymbolAttr, Symbols};
 
-pub type Program = Vec<Function>;
+pub type Program = Vec<TopLevelDecl>;
+#[derive(Debug)]
+pub enum TopLevelDecl {
+    FUNCTION(Function),
+    STATICVAR(StaticVariable),
+}
 #[derive(Debug)]
 pub struct Function {
     pub name: String,
     pub instructions: Vec<Instruction>,
+    pub global: bool,
 }
-
 // Instructions
 #[derive(Debug)]
 pub enum Instruction {
@@ -51,6 +58,7 @@ pub enum Operand {
     IMM(i32),
     STACK(isize),
     REGISTER(Register),
+    DATA(String),
 }
 #[derive(Debug, Clone)]
 pub enum Register {
@@ -89,50 +97,63 @@ impl StackGen {
     }
 }
 
-pub fn gen_assembly_tree(ast: generator::Program) -> Program {
+pub fn gen_assembly_tree(ast: generator::Program, symbols: &Symbols) -> Program {
     let mut program: Program = Vec::new();
-    for function in ast.into_iter() {
-        if function.instructions.is_empty() {
-            continue;
-        }
-        let stack = &mut StackGen::new();
-        let mut instructions: Vec<Instruction> = Vec::new();
-        instructions.push(Instruction::STACKALLOCATE(0));
-        for (i, param) in function.params.iter().enumerate() {
-            let param = gen_operand(generator::Value::VARIABLE(param.to_string()), stack);
-            match i {
-                0 => gen_move(&mut instructions, &Operand::REGISTER(Register::DI), &param),
-                1 => gen_move(&mut instructions, &Operand::REGISTER(Register::SI), &param),
-                2 => gen_move(&mut instructions, &Operand::REGISTER(Register::DX), &param),
-                3 => gen_move(&mut instructions, &Operand::REGISTER(Register::CX), &param),
-                4 => gen_move(&mut instructions, &Operand::REGISTER(Register::R8), &param),
-                5 => gen_move(&mut instructions, &Operand::REGISTER(Register::R9), &param),
-                _ => gen_move(
-                    &mut instructions,
-                    &Operand::STACK((4 - i as isize) * 8),
-                    &param,
-                ),
+    for decl in ast.into_iter() {
+        match decl {
+            generator::TopLevelDecl::FUNCTION(function) => {
+                if function.instructions.is_empty() {
+                    continue;
+                }
+                let stack = &mut StackGen::new();
+                let mut instructions: Vec<Instruction> = Vec::new();
+                instructions.push(Instruction::STACKALLOCATE(0));
+                for (i, param) in function.params.iter().enumerate() {
+                    let param = gen_operand(
+                        generator::Value::VARIABLE(param.to_string()),
+                        stack,
+                        symbols,
+                    );
+                    match i {
+                        0 => gen_move(&mut instructions, &Operand::REGISTER(Register::DI), &param),
+                        1 => gen_move(&mut instructions, &Operand::REGISTER(Register::SI), &param),
+                        2 => gen_move(&mut instructions, &Operand::REGISTER(Register::DX), &param),
+                        3 => gen_move(&mut instructions, &Operand::REGISTER(Register::CX), &param),
+                        4 => gen_move(&mut instructions, &Operand::REGISTER(Register::R8), &param),
+                        5 => gen_move(&mut instructions, &Operand::REGISTER(Register::R9), &param),
+                        _ => gen_move(
+                            &mut instructions,
+                            &Operand::STACK((4 - i as isize) * 8),
+                            &param,
+                        ),
+                    }
+                }
+                instructions.append(&mut gen_instructions(function.instructions, stack, symbols));
+                instructions[0] =
+                    Instruction::STACKALLOCATE(stack.stack_offset + 16 - stack.stack_offset % 16);
+                program.push(TopLevelDecl::FUNCTION(Function {
+                    name: function.name,
+                    global: function.global,
+                    instructions,
+                }));
+            }
+            generator::TopLevelDecl::STATICVAR(static_data) => {
+                program.push(TopLevelDecl::STATICVAR(static_data));
             }
         }
-        instructions.append(&mut gen_instructions(function.instructions, stack));
-        instructions[0] =
-            Instruction::STACKALLOCATE(stack.stack_offset + 16 - stack.stack_offset % 16);
-        program.push(Function {
-            name: function.name,
-            instructions,
-        });
     }
     program
 }
 fn gen_instructions(
     instructions: Vec<generator::Instruction>,
     stack: &mut StackGen,
+    symbols: &Symbols,
 ) -> Vec<Instruction> {
     let mut assembly_instructions: Vec<Instruction> = Vec::new();
     for instruction in instructions {
         match instruction {
             generator::Instruction::RETURN(val) => {
-                let val = gen_operand(val, stack);
+                let val = gen_operand(val, stack, symbols);
                 gen_move(
                     &mut assembly_instructions,
                     &val,
@@ -145,23 +166,23 @@ fn gen_instructions(
                     generator::UnaryOperator::COMPLEMENT => UnaryOperator::NOT,
                     generator::UnaryOperator::NEGATE => UnaryOperator::NEG,
                     generator::UnaryOperator::LOGICALNOT => {
-                        let src = gen_operand(val.src, stack);
-                        let dst = gen_operand(val.dst, stack);
+                        let src = gen_operand(val.src, stack, symbols);
+                        let dst = gen_operand(val.dst, stack, symbols);
                         gen_compare(&mut assembly_instructions, &Operand::IMM(0), &src);
                         gen_move(&mut assembly_instructions, &Operand::IMM(0), &dst);
                         assembly_instructions.push(Instruction::SetCond(Condition::EQUAL, dst));
                         continue;
                     }
                 };
-                let src = gen_operand(val.src, stack);
-                let dst = gen_operand(val.dst, stack);
+                let src = gen_operand(val.src, stack, symbols);
+                let dst = gen_operand(val.dst, stack, symbols);
                 gen_move(&mut assembly_instructions, &src, &dst);
                 assembly_instructions.push(Instruction::UNARY(operator, dst));
             }
             generator::Instruction::BINARYOP(val) => {
-                let src1 = gen_operand(val.src1, stack);
-                let src2 = gen_operand(val.src2, stack);
-                let dst = gen_operand(val.dst, stack);
+                let src1 = gen_operand(val.src1, stack, symbols);
+                let src2 = gen_operand(val.src2, stack, symbols);
+                let dst = gen_operand(val.dst, stack, symbols);
                 let operator = match val.operator {
                     // Handle simple binary operators
                     parser::BinaryOperator::ADD => BinaryOperator::ADD,
@@ -231,20 +252,20 @@ fn gen_instructions(
                 gen_compare(
                     &mut assembly_instructions,
                     &Operand::IMM(0),
-                    &gen_operand(jump.condition, stack),
+                    &gen_operand(jump.condition, stack, symbols),
                 );
                 assembly_instructions.push(Instruction::JMPCond(condition, jump.target));
             }
             generator::Instruction::COPY(copy) => {
-                let src = gen_operand(copy.src, stack);
-                let dst = gen_operand(copy.dst, stack);
+                let src = gen_operand(copy.src, stack, symbols);
+                let dst = gen_operand(copy.dst, stack, symbols);
                 gen_move(&mut assembly_instructions, &src, &dst);
             }
             generator::Instruction::LABEL(target) => {
                 assembly_instructions.push(Instruction::LABEL(target));
             }
             generator::Instruction::FUNCTION(name, args, dst) => {
-                gen_func_call(&mut assembly_instructions, stack, name, args, dst);
+                gen_func_call(&mut assembly_instructions, stack, name, args, dst, symbols);
             }
         }
     }
@@ -256,6 +277,7 @@ fn gen_func_call(
     name: String,
     args: Vec<generator::Value>,
     dst: generator::Value,
+    symbols: &Symbols,
 ) {
     let arg_registers = [
         Register::DI,
@@ -279,13 +301,13 @@ fn gen_func_call(
         }
         gen_move(
             instructions,
-            &gen_operand(arg.clone(), stack),
+            &gen_operand(arg.clone(), stack, symbols),
             &Operand::REGISTER(arg_registers[i].clone()),
         );
     }
     let mut i = args.len() as isize - 1;
     while i >= 6 {
-        let operand = gen_operand(args[i as usize].clone(), stack);
+        let operand = gen_operand(args[i as usize].clone(), stack, symbols);
         match operand {
             Operand::IMM(_) | Operand::REGISTER(_) => {
                 instructions.push(Instruction::PUSH(operand));
@@ -309,12 +331,12 @@ fn gen_func_call(
     gen_move(
         instructions,
         &Operand::REGISTER(Register::AX),
-        &gen_operand(dst, stack),
+        &gen_operand(dst, stack, symbols),
     )
 }
 fn gen_move(instructions: &mut Vec<Instruction>, src: &Operand, dst: &Operand) {
     match (src, dst) {
-        (Operand::STACK(_), Operand::STACK(_)) => {
+        (Operand::STACK(_) | Operand::DATA(_), Operand::STACK(_) | Operand::DATA(_)) => {
             instructions.push(Instruction::MOV(
                 src.clone(),
                 Operand::REGISTER(Register::R10),
@@ -332,7 +354,7 @@ fn gen_move(instructions: &mut Vec<Instruction>, src: &Operand, dst: &Operand) {
 
 fn gen_compare(instructions: &mut Vec<Instruction>, src: &Operand, dst: &Operand) {
     match (src, dst) {
-        (Operand::STACK(_), Operand::STACK(_)) => {
+        (Operand::STACK(_) | Operand::DATA(_), Operand::STACK(_) | Operand::DATA(_)) => {
             gen_move(instructions, &src, &Operand::REGISTER(Register::R10));
             instructions.push(Instruction::COMPARE(
                 Operand::REGISTER(Register::R10),
@@ -376,7 +398,7 @@ fn gen_binary_op(
     src2: Operand,
 ) {
     match (&operator, &src1, &src2) {
-        (BinaryOperator::MULT, _, Operand::STACK(_)) => {
+        (BinaryOperator::MULT, _, Operand::STACK(_) | Operand::DATA(_)) => {
             gen_move(instructions, &src2, &Operand::REGISTER(Register::R11));
             instructions.push(Instruction::BINARY(
                 operator,
@@ -385,7 +407,7 @@ fn gen_binary_op(
             ));
             gen_move(instructions, &Operand::REGISTER(Register::R11), &src2);
         }
-        (_, Operand::STACK(_), Operand::STACK(_)) => {
+        (_, Operand::STACK(_) | Operand::DATA(_), Operand::STACK(_) | Operand::DATA(_)) => {
             gen_move(instructions, &src1, &Operand::REGISTER(Register::R10));
             instructions.push(Instruction::BINARY(
                 operator,
@@ -438,11 +460,17 @@ fn gen_division(
     gen_move(instructions, &Operand::REGISTER(result_reg), &dst);
 }
 
-fn gen_operand(value: generator::Value, stack: &mut StackGen) -> Operand {
+fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols) -> Operand {
     match value {
         generator::Value::CONSTANT(val) => Operand::IMM(val),
         generator::Value::VARIABLE(name) => {
-            if let Some(location) = stack.variables.get(&name) {
+            if let Some(Symbol {
+                attrs: SymbolAttr::STATIC(_),
+                ctype: _,
+            }) = symbols.get(&name)
+            {
+                Operand::DATA(name)
+            } else if let Some(location) = stack.variables.get(&name) {
                 Operand::STACK(*location as isize)
             } else {
                 stack.stack_offset += 4;

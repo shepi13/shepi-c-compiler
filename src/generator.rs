@@ -2,14 +2,29 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::parser::{self, BinaryOperator};
+use crate::{
+    parser::{self, BinaryOperator, StorageClass},
+    type_check::{StaticInitializer, SymbolAttr, Symbols},
+};
 
-pub type Program = Vec<Function>;
+pub type Program = Vec<TopLevelDecl>;
+#[derive(Debug)]
+pub enum TopLevelDecl {
+    FUNCTION(Function),
+    STATICVAR(StaticVariable),
+}
 #[derive(Debug)]
 pub struct Function {
     pub name: String,
     pub params: Vec<String>,
     pub instructions: Vec<Instruction>,
+    pub global: bool,
+}
+#[derive(Debug)]
+pub struct StaticVariable {
+    pub identifier: String,
+    pub global: bool,
+    pub initializer: i32,
 }
 
 #[derive(Debug)]
@@ -76,24 +91,48 @@ pub enum Value {
     VARIABLE(String),
 }
 
-pub fn gen_tac_ast(parser_ast: parser::Program) -> Program {
+pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &Symbols) -> Program {
     let mut program: Program = Vec::new();
+
     for decl in parser_ast {
         if let parser::Declaration::FUNCTION(function) = decl {
-            program.push(gen_function(function));
+            program.push(TopLevelDecl::FUNCTION(gen_function(function, symbols)));
+        }
+    }
+    for (name, entry) in symbols {
+        if let SymbolAttr::STATIC(var_attrs) = &entry.attrs {
+            match &var_attrs.init {
+                StaticInitializer::INITIALIZER(val) => {
+                    program.push(TopLevelDecl::STATICVAR(StaticVariable {
+                        identifier: name.clone(),
+                        global: var_attrs.global,
+                        initializer: *val,
+                    }));
+                }
+                StaticInitializer::TENTATIVE => {
+                    program.push(TopLevelDecl::STATICVAR(StaticVariable {
+                        identifier: name.clone(),
+                        global: var_attrs.global,
+                        initializer: 0,
+                    }));
+                }
+                StaticInitializer::NONE => (),
+            }
         }
     }
     program
 }
-fn gen_function(function: parser::FunctionDeclaration) -> Function {
+fn gen_function(function: parser::FunctionDeclaration, symbols: &Symbols) -> Function {
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions);
         instructions.push(Instruction::RETURN(Value::CONSTANT(0)));
     }
+    let global = symbols[&function.name].get_function_attrs().global;
     Function {
         name: function.name,
         params: function.params,
+        global,
         instructions,
     }
 }
@@ -109,6 +148,11 @@ fn gen_block(block: parser::Block, instructions: &mut Vec<Instruction>) {
     }
 }
 fn gen_declaration(declaration: parser::VariableDeclaration, instructions: &mut Vec<Instruction>) {
+    if declaration.storage == Some(StorageClass::EXTERN)
+        || declaration.storage == Some(StorageClass::STATIC)
+    {
+        return;
+    }
     if let Some(value) = declaration.value {
         let result = gen_expression(value, instructions);
         instructions.push(Instruction::COPY(InstructionCopy {
