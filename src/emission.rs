@@ -1,4 +1,7 @@
-use crate::{assembly::{self, AsmSymbol, AssemblyType, BackendSymbols, Condition, StaticVar}, type_check::Initializer};
+use crate::{
+    assembly::{self, AsmSymbol, AssemblyType, BackendSymbols, Condition, StaticVar},
+    type_check::Initializer,
+};
 use std::{fs::File, io::Write};
 
 pub fn emit_program(output_filename: &str, program: assembly::Program) {
@@ -8,9 +11,7 @@ pub fn emit_program(output_filename: &str, program: assembly::Program) {
             assembly::TopLevelDecl::FUNCTION(function) => {
                 emit_function(&mut file, function, &program.backend_symbols);
             }
-            assembly::TopLevelDecl::STATICVAR(var) => {
-                emit_static_var(&mut file, var)
-            }
+            assembly::TopLevelDecl::STATICVAR(var) => emit_static_var(&mut file, var),
         }
     }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
@@ -57,7 +58,7 @@ fn emit_instructions(
                 let t = get_size_suffix(move_type);
                 writeln!(file, "    mov{t} {src}, {dst}").unwrap();
             }
-            assembly::Instruction::MovSX(src, dst ) => {
+            assembly::Instruction::MovSX(src, dst) => {
                 let src = get_operand(src, &AssemblyType::Longword);
                 let dst = get_operand(dst, &AssemblyType::Quadword);
                 writeln!(file, "    movslq {src}, {dst}").unwrap();
@@ -73,12 +74,10 @@ fn emit_instructions(
                 let t = get_size_suffix(asm_type);
                 writeln!(file, "    {operator}{t} {operand}").unwrap();
             }
-            assembly::Instruction::Cdq(asm_type) => {
-                match asm_type {
-                    AssemblyType::Longword => writeln!(file, "    cdq").unwrap(),
-                    AssemblyType::Quadword => writeln!(file, "    cqo").unwrap(),
-                }   
-            }
+            assembly::Instruction::Cdq(asm_type) => match asm_type {
+                AssemblyType::Longword => writeln!(file, "    cdq").unwrap(),
+                AssemblyType::Quadword => writeln!(file, "    cqo").unwrap(),
+            },
             assembly::Instruction::IDiv(operand, asm_type) => {
                 let t = get_size_suffix(asm_type);
                 let operand = get_operand(operand, asm_type);
