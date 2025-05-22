@@ -74,10 +74,11 @@ pub struct TypedProgram {
 
 pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Constant {
     match &expr.expr {
-        Expression::Constant(Constant::Int(val)) | Expression::Constant(Constant::Long(val)) => {
+        Expression::Constant(constexpr) => {
+            let val = constexpr.value();
             match ctype {
-                CType::Int => Constant::Int(*val & 0xFFFFFFFF),
-                CType::Long => Constant::Long(*val),
+                CType::Int => Constant::Int(val & 0xFFFFFFFF),
+                CType::Long => Constant::Long(val),
                 _ => panic!("Invalid conversion type!"),
             }
         }
@@ -204,9 +205,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
             let mut case_vals = HashSet::new();
             for case in switch.cases {
                 let constexpr = eval_constant_expr(&case.1, &cond_type);
-                let val = match constexpr {
-                    Constant::Int(val) | Constant::Long(val) => val,
-                };
+                let val = constexpr.value();
                 assert!(!case_vals.contains(&val), "Duplicate case!");
                 case_vals.insert(val);
                 new_cases.push((case.0, Expression::Constant(constexpr).into()));
@@ -246,13 +245,8 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             set_type(Expression::Variable(name).into(), var_type)
         }
         Expression::Constant(constant) => match constant {
-            Constant::Int(val) => {
-                set_type(Expression::Constant(Constant::Int(val)).into(), &CType::Int)
-            }
-            Constant::Long(val) => set_type(
-                Expression::Constant(Constant::Long(val)).into(),
-                &CType::Long,
-            ),
+            Constant::Int(_) => set_type(Expression::Constant(constant).into(), &CType::Int),
+            Constant::Long(_) => set_type(Expression::Constant(constant).into(), &CType::Long),
         },
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_expression(*inner, table);
@@ -439,10 +433,7 @@ fn parse_static_initializer(
     ctype: &CType,
 ) -> StaticInitializerType {
     let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
-    let val = match init_val {
-        Some(Constant::Long(val)) | Some(Constant::Int(val)) => val,
-        None => 0,
-    };
+    let val = init_val.map_or(0, |constexpr| constexpr.value());
     match ctype {
         CType::Int => StaticInitializerType::Initialized(Initializer::Int(val)),
         CType::Long => StaticInitializerType::Initialized(Initializer::Long(val)),

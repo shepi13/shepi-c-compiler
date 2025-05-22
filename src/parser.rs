@@ -188,6 +188,13 @@ pub enum Constant {
     Int(i64), // Limited to i32, but we'll store it as i64 for convenient conversions
     Long(i64),
 }
+impl Constant {
+    pub fn value(&self) -> i64 {
+        match self {
+            Self::Int(val) | Self::Long(val) => *val,
+        }
+    }
+}
 
 lazy_static! {
     static ref precedence_table: HashMap<TokenType<'static>, usize> = HashMap::from([
