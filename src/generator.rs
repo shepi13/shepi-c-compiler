@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     parser::{self, BinaryOperator, CType, StorageClass},
-    type_check::{get_type, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols},
+    type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
 };
 
 pub type Program = Vec<TopLevelDecl>;

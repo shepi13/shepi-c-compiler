@@ -68,7 +68,7 @@ pub enum Initializer {
 impl Initializer {
     pub fn value(&self) -> i64 {
         match self {
-            Self::Int(val) | Self::Long(val) => *val
+            Self::Int(val) | Self::Long(val) => *val,
         }
     }
 }

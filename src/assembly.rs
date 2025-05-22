@@ -351,7 +351,7 @@ fn gen_instructions(
                     generator::JumpType::JumpIfNotZero => Condition::NotEqual,
                 };
                 let (dst, cmp_type) = gen_operand(jump.condition, stack, symbols);
-                gen_compare(&mut assembly_instructions,&Operand::IMM(0), &dst, cmp_type);
+                gen_compare(&mut assembly_instructions, &Operand::IMM(0), &dst, cmp_type);
                 assembly_instructions.push(Instruction::JmpCond(condition, jump.target));
             }
             generator::Instruction::Copy(copy) => {
@@ -696,7 +696,11 @@ fn gen_relational_op(
         _ => panic!("Expected relational operator!"),
     };
     gen_compare(instructions, &src2, &src1, op_type.clone());
-    instructions.push(Instruction::Mov(Operand::IMM(0), dst.clone(), AssemblyType::Longword));
+    instructions.push(Instruction::Mov(
+        Operand::IMM(0),
+        dst.clone(),
+        AssemblyType::Longword,
+    ));
     instructions.push(Instruction::SetCond(condition, dst));
 }
 
