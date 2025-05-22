@@ -1,6 +1,4 @@
-use crate::{
-    assembly::{self, AsmSymbol, AssemblyType, BackendSymbols, Condition, StaticVar},
-};
+use crate::assembly::{self, AsmSymbol, AssemblyType, BackendSymbols, Condition, StaticVar};
 use std::{fs::File, io::Write};
 
 pub fn emit_program(output_filename: &str, program: assembly::Program) {
@@ -10,7 +8,9 @@ pub fn emit_program(output_filename: &str, program: assembly::Program) {
             assembly::TopLevelDecl::FUNCTION(function) => {
                 emit_function(&mut file, function, &program.backend_symbols);
             }
-            assembly::TopLevelDecl::STATICVAR(var) => emit_static_var(&mut file, var, &program.backend_symbols),
+            assembly::TopLevelDecl::STATICVAR(var) => {
+                emit_static_var(&mut file, var, &program.backend_symbols)
+            }
         }
     }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
@@ -72,9 +72,9 @@ fn emit_instructions(
                 let mut operator = get_binary_operator(operator);
                 if *asm_type == AssemblyType::Quadword {
                     match operator {
-                        "subl" => {operator = "subq"},
-                        "addl" => {operator = "addq"},
-                        _ => ()
+                        "subl" => operator = "subq",
+                        "addl" => operator = "addq",
+                        _ => (),
                     }
                 }
                 let src1 = get_operand(left);
@@ -110,7 +110,7 @@ fn emit_instructions(
                     writeln!(file, "    call {}@PLT", label).unwrap();
                 }
             }
-            _ => panic!("Not implemented!")
+            _ => panic!("Not implemented!"),
         }
     }
 }
