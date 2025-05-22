@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::generator;
 use crate::parser;
 use crate::parser::CType;
-use crate::type_check::StaticInitializer;
+use crate::type_check::Initializer;
 use crate::type_check::{SymbolAttr, Symbols};
 
 pub type BackendSymbols = HashMap<String, AsmSymbol>;
@@ -27,7 +27,7 @@ pub struct StaticVar {
     pub name: String,
     pub global: bool,
     pub alignment: i32,
-    pub init: StaticInitializer,
+    pub init: Initializer,
 }
 #[derive(Debug)]
 pub struct Function {
@@ -350,12 +350,8 @@ fn gen_instructions(
                     generator::JumpType::JumpIfZero => Condition::Equal,
                     generator::JumpType::JumpIfNotZero => Condition::NotEqual,
                 };
-                gen_compare(
-                    &mut assembly_instructions,
-                    &Operand::IMM(0),
-                    &gen_operand(jump.condition, stack, symbols).0,
-                    AssemblyType::Longword,
-                );
+                let (dst, cmp_type) = gen_operand(jump.condition, stack, symbols);
+                gen_compare(&mut assembly_instructions,&Operand::IMM(0), &dst, cmp_type);
                 assembly_instructions.push(Instruction::JmpCond(condition, jump.target));
             }
             generator::Instruction::Copy(copy) => {
@@ -700,7 +696,7 @@ fn gen_relational_op(
         _ => panic!("Expected relational operator!"),
     };
     gen_compare(instructions, &src2, &src1, op_type.clone());
-    instructions.push(Instruction::Mov(Operand::IMM(0), dst.clone(), op_type));
+    instructions.push(Instruction::Mov(Operand::IMM(0), dst.clone(), AssemblyType::Longword));
     instructions.push(Instruction::SetCond(condition, dst));
 }
 
@@ -760,6 +756,7 @@ fn gen_operand(
                         stack.stack_offset += 8 + (8 - stack.stack_offset % 8);
                     }
                 }
+                println!("Var: {name} -> {}", stack.stack_offset);
                 stack.variables.insert(name.to_string(), stack.stack_offset);
                 (Operand::Stack(stack.stack_offset as isize), var_type)
             }

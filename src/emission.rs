@@ -1,4 +1,4 @@
-use crate::assembly::{self, AsmSymbol, AssemblyType, BackendSymbols, Condition, StaticVar};
+use crate::{assembly::{self, AsmSymbol, AssemblyType, BackendSymbols, Condition, StaticVar}, type_check::Initializer};
 use std::{fs::File, io::Write};
 
 pub fn emit_program(output_filename: &str, program: assembly::Program) {
@@ -9,26 +9,30 @@ pub fn emit_program(output_filename: &str, program: assembly::Program) {
                 emit_function(&mut file, function, &program.backend_symbols);
             }
             assembly::TopLevelDecl::STATICVAR(var) => {
-                emit_static_var(&mut file, var, &program.backend_symbols)
+                emit_static_var(&mut file, var)
             }
         }
     }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
 }
-fn emit_static_var(file: &mut File, var: StaticVar, symbols: &BackendSymbols) {
+fn emit_static_var(file: &mut File, var: StaticVar) {
     if var.global {
         writeln!(file, "    .globl {}", var.name).unwrap();
     }
-    let initializer = var.init.value();
-    let (section, data_type) = match initializer {
-        Some(0) => (".bss", ".zero 4".to_string()),
-        Some(val) => (".data", format!(".long {}", val)),
-        None => panic!("No static initializer!"),
+    let init = match var.init {
+        Initializer::Int(0) => String::from(".zero 4"),
+        Initializer::Long(0) => String::from(".zero 8"),
+        Initializer::Int(val) => format!(".long {}", val),
+        Initializer::Long(val) => format!(".quad {}", val),
     };
-    writeln!(file, "    {}", section).unwrap();
-    writeln!(file, "    .align 4").unwrap();
+    if var.init.value() == 0 {
+        writeln!(file, "    .bss").unwrap();
+    } else {
+        writeln!(file, "    .data").unwrap();
+    }
+    writeln!(file, "    .align {}", var.alignment).unwrap();
     writeln!(file, "{}:", var.name).unwrap();
-    writeln!(file, "    {}", data_type).unwrap();
+    writeln!(file, "    {}", init).unwrap();
 }
 fn emit_function(file: &mut File, function: assembly::Function, symbols: &BackendSymbols) {
     if function.global {
@@ -47,49 +51,56 @@ fn emit_instructions(
 ) {
     for instruction in instructions {
         match instruction {
-            assembly::Instruction::Mov(src, dst, _) => {
-                let src = get_operand(src);
-                let dst = get_operand(dst);
-                writeln!(file, "    movl {src}, {dst}").unwrap();
+            assembly::Instruction::Mov(src, dst, move_type) => {
+                let src = get_operand(src, move_type);
+                let dst = get_operand(dst, move_type);
+                let t = get_size_suffix(move_type);
+                writeln!(file, "    mov{t} {src}, {dst}").unwrap();
+            }
+            assembly::Instruction::MovSX(src, dst ) => {
+                let src = get_operand(src, &AssemblyType::Longword);
+                let dst = get_operand(dst, &AssemblyType::Quadword);
+                writeln!(file, "    movslq {src}, {dst}").unwrap();
             }
             assembly::Instruction::Ret => {
                 writeln!(file, "    movq %rbp, %rsp").unwrap();
                 writeln!(file, "    popq %rbp").unwrap();
                 writeln!(file, "    ret").unwrap();
             }
-            assembly::Instruction::Unary(operator, operand, _) => {
+            assembly::Instruction::Unary(operator, operand, asm_type) => {
                 let operator = get_unary_operator(operator);
-                let operand = get_operand(operand);
-                writeln!(file, "    {} {}", operator, operand).unwrap();
+                let operand = get_operand(operand, asm_type);
+                let t = get_size_suffix(asm_type);
+                writeln!(file, "    {operator}{t} {operand}").unwrap();
             }
-            assembly::Instruction::Cdq(_) => {
-                writeln!(file, "    cdq").unwrap();
+            assembly::Instruction::Cdq(asm_type) => {
+                match asm_type {
+                    AssemblyType::Longword => writeln!(file, "    cdq").unwrap(),
+                    AssemblyType::Quadword => writeln!(file, "    cqo").unwrap(),
+                }   
             }
-            assembly::Instruction::IDiv(operand, _) => {
-                writeln!(file, "    idivl {}", get_operand(operand)).unwrap();
+            assembly::Instruction::IDiv(operand, asm_type) => {
+                let t = get_size_suffix(asm_type);
+                let operand = get_operand(operand, asm_type);
+                writeln!(file, "    idiv{t} {operand}").unwrap();
             }
             assembly::Instruction::Binary(operator, left, right, asm_type) => {
-                let mut operator = get_binary_operator(operator);
-                if *asm_type == AssemblyType::Quadword {
-                    match operator {
-                        "subl" => operator = "subq",
-                        "addl" => operator = "addq",
-                        _ => (),
-                    }
-                }
-                let src1 = get_operand(left);
-                let src2 = get_operand(right);
-                writeln!(file, "    {} {}, {}", operator, src1, src2).unwrap();
+                let operator = get_binary_operator(operator);
+                let src = get_operand(left, asm_type);
+                let dst = get_operand(right, asm_type);
+                let t = get_size_suffix(asm_type);
+                writeln!(file, "    {operator}{t} {src}, {dst}").unwrap();
             }
             assembly::Instruction::SetCond(cond, val) => {
                 let code = get_cond_code(cond);
                 let reg = get_short_reg(val);
                 writeln!(file, "    set{} {}", code, reg).unwrap();
             }
-            assembly::Instruction::Compare(left, right, _) => {
-                let left = get_operand(left);
-                let right = get_operand(right);
-                writeln!(file, "    cmpl {}, {}", left, right).unwrap();
+            assembly::Instruction::Compare(left, right, cmp_type) => {
+                let left = get_operand(left, cmp_type);
+                let right = get_operand(right, cmp_type);
+                let t = get_size_suffix(cmp_type);
+                writeln!(file, "    cmp{t} {left}, {right}").unwrap();
             }
             assembly::Instruction::JmpCond(cond, target) => {
                 writeln!(file, "    j{} .L_{}", get_cond_code(cond), target).unwrap();
@@ -101,7 +112,7 @@ fn emit_instructions(
                 writeln!(file, ".L_{}:", target).unwrap();
             }
             assembly::Instruction::Push(operand) => {
-                writeln!(file, "    pushq {}", get_long_reg(operand)).unwrap();
+                writeln!(file, "    pushq {}", get_operand_quadword(operand)).unwrap();
             }
             assembly::Instruction::Call(label) => {
                 if let AsmSymbol::FunctionEntry(true) = &symbols[label] {
@@ -115,7 +126,7 @@ fn emit_instructions(
     }
 }
 
-fn get_long_reg(operand: &assembly::Operand) -> String {
+fn get_operand_quadword(operand: &assembly::Operand) -> String {
     match operand {
         assembly::Operand::IMM(val) => format!("${val}"),
         assembly::Operand::Register(assembly::Register::AX) => String::from("%rax"),
@@ -133,8 +144,7 @@ fn get_long_reg(operand: &assembly::Operand) -> String {
         assembly::Operand::Data(name) => format!("{name}(%rip)"),
     }
 }
-
-fn get_operand(operand: &assembly::Operand) -> String {
+fn get_operand_longword(operand: &assembly::Operand) -> String {
     match operand {
         assembly::Operand::IMM(val) => format!("${val}"),
         assembly::Operand::Register(assembly::Register::AX) => String::from("%eax"),
@@ -150,6 +160,13 @@ fn get_operand(operand: &assembly::Operand) -> String {
         assembly::Operand::Register(assembly::Register::SP) => String::from("%rsp"),
         assembly::Operand::Stack(val) => format!("-{val}(%rbp)"),
         assembly::Operand::Data(name) => format!("{name}(%rip)"),
+    }
+}
+
+fn get_operand(operand: &assembly::Operand, asm_type: &AssemblyType) -> String {
+    match asm_type {
+        AssemblyType::Longword => get_operand_longword(operand),
+        AssemblyType::Quadword => get_operand_quadword(operand),
     }
 }
 
@@ -185,20 +202,27 @@ fn get_cond_code(condition: &assembly::Condition) -> &str {
 
 fn get_unary_operator(operator: &assembly::UnaryOperator) -> &str {
     match operator {
-        assembly::UnaryOperator::Neg => "negl",
-        assembly::UnaryOperator::Not => "notl",
+        assembly::UnaryOperator::Neg => "neg",
+        assembly::UnaryOperator::Not => "not",
     }
 }
 
 fn get_binary_operator(operator: &assembly::BinaryOperator) -> &str {
     match operator {
-        assembly::BinaryOperator::Add => "addl",
-        assembly::BinaryOperator::Sub => "subl",
-        assembly::BinaryOperator::Mult => "imull",
-        assembly::BinaryOperator::BitAnd => "andl",
-        assembly::BinaryOperator::BitOr => "orl",
-        assembly::BinaryOperator::BitXor => "xorl",
+        assembly::BinaryOperator::Add => "add",
+        assembly::BinaryOperator::Sub => "sub",
+        assembly::BinaryOperator::Mult => "imul",
+        assembly::BinaryOperator::BitAnd => "and",
+        assembly::BinaryOperator::BitOr => "or",
+        assembly::BinaryOperator::BitXor => "xor",
         assembly::BinaryOperator::LeftShift => "sal",
         assembly::BinaryOperator::RightShift => "sar",
+    }
+}
+
+fn get_size_suffix(asm_type: &AssemblyType) -> &str {
+    match asm_type {
+        AssemblyType::Longword => "l",
+        AssemblyType::Quadword => "q",
     }
 }

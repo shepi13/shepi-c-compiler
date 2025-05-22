@@ -426,7 +426,9 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
                 .collect();
             FunctionCall(name, args).into()
         }
-        Cast(_, expr) => resolve_expression(*expr, symbols),
+        Cast(new_type, expr) => {
+            Cast(new_type, resolve_expression(*expr, symbols).into()).into()
+        }
     }
 }
 
