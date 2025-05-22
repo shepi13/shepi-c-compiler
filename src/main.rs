@@ -95,16 +95,16 @@ fn main() {
     // Run Semantics Analysis Pass
     let resolved_ast = semantics::resolve_program(parser_ast);
     // Run type checking
-    let symbol_table = type_check::type_check_program(&resolved_ast);
+    let typed_program = type_check::type_check_program(resolved_ast);
 
     if args.validate {
-        println!("Resolved AST: {:#?}", resolved_ast);
-        println!("Symbols: {:#?}", symbol_table);
+        println!("Resolved AST: {:#?}", typed_program.program);
+        println!("Symbols: {:#?}", typed_program.symbols);
         return;
     }
 
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(resolved_ast, &symbol_table);
+    let tac_ast = generator::gen_tac_ast(typed_program.program, &typed_program.symbols);
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);
@@ -112,7 +112,7 @@ fn main() {
     }
 
     // Run Full codegen
-    let assembly_ast = assembly::gen_assembly_tree(tac_ast, &symbol_table);
+    let assembly_ast = assembly::gen_assembly_tree(tac_ast, &typed_program.symbols);
 
     if args.codegen {
         // Print generated code?
@@ -121,7 +121,7 @@ fn main() {
     }
 
     // Code emission
-    emission::emit_program(&assembly_file, assembly_ast, &symbol_table);
+    emission::emit_program(&assembly_file, assembly_ast, &typed_program.symbols);
 
     if args.assembler_only {
         // Print assembly?

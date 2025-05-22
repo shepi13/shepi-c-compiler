@@ -1,5 +1,6 @@
 use crate::parser::{
-    self, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Loop, Program, Statement, StorageClass, SwitchStatement, TypedExpression, UnaryOperator, VariableDeclaration
+    self, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop, Program, Statement,
+    StorageClass, SwitchStatement, TypedExpression, VariableDeclaration,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -11,11 +12,11 @@ pub struct Identifier {
     pub unique_name: String,
     pub external: bool,
 }
-#[derive(Debug)]
-pub struct Switch {
+
+pub struct SwitchData {
     pub label: String,
-    pub cases: HashMap<i32, String>,
-    default: Option<String>,
+    pub cases: Vec<(String, TypedExpression)>,
+    pub default: Option<String>,
 }
 
 pub struct SymbolTable {
@@ -26,7 +27,7 @@ pub struct SymbolTable {
     gotos: Vec<HashSet<String>>,
 
     loops: Vec<String>,
-    switches: Vec<Switch>,
+    switches: Vec<SwitchData>,
 
     break_scopes: Vec<String>,
     current_function: Option<String>,
@@ -59,22 +60,11 @@ impl SymbolTable {
     }
     fn resolve_case(&mut self, matcher: TypedExpression) -> String {
         let stack_len = self.switches.len() - 1;
-        let case_label = case_name(&self.switches[stack_len].label);
-        let value = eval_constant_expr(&matcher);
-
         assert!(self.switches.len() > 0, "Used case outside of switch!");
-        assert!(
-            matches!(matcher.expr, Expression::Constant(_)),
-            "Case statement must be constant!"
-        );
-        assert!(
-            !self.switches[stack_len].cases.contains_key(&value),
-            "Duplicate case!"
-        );
-
+        let case_label = case_name(&self.switches[stack_len].label);
         self.switches[stack_len]
             .cases
-            .insert(value, case_label.clone());
+            .push((case_label.clone(), matcher));
         case_label
     }
     fn resolve_default(&mut self) -> String {
@@ -106,13 +96,13 @@ impl SymbolTable {
     }
     fn enter_switch(&mut self, switch: &SwitchStatement) {
         self.break_scopes.push(switch.label.to_string());
-        self.switches.push(Switch {
+        self.switches.push(SwitchData {
             label: switch.label.to_string(),
-            cases: HashMap::new(),
+            cases: Vec::new(),
             default: None,
         });
     }
-    fn leave_switch(&mut self) -> Switch {
+    fn leave_switch(&mut self) -> SwitchData {
         self.break_scopes.pop();
         self.switches
             .pop()
@@ -251,19 +241,6 @@ fn variable_name(name: &str) -> String {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
 }
-pub fn eval_constant_expr(expr: &TypedExpression) -> i32 {
-    match &expr.expr {
-        Expression::Constant(parser::Constant::Int(val)) => *val,
-        Expression::Unary(UnaryOperator::Negate, litexpr) => {
-            if let parser::Expression::Constant(parser::Constant::Int(val)) = litexpr.expr {
-                -val
-            } else {
-                panic!("Expected constant expression!")
-            }
-        }
-        _ => panic!("Expected constant expression!"),
-    }
-}
 
 pub fn resolve_program(program: Program) -> Program {
     let symbols = &mut SymbolTable::new();
@@ -375,11 +352,7 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             switch.condition = resolve_expression(switch.condition, symbols);
             switch.statement = resolve_statement(*switch.statement, symbols).into();
             let switch_symbols = symbols.leave_switch();
-            switch.cases = switch_symbols
-                .cases
-                .into_iter()
-                .map(|(val, label)| (label, Expression::Constant(parser::Constant::Int(val)).into()))
-                .collect();
+            switch.cases = switch_symbols.cases;
             switch.label = switch_symbols.label;
             switch.default = switch_symbols.default;
             Switch(switch)
@@ -425,10 +398,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
         }
         Binary(mut binexpr) => {
             if binexpr.is_assignment {
-                assert!(
-                    matches!(binexpr.left.expr, Variable(_)),
-                    "Invalid lvalue!"
-                );
+                assert!(matches!(binexpr.left.expr, Variable(_)), "Invalid lvalue!");
             }
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
@@ -441,10 +411,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
             Condition(cond).into()
         }
         Assignment(mut assign) => {
-            assert!(
-                matches!(assign.left.expr, Variable(_)),
-                "Invalid lvalue!"
-            );
+            assert!(matches!(assign.left.expr, Variable(_)), "Invalid lvalue!");
             assign.left = resolve_expression(assign.left, symbols);
             assign.right = resolve_expression(assign.right, symbols);
             Assignment(assign).into()
