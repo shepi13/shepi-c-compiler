@@ -301,18 +301,6 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
                     .into(),
                 );
                 set_type(binexpr.into(), left_type)
-            } else if binary.is_assignment {
-                let left_type = &get_type(&left);
-                let right = convert_to(right, left_type);
-                let binexpr = Binary(
-                    BinaryExpression {
-                        left,
-                        right,
-                        ..*binary
-                    }
-                    .into(),
-                );
-                set_type(binexpr.into(), left_type)
             } else {
                 let common_type = get_common_type(&get_type(&left), &get_type(&right));
                 let left = convert_to(left, &common_type);
