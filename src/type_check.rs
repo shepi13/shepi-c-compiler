@@ -51,11 +51,11 @@ pub struct FunctionAttributes {
 }
 #[derive(Debug)]
 pub struct StaticAttributes {
-    pub init: StaticInitializerType,
+    pub init: StaticInitializer,
     pub global: bool,
 }
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum StaticInitializerType {
+pub enum StaticInitializer {
     Tentative,
     Initialized(Initializer),
     None,
@@ -64,6 +64,14 @@ pub enum StaticInitializerType {
 pub enum Initializer {
     Int(i64), // Limited to i32, but we store as i64 for matching and do our own conversion
     Long(i64),
+}
+impl StaticInitializer {
+    pub fn value(&self) -> Option<i64> {
+        match self {
+            Self::Initialized(Initializer::Int(val) | Initializer::Long(val)) => Some(*val),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -95,10 +103,10 @@ fn set_type(mut expression: TypedExpression, ctype: &CType) -> TypedExpression {
     expression.ctype = Some(ctype.clone());
     expression
 }
-fn get_type(expression: &TypedExpression) -> CType {
+pub fn get_type(expression: &TypedExpression) -> CType {
     expression.ctype.clone().expect("Undefined type!")
 }
-fn get_common_type(left_type: &CType, right_type: &CType) -> CType {
+pub fn get_common_type(left_type: &CType, right_type: &CType) -> CType {
     if left_type == right_type {
         left_type.clone()
     } else {
@@ -428,15 +436,12 @@ fn type_check_function(
     }
 }
 
-fn parse_static_initializer(
-    init: &Option<TypedExpression>,
-    ctype: &CType,
-) -> StaticInitializerType {
+fn parse_static_initializer(init: &Option<TypedExpression>, ctype: &CType) -> StaticInitializer {
     let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
     let val = init_val.map_or(0, |constexpr| constexpr.value());
     match ctype {
-        CType::Int => StaticInitializerType::Initialized(Initializer::Int(val)),
-        CType::Long => StaticInitializerType::Initialized(Initializer::Long(val)),
+        CType::Int => StaticInitializer::Initialized(Initializer::Int(val)),
+        CType::Long => StaticInitializer::Initialized(Initializer::Long(val)),
         _ => panic!("Invalid static initializer!"),
     }
 }
@@ -459,7 +464,7 @@ fn type_check_var_declaration(
                     Symbol {
                         ctype: var.ctype.clone(),
                         attrs: SymbolAttr::Static(StaticAttributes {
-                            init: StaticInitializerType::None,
+                            init: StaticInitializer::None,
                             global: true,
                         }),
                     },
@@ -502,9 +507,9 @@ fn type_check_var_declaration(
 fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
     let mut init_value = if var.value.is_none() {
         if var.storage == Some(StorageClass::Extern) {
-            StaticInitializerType::None
+            StaticInitializer::None
         } else {
-            StaticInitializerType::Tentative
+            StaticInitializer::Tentative
         }
     } else {
         parse_static_initializer(&var.value, &var.ctype)
@@ -520,16 +525,16 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
             panic!("Conflicting linkage!");
         }
 
-        if matches!(attrs.init, StaticInitializerType::Initialized(_)) {
+        if matches!(attrs.init, StaticInitializer::Initialized(_)) {
             assert!(
-                !matches!(init_value, StaticInitializerType::Initialized(_)),
+                !matches!(init_value, StaticInitializer::Initialized(_)),
                 "Conflicting static initializers!"
             );
             init_value = attrs.init.clone();
-        } else if attrs.init == StaticInitializerType::Tentative
-            && !matches!(init_value, StaticInitializerType::Initialized(_))
+        } else if attrs.init == StaticInitializer::Tentative
+            && !matches!(init_value, StaticInitializer::Initialized(_))
         {
-            init_value = StaticInitializerType::Tentative
+            init_value = StaticInitializer::Tentative
         }
     }
     table.symbols.insert(
