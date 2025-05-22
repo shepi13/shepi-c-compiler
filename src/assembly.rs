@@ -110,7 +110,7 @@ pub fn gen_assembly_tree(ast: generator::Program, symbols: &Symbols) -> Program 
                 instructions.push(Instruction::StackAllocate(0));
                 for (i, param) in function.params.iter().enumerate() {
                     let param = gen_operand(
-                        generator::Value::VARIABLE(param.to_string()),
+                        generator::Value::Variable(param.to_string()),
                         stack,
                         symbols,
                     );
@@ -246,8 +246,8 @@ fn gen_instructions(
             }
             generator::Instruction::JumpCond(jump) => {
                 let condition = match jump.jump_type {
-                    generator::JumpType::JUMPIFZERO => Condition::Equal,
-                    generator::JumpType::JUMPIFNOTZERO => Condition::NotEqual,
+                    generator::JumpType::JumpIfZero => Condition::Equal,
+                    generator::JumpType::JumpIfNotZero => Condition::NotEqual,
                 };
                 gen_compare(
                     &mut assembly_instructions,
@@ -267,6 +267,7 @@ fn gen_instructions(
             generator::Instruction::Function(name, args, dst) => {
                 gen_func_call(&mut assembly_instructions, stack, name, args, dst, symbols);
             }
+            generator::Instruction::SignExtend(_, _) | generator::Instruction::Truncate(_, _) => panic!("Not implemented!")
         }
     }
     assembly_instructions
@@ -462,8 +463,8 @@ fn gen_division(
 
 fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols) -> Operand {
     match value {
-        generator::Value::CONSTANT(val) => Operand::IMM(val),
-        generator::Value::VARIABLE(name) => {
+        generator::Value::ConstValue(val) => Operand::IMM(val.value()),
+        generator::Value::Variable(name) => {
             if let Some(Symbol {
                 attrs: SymbolAttr::Static(_),
                 ctype: _,

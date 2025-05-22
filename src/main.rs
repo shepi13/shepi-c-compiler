@@ -95,7 +95,7 @@ fn main() {
     // Run Semantics Analysis Pass
     let resolved_ast = semantics::resolve_program(parser_ast);
     // Run type checking
-    let typed_program = type_check::type_check_program(resolved_ast);
+    let mut typed_program = type_check::type_check_program(resolved_ast);
 
     if args.validate {
         println!("Resolved AST: {:#?}", typed_program.program);
@@ -104,7 +104,7 @@ fn main() {
     }
 
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(typed_program.program, &typed_program.symbols);
+    let tac_ast = generator::gen_tac_ast(typed_program.program, &mut typed_program.symbols);
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);

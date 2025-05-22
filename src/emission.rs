@@ -21,10 +21,11 @@ fn emit_static_var(file: &mut File, var: StaticVariable) {
     if var.global {
         writeln!(file, "    .globl {}", var.identifier).unwrap();
     }
-    let (section, data_type) = if var.initializer == 0 {
-        (".bss", ".zero 4".to_string())
-    } else {
-        (".data", format!(".long {}", var.initializer))
+    let initializer = var.initializer.value();
+    let (section, data_type) = match initializer {
+        Some(0) => (".bss", ".zero 4".to_string()),
+        Some(val) => (".data", format!(".long {}", val)),
+        None => panic!("No static initializer!"),
     };
     writeln!(file, "    {}", section).unwrap();
     writeln!(file, "    .align 4").unwrap();
