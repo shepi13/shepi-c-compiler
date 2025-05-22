@@ -1,6 +1,5 @@
 use crate::parser::{
-    self, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop, Program, Statement,
-    StorageClass, SwitchStatement, TypedExpression, VariableDeclaration,
+    self, AssignmentExpression, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop, Program, Statement, StorageClass, SwitchStatement, TypedExpression, VariableDeclaration
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -397,11 +396,19 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
             Unary(operator, resolve_expression(*expr, symbols).into()).into()
         }
         Binary(mut binexpr) => {
-            if binexpr.is_assignment {
-                assert!(matches!(binexpr.left.expr, Variable(_)), "Invalid lvalue!");
-            }
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
+            if binexpr.is_assignment {
+                match &binexpr.left.expr {
+                    Variable(name) => {
+                        return Assignment(AssignmentExpression {
+                            left: Variable(name.clone()).into(),
+                            right: Binary(binexpr).into(),
+                        }.into()).into()
+                    }
+                    _ => panic!("Invalid lvalue!")
+                }
+            }
             Binary(binexpr).into()
         }
         Condition(mut cond) => {
@@ -426,7 +433,9 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
                 .collect();
             FunctionCall(name, args).into()
         }
-        Cast(_, expr) => resolve_expression(*expr, symbols),
+        Cast(new_type, expr) => {
+            Cast(new_type, resolve_expression(*expr, symbols).into()).into()
+        }
     }
 }
 

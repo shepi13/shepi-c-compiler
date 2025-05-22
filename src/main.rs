@@ -26,6 +26,9 @@ struct Args {
     #[arg(short, long)]
     parse: bool,
 
+    #[arg(long)]
+    semantics: bool,
+
     /// Run the parser, lexer, and type checking
     #[arg(short, long)]
     validate: bool,
@@ -94,6 +97,12 @@ fn main() {
 
     // Run Semantics Analysis Pass
     let resolved_ast = semantics::resolve_program(parser_ast);
+
+    if args.semantics {
+        println!("Resolved AST: {:#?}", resolved_ast);
+        return;
+    }
+
     // Run type checking
     let mut typed_program = type_check::type_check_program(resolved_ast);
 
@@ -108,6 +117,7 @@ fn main() {
 
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);
+        println!("Tacky symbols: {:#?}", typed_program.symbols);
         return;
     }
 

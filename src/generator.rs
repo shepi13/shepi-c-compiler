@@ -24,7 +24,7 @@ pub struct Function {
 pub struct StaticVariable {
     pub identifier: String,
     pub global: bool,
-    pub initializer: StaticInitializer,
+    pub initializer: Initializer,
     pub ctype: CType,
 }
 
@@ -105,18 +105,18 @@ pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &mut Symbols) -> Progra
     for (name, entry) in symbols {
         if let SymbolAttr::Static(var_attrs) = &entry.attrs {
             match &var_attrs.init {
-                StaticInitializer::Initialized(_) => {
+                StaticInitializer::Initialized(initializer) => {
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
-                        initializer: var_attrs.init.clone(),
+                        initializer: initializer.clone(),
                         ctype: entry.ctype.clone(),
                     }));
                 }
                 StaticInitializer::Tentative => {
                     let initializer = match &entry.ctype {
-                        CType::Int => StaticInitializer::Initialized(Initializer::Int(0)),
-                        CType::Long => StaticInitializer::Initialized(Initializer::Long(0)),
+                        CType::Int => Initializer::Int(0),
+                        CType::Long => Initializer::Long(0),
                         _ => panic!("Not a variable"),
                     };
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {

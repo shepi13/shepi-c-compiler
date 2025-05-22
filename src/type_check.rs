@@ -65,11 +65,10 @@ pub enum Initializer {
     Int(i64), // Limited to i32, but we store as i64 for matching and do our own conversion
     Long(i64),
 }
-impl StaticInitializer {
-    pub fn value(&self) -> Option<i64> {
+impl Initializer {
+    pub fn value(&self) -> i64 {
         match self {
-            Self::Initialized(Initializer::Int(val) | Initializer::Long(val)) => Some(*val),
-            _ => None,
+            Self::Int(val) | Self::Long(val) => *val
         }
     }
 }
@@ -293,18 +292,6 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
                 BinaryOperator::LeftShift | BinaryOperator::RightShift
             ) {
                 let left_type = &get_type(&left);
-                let binexpr = Binary(
-                    BinaryExpression {
-                        left,
-                        right,
-                        ..*binary
-                    }
-                    .into(),
-                );
-                set_type(binexpr.into(), left_type)
-            } else if binary.is_assignment {
-                let left_type = &get_type(&left);
-                let right = convert_to(right, left_type);
                 let binexpr = Binary(
                     BinaryExpression {
                         left,
