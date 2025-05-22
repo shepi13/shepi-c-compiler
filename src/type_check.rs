@@ -37,19 +37,19 @@ impl Symbol {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SymbolAttr {
     Function(FunctionAttributes),
     Static(StaticAttributes),
     Local,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct FunctionAttributes {
     pub defined: bool,
     pub global: bool,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StaticAttributes {
     pub init: StaticInitializer,
     pub global: bool,

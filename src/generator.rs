@@ -136,7 +136,9 @@ fn gen_function(function: parser::FunctionDeclaration, symbols: &mut Symbols) ->
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions, symbols);
-        instructions.push(Instruction::Return(Value::ConstValue(parser::Constant::Int(0))));
+        instructions.push(Instruction::Return(Value::ConstValue(
+            parser::Constant::Int(0),
+        )));
     }
     let global = symbols[&function.name].get_function_attrs().global;
     Function {
@@ -159,7 +161,11 @@ fn gen_block(block: parser::Block, instructions: &mut Vec<Instruction>, symbols:
         }
     }
 }
-fn gen_declaration(declaration: parser::VariableDeclaration, instructions: &mut Vec<Instruction>, symbols: &mut Symbols) {
+fn gen_declaration(
+    declaration: parser::VariableDeclaration,
+    instructions: &mut Vec<Instruction>,
+    symbols: &mut Symbols,
+) {
     if declaration.storage == Some(StorageClass::Extern)
         || declaration.storage == Some(StorageClass::Static)
     {
@@ -173,7 +179,11 @@ fn gen_declaration(declaration: parser::VariableDeclaration, instructions: &mut 
         }));
     }
 }
-fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruction>, symbols: &mut Symbols) {
+fn gen_instructions(
+    statement: parser::Statement,
+    instructions: &mut Vec<Instruction>,
+    symbols: &mut Symbols,
+) {
     match statement {
         parser::Statement::Return(value) => {
             let dst = gen_expression(value, instructions, symbols);
@@ -181,7 +191,7 @@ fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruc
         }
         parser::Statement::Null => (),
         parser::Statement::ExprStmt(value) => {
-            gen_expression(value, instructions,symbols);
+            gen_expression(value, instructions, symbols);
         }
         parser::Statement::If(condition, if_true, if_false) => {
             let end_label = gen_label("end");
@@ -207,7 +217,7 @@ fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruc
             instructions.push(Instruction::Label(name.to_string()));
             gen_instructions(*statement, instructions, symbols);
         }
-        parser::Statement::Compound(block) => gen_block(block, instructions,symbols),
+        parser::Statement::Compound(block) => gen_block(block, instructions, symbols),
         parser::Statement::Break(name) => {
             let target = format!("break_{}", name);
             instructions.push(Instruction::Jump(target));
@@ -357,7 +367,7 @@ fn gen_expression(
                     operator.operator,
                     operator.left,
                     operator.right,
-                    symbols
+                    symbols,
                 );
             };
             let src1 = gen_expression(operator.left, instructions, symbols);
@@ -437,10 +447,10 @@ fn gen_expression(
             match new_type {
                 CType::Long => instructions.push(Instruction::SignExtend(result, dst.clone())),
                 CType::Int => instructions.push(Instruction::Truncate(result, dst.clone())),
-                _ => panic!("Not a variable!")
+                _ => panic!("Not a variable!"),
             }
             dst
-        },
+        }
     }
 }
 
@@ -488,10 +498,13 @@ fn gen_short_circuit(
 fn gen_temp_var(ctype: CType, symbols: &mut Symbols) -> Value {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let tmp_name = format!("tmp.{}", COUNTER.fetch_add(1, Ordering::Relaxed));
-    symbols.insert(tmp_name.clone(), Symbol {
-        ctype,
-        attrs: SymbolAttr::Local,
-    });
+    symbols.insert(
+        tmp_name.clone(),
+        Symbol {
+            ctype,
+            attrs: SymbolAttr::Local,
+        },
+    );
     Value::Variable(tmp_name)
 }
 
