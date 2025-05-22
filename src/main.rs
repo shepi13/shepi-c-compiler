@@ -112,7 +112,7 @@ fn main() {
     }
 
     // Run Full codegen
-    let assembly_ast = assembly::gen_assembly_tree(tac_ast, &typed_program.symbols);
+    let assembly_ast = assembly::gen_assembly_tree(tac_ast, typed_program.symbols);
 
     if args.codegen {
         // Print generated code?
@@ -121,7 +121,7 @@ fn main() {
     }
 
     // Code emission
-    emission::emit_program(&assembly_file, assembly_ast, &typed_program.symbols);
+    emission::emit_program(&assembly_file, assembly_ast);
 
     if args.assembler_only {
         // Print assembly?
