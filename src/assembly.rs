@@ -55,7 +55,7 @@ pub enum BinaryOperator {
 // Operands
 #[derive(Debug, Clone)]
 pub enum Operand {
-    IMM(i32),
+    IMM(i64),
     Stack(isize),
     Register(Register),
     Data(String),

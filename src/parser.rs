@@ -100,12 +100,19 @@ pub struct TypedExpression {
 }
 impl From<Expression> for TypedExpression {
     fn from(value: Expression) -> Self {
-        Self {ctype: None, expr: value}
+        Self {
+            ctype: None,
+            expr: value,
+        }
     }
 }
 impl From<Expression> for Box<TypedExpression> {
     fn from(value: Expression) -> Self {
-        TypedExpression { ctype: None, expr: value }.into()
+        TypedExpression {
+            ctype: None,
+            expr: value,
+        }
+        .into()
     }
 }
 #[derive(Debug)]
@@ -138,14 +145,14 @@ pub struct ConditionExpression {
     pub if_true: TypedExpression,
     pub if_false: TypedExpression,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnaryOperator {
     Complement,
     Negate,
     LogicalNot,
     Increment(Increment),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Increment {
     PreIncrement,
     PostIncrement,
@@ -176,9 +183,9 @@ pub enum BinaryOperator {
     GreaterThan,
     GreaterThanEqual,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constant {
-    Int(i32),
+    Int(i64), // Limited to i32, but we'll store it as i64 for convenient conversions
     Long(i64),
 }
 
@@ -361,7 +368,8 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -
             Expression::Unary(
                 UnaryOperator::Increment(Increment::PostIncrement),
                 expression.into(),
-            ).into(),
+            )
+            .into(),
         )
     } else if try_consume(tokens, TokenType::Decrement) {
         parse_post_operator(
@@ -369,7 +377,8 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -
             Expression::Unary(
                 UnaryOperator::Increment(Increment::PostDecrement),
                 expression.into(),
-            ).into(),
+            )
+            .into(),
         )
     } else {
         expression
@@ -381,15 +390,19 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
     *tokens = &tokens[1..];
     match token {
         TokenType::Constant(val) => match val.parse::<i32>() {
-            Ok(val) => Expression::Constant(Constant::Int(val)).into(),
+            Ok(val) => Expression::Constant(Constant::Int(val.into())).into(),
             Err(_) => Expression::Constant(Constant::Long(
                 val.parse().expect("Failed to convert constant to int"),
-            )).into(),
+            ))
+            .into(),
         },
         TokenType::LongConstant(val) => Expression::Constant(Constant::Long(
             val.parse().expect("Failed to convert constant to long"),
-        )).into(),
-        TokenType::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()).into(),
+        ))
+        .into(),
+        TokenType::Hyphen => {
+            Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()).into()
+        }
         TokenType::Tilde => {
             Expression::Unary(UnaryOperator::Complement, parse_factor(tokens).into()).into()
         }
@@ -399,11 +412,13 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
         TokenType::Increment => Expression::Unary(
             UnaryOperator::Increment(Increment::PreIncrement),
             parse_factor(tokens).into(),
-        ).into(),
+        )
+        .into(),
         TokenType::Decrement => Expression::Unary(
             UnaryOperator::Increment(Increment::PreDecrement),
             parse_factor(tokens).into(),
-        ).into(),
+        )
+        .into(),
         TokenType::OpenParen => {
             if is_type_specifier(&tokens[0]) {
                 let ctype = parse_type(tokens);
@@ -419,7 +434,10 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
             if try_consume(tokens, TokenType::OpenParen) {
                 let args = parse_argument_list(tokens);
                 expect(tokens, TokenType::CloseParen);
-                parse_post_operator(tokens, Expression::FunctionCall(name.to_string(), args).into())
+                parse_post_operator(
+                    tokens,
+                    Expression::FunctionCall(name.to_string(), args).into(),
+                )
             } else {
                 parse_post_operator(tokens, Expression::Variable(name.to_string()).into())
             }
@@ -446,7 +464,8 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> TypedExpressi
                     if_false,
                 }
                 .into(),
-            ).into();
+            )
+            .into();
         } else {
             let is_assignment = is_assignment_token(&tokens[0]);
             let operator = parse_binop(tokens);
@@ -463,7 +482,8 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> TypedExpressi
                     is_assignment,
                 }
                 .into(),
-            ).into();
+            )
+            .into();
         }
     }
     left

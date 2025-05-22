@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     parser::{self, BinaryOperator, StorageClass},
-    type_check::{StaticInitializer, SymbolAttr, Symbols},
+    type_check::{Initializer, StaticInitializerType, SymbolAttr, Symbols},
 };
 
 pub type Program = Vec<TopLevelDecl>;
@@ -24,7 +24,7 @@ pub struct Function {
 pub struct StaticVariable {
     pub identifier: String,
     pub global: bool,
-    pub initializer: i32,
+    pub initializer: i64,
 }
 
 #[derive(Debug)]
@@ -87,7 +87,7 @@ pub enum JumpType {
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    CONSTANT(i32),
+    CONSTANT(i64),
     VARIABLE(String),
 }
 
@@ -102,21 +102,24 @@ pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &Symbols) -> Program {
     for (name, entry) in symbols {
         if let SymbolAttr::Static(var_attrs) = &entry.attrs {
             match &var_attrs.init {
-                StaticInitializer::Initialized(val) => {
+                StaticInitializerType::Initialized(initializer) => {
+                    let val = match initializer {
+                        Initializer::Int(v) | Initializer::Long(v) => *v,
+                    };
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
-                        initializer: *val,
+                        initializer: val,
                     }));
                 }
-                StaticInitializer::Tentative => {
+                StaticInitializerType::Tentative => {
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
                         initializer: 0,
                     }));
                 }
-                StaticInitializer::None => (),
+                StaticInitializerType::None => (),
             }
         }
     }
@@ -290,10 +293,13 @@ fn gen_instructions(statement: parser::Statement, instructions: &mut Vec<Instruc
         }
     }
 }
-fn gen_expression(expression: parser::TypedExpression, instructions: &mut Vec<Instruction>) -> Value {
+fn gen_expression(
+    expression: parser::TypedExpression,
+    instructions: &mut Vec<Instruction>,
+) -> Value {
     match expression.expr {
         parser::Expression::Constant(parser::Constant::Int(val)) => Value::CONSTANT(val),
-        parser::Expression::Constant(parser::Constant::Long(val)) => panic!("Not implemented!"),
+        parser::Expression::Constant(parser::Constant::Long(_)) => panic!("Not implemented!"),
         parser::Expression::Unary(parser::UnaryOperator::Increment(increment_type), expr) => {
             use parser::Increment::*;
             let dst = gen_expression(*expr, instructions);
@@ -443,13 +449,13 @@ fn gen_short_circuit(
         target: target.clone(),
     }));
     instructions.push(Instruction::Copy(InstructionCopy {
-        src: Value::CONSTANT(!label_type as i32),
+        src: Value::CONSTANT(!label_type as i64),
         dst: dst.clone(),
     }));
     instructions.push(Instruction::Jump(end.clone()));
     instructions.push(Instruction::Label(target));
     instructions.push(Instruction::Copy(InstructionCopy {
-        src: Value::CONSTANT(label_type as i32),
+        src: Value::CONSTANT(label_type as i64),
         dst: dst.clone(),
     }));
     instructions.push(Instruction::Label(end));
