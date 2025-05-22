@@ -60,7 +60,7 @@ pub enum UnaryOperator {
     Not,
     Neg,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOperator {
     Add,
     Mult,
@@ -359,13 +359,29 @@ fn gen_instructions(
                 gen_func_call(&mut assembly_instructions, stack, name, args, dst, symbols);
             }
             generator::Instruction::SignExtend(src, dst) => {
-                let (src, _) = gen_operand(src, stack, symbols);
-                let (dst, _) = gen_operand(dst, stack, symbols);
-                assembly_instructions.push(Instruction::MovSX(src, dst));
+                let (mut src, src_type) = gen_operand(src, stack, symbols);
+                let (dst, dst_type) = gen_operand(dst, stack, symbols);
+                if matches!(src, Operand::IMM(_)) {
+                    gen_move(&mut assembly_instructions, &src, &Operand::Register(Register::R10), src_type);
+                    src = Operand::Register(Register::R10)
+                }
+
+                if matches!(dst, Operand::Data(_) | Operand::Stack(_)) {
+                    assembly_instructions.push(Instruction::MovSX(src, Operand::Register(Register::R11)));
+                    gen_move(&mut assembly_instructions, &Operand::Register(Register::R11), &dst, dst_type);
+                } else {
+                    assembly_instructions.push(Instruction::MovSX(src, dst));
+                }
+                
              } 
              generator::Instruction::Truncate(src, dst) => {
-                let (src, _) = gen_operand(src, stack, symbols);
+                let (mut src, _) = gen_operand(src, stack, symbols);
                 let (dst, _) = gen_operand(dst, stack, symbols);
+                if let Operand::IMM(val) = src {
+                    if val > i32::MAX as i64 {
+                        src = Operand::IMM(val & (0xFFFFFFFF));
+                    }
+                }
                 gen_move(&mut assembly_instructions, &src, &dst, AssemblyType::Longword);
             }
         }
@@ -472,6 +488,12 @@ fn gen_move(
                 mov_type,
             ));
         }
+        (Operand::IMM(val), Operand::Stack(_) | Operand::Data(_)) => {
+            if *val > i32::MAX as i64 {
+                instructions.push(Instruction::Mov(src.clone(), Operand::Register(Register::R10), mov_type.clone()));
+                instructions.push(Instruction::Mov(Operand::Register(Register::R10), dst.clone(), mov_type));
+            }
+        }
         _ => {
             instructions.push(Instruction::Mov(src.clone(), dst.clone(), mov_type));
         }
@@ -554,49 +576,33 @@ fn gen_shift(
 fn gen_binary_op(
     instructions: &mut Vec<Instruction>,
     operator: BinaryOperator,
-    src1: Operand,
+    mut src1: Operand,
     src2: Operand,
     op_type: AssemblyType,
 ) {
-    match (&operator, &src1, &src2) {
-        (BinaryOperator::Mult, _, Operand::Stack(_) | Operand::Data(_)) => {
-            gen_move(
-                instructions,
-                &src2,
-                &Operand::Register(Register::R11),
-                op_type.clone(),
-            );
-            instructions.push(Instruction::Binary(
-                operator,
-                src1,
-                Operand::Register(Register::R11),
-                op_type.clone(),
-            ));
-            gen_move(
-                instructions,
-                &Operand::Register(Register::R11),
-                &src2,
-                op_type,
-            );
-        }
-        (_, Operand::Stack(_) | Operand::Data(_), Operand::Stack(_) | Operand::Data(_)) => {
-            gen_move(
-                instructions,
-                &src1,
-                &Operand::Register(Register::R10),
-                op_type.clone(),
-            );
-            instructions.push(Instruction::Binary(
-                operator,
-                Operand::Register(Register::R10),
-                src2,
-                op_type,
-            ));
-        }
-        _ => {
-            instructions.push(Instruction::Binary(operator, src1, src2, op_type));
-        }
-    };
+    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
+    let operands_in_mem = matches!((&src1, &src2), (Operand::Stack(_) | Operand::Data(_), Operand::Stack(_) | Operand::Data(_)));
+    let int_overflow = if let Operand::IMM(val) = src1 {
+        val > i32::MAX as i64
+    } else { false };
+    if operands_in_mem || int_overflow {
+        gen_move(instructions, &src1, &Operand::Register(Register::R10), op_type.clone());
+        src1 = Operand::Register(Register::R10);
+    }
+
+    // Rewrite dst (currently only if mult tries to put result in memory)
+    if operator == BinaryOperator::Mult && matches!(src2, Operand::Data(_) | Operand::Stack(_)) {
+        gen_move(instructions, &src2, &Operand::Register(Register::R11), op_type.clone());
+        instructions.push(Instruction::Binary(
+            operator,
+            src1,
+            Operand::Register(Register::R11),
+            op_type.clone(),
+        ));
+        gen_move(instructions,&Operand::Register(Register::R11), &src2, op_type);
+    } else {
+        instructions.push(Instruction::Binary(operator, src1, src2, op_type));
+    }
 }
 
 fn gen_relational_op(
