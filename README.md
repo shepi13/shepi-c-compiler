@@ -13,4 +13,4 @@ Currently supports:
 - If, Conditionals, and Switch Statements
 - Arithmetic/Relational/Bitwise Operators (with short circuting && and || as well as precedence climbing)
 - static/extern
-- int and long types
+- signed/unsigned int/long types with proper C conversions and casting
