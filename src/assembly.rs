@@ -7,6 +7,10 @@ use crate::parser::CType;
 use crate::type_check::Initializer;
 use crate::type_check::{SymbolAttr, Symbols};
 
+use Operand::IMM;
+use Operand::Register as Reg;
+use assembly::Register::*;
+
 pub type BackendSymbols = HashMap<String, AsmSymbol>;
 #[derive(Debug)]
 pub struct Program {
@@ -273,107 +277,8 @@ fn gen_instructions(
                 assembly_instructions.push(Instruction::Mov(src, dst.clone(), src_type.clone()));
                 assembly_instructions.push(Instruction::Unary(operator, dst, src_type));
             }
-            generator::Instruction::BinaryOp(val) => {
-                let src_ctype = get_type(&val.src1, symbols);
-                let src_asm_type = AssemblyType::from(&src_ctype);
-                let src1 = gen_operand(val.src1, stack, symbols);
-                let src2 = gen_operand(val.src2, stack, symbols);
-                let dst = gen_operand(val.dst, stack, symbols);
-                let operator = match val.operator {
-                    // Handle simple binary operators
-                    parser::BinaryOperator::Add => BinaryOperator::Add,
-                    parser::BinaryOperator::Multiply => BinaryOperator::Mult,
-                    parser::BinaryOperator::Subtract => BinaryOperator::Sub,
-                    parser::BinaryOperator::BitAnd => BinaryOperator::BitAnd,
-                    parser::BinaryOperator::BitXor => BinaryOperator::BitXor,
-                    parser::BinaryOperator::BitOr => BinaryOperator::BitOr,
-                    parser::BinaryOperator::LeftShift => {
-                        let operator = match src_ctype.is_signed() {
-                            true => BinaryOperator::LeftShift,
-                            false => BinaryOperator::LeftShiftUnsigned,
-                        };
-                        gen_shift(
-                            &mut assembly_instructions,
-                            operator,
-                            src1,
-                            src2,
-                            dst,
-                            src_asm_type.clone(),
-                        );
-                        continue;
-                    }
-                    parser::BinaryOperator::RightShift => {
-                        let operator = match src_ctype.is_signed() {
-                            true => BinaryOperator::RightShift,
-                            false => BinaryOperator::RightShiftUnsigned,
-                        };
-                        gen_shift(
-                            &mut assembly_instructions,
-                            operator,
-                            src1,
-                            src2,
-                            dst,
-                            src_asm_type.clone(),
-                        );
-                        continue;
-                    }
-                    // Division is handled separately
-                    parser::BinaryOperator::Divide => {
-                        gen_division(
-                            &mut assembly_instructions,
-                            src1,
-                            src2,
-                            dst,
-                            Register::AX,
-                            src_asm_type.clone(),
-                            src_ctype.is_signed(),
-                        );
-                        continue;
-                    }
-                    parser::BinaryOperator::Remainder => {
-                        gen_division(
-                            &mut assembly_instructions,
-                            src1,
-                            src2,
-                            dst,
-                            Register::DX,
-                            src_asm_type.clone(),
-                            src_ctype.is_signed(),
-                        );
-                        continue;
-                    }
-                    parser::BinaryOperator::GreaterThan
-                    | parser::BinaryOperator::GreaterThanEqual
-                    | parser::BinaryOperator::IsEqual
-                    | parser::BinaryOperator::LessThan
-                    | parser::BinaryOperator::LessThanEqual
-                    | parser::BinaryOperator::LogicalAnd
-                    | parser::BinaryOperator::LogicalOr
-                    | parser::BinaryOperator::NotEqual => {
-                        gen_relational_op(
-                            &mut assembly_instructions,
-                            val.operator,
-                            src1,
-                            src2,
-                            dst,
-                            src_asm_type.clone(),
-                            src_ctype.is_signed(),
-                        );
-                        continue;
-                    }
-                };
-                assembly_instructions.push(Instruction::Mov(
-                    src1,
-                    dst.clone(),
-                    src_asm_type.clone(),
-                ));
-                gen_binary_op(
-                    &mut assembly_instructions,
-                    operator,
-                    src2,
-                    dst,
-                    src_asm_type,
-                );
+            generator::Instruction::BinaryOp(binop) => {
+                gen_binary_op(&mut assembly_instructions, binop, stack, symbols);
             }
             generator::Instruction::Jump(target) => {
                 assembly_instructions.push(Instruction::Jmp(target));
@@ -467,6 +372,7 @@ fn gen_instructions(
     }
     assembly_instructions
 }
+
 fn gen_func_call(
     instructions: &mut Vec<Instruction>,
     stack: &mut StackGen,
@@ -547,6 +453,83 @@ fn gen_func_call(
     ));
 }
 
+fn gen_binary_op(
+    instructions: &mut Vec<Instruction>,
+    binary_instruction: generator::InstructionBinary,
+    stack: &mut StackGen,
+    symbols: &Symbols,
+) {
+    use parser::BinaryOperator::*;
+    let src_ctype = get_type(&binary_instruction.src1, symbols);
+    let asm_type = AssemblyType::from(&src_ctype);
+    let src1 = gen_operand(binary_instruction.src1, stack, symbols);
+    let src2 = gen_operand(binary_instruction.src2, stack, symbols);
+    let dst = gen_operand(binary_instruction.dst, stack, symbols);
+
+    let mut gen_arithmetic = |operator| {
+        instructions.push(Instruction::Mov(src1.clone(), dst.clone(), asm_type.clone()));
+        instructions.push(Instruction::Binary(operator, src2.clone(), dst.clone(), asm_type.clone()));
+    };
+    match &binary_instruction.operator {
+        // Handle arithmetic binary operators
+        Add => gen_arithmetic(BinaryOperator::Add),
+        Multiply => gen_arithmetic(BinaryOperator::Mult),
+        Subtract => gen_arithmetic(BinaryOperator::Sub),
+        BitAnd => gen_arithmetic(BinaryOperator::BitAnd),
+        BitOr => gen_arithmetic(BinaryOperator::BitOr),
+        BitXor => gen_arithmetic(BinaryOperator::BitXor),
+        LeftShift => {
+            let operator = match src_ctype.is_signed() {
+                true => BinaryOperator::LeftShift,
+                false => BinaryOperator::LeftShiftUnsigned,
+            };
+            gen_shift(instructions, operator, src1, src2, dst, asm_type.clone());
+        }
+        RightShift => {
+            let operator = match src_ctype.is_signed() {
+                true => BinaryOperator::RightShift,
+                false => BinaryOperator::RightShiftUnsigned,
+            };
+            gen_shift(instructions, operator, src1, src2, dst, asm_type.clone());
+        }
+        // Division is handled separately
+        Divide => {
+            gen_division(
+                instructions,
+                src1,
+                src2,
+                dst,
+                Register::AX,
+                asm_type.clone(),
+                src_ctype.is_signed(),
+            );
+        }
+        Remainder => {
+            gen_division(
+                instructions,
+                src1,
+                src2,
+                dst,
+                Register::DX,
+                asm_type.clone(),
+                src_ctype.is_signed(),
+            );
+        }
+        GreaterThan | GreaterThanEqual | IsEqual | LessThan | LessThanEqual | LogicalAnd
+        | LogicalOr | NotEqual => {
+            gen_relational_op(
+                instructions,
+                binary_instruction.operator,
+                src1,
+                src2,
+                dst,
+                asm_type.clone(),
+                src_ctype.is_signed(),
+            );
+        }
+    };
+}
+
 fn gen_push(instructions: &mut Vec<Instruction>, operand: &Operand) {
     if let Operand::IMM(val) = operand {
         if *val > i32::MAX as i128 {
@@ -615,8 +598,6 @@ fn gen_shift(
     dst: Operand,
     shift_type: AssemblyType,
 ) {
-    use Operand::Register as Reg;
-    use assembly::Register::*;
     instructions.push(Instruction::Mov(src1, Reg(AX), shift_type.clone()));
     instructions.push(Instruction::Mov(src2, Reg(CX), shift_type.clone()));
     instructions.push(Instruction::Binary(
@@ -626,58 +607,6 @@ fn gen_shift(
         shift_type.clone(),
     ));
     instructions.push(Instruction::Mov(Reg(AX), dst, shift_type));
-}
-
-fn gen_binary_op(
-    instructions: &mut Vec<Instruction>,
-    operator: BinaryOperator,
-    mut src1: Operand,
-    src2: Operand,
-    op_type: AssemblyType,
-) {
-    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
-    let operands_in_mem = matches!(
-        (&src1, &src2),
-        (
-            Operand::Stack(_) | Operand::Data(_),
-            Operand::Stack(_) | Operand::Data(_)
-        )
-    );
-    let int_overflow = if let Operand::IMM(val) = src1 {
-        val > i32::MAX as i128
-    } else {
-        false
-    };
-    if operands_in_mem || int_overflow {
-        instructions.push(Instruction::Mov(
-            src1,
-            Operand::Register(Register::R10),
-            op_type.clone(),
-        ));
-        src1 = Operand::Register(Register::R10);
-    }
-
-    // Rewrite dst (currently only if mult tries to put result in memory)
-    if operator == BinaryOperator::Mult && matches!(src2, Operand::Data(_) | Operand::Stack(_)) {
-        instructions.push(Instruction::Mov(
-            src2.clone(),
-            Operand::Register(Register::R11),
-            op_type.clone(),
-        ));
-        instructions.push(Instruction::Binary(
-            operator,
-            src1,
-            Operand::Register(Register::R11),
-            op_type.clone(),
-        ));
-        instructions.push(Instruction::Mov(
-            Operand::Register(Register::R11),
-            src2,
-            op_type,
-        ));
-    } else {
-        instructions.push(Instruction::Binary(operator, src1, src2, op_type));
-    }
 }
 
 fn gen_relational_op(
@@ -721,50 +650,26 @@ fn gen_relational_op(
 fn gen_division(
     instructions: &mut Vec<Instruction>,
     src1: Operand,
-    mut src2: Operand,
+    src2: Operand,
     dst: Operand,
     result_reg: Register,
     div_type: AssemblyType,
     is_signed: bool,
 ) {
     // Move dividend into AX
-    instructions.push(Instruction::Mov(
-        src1,
-        Operand::Register(Register::AX),
-        div_type.clone(),
-    ));
+    instructions.push(Instruction::Mov(src1, Reg(AX), div_type.clone()));
 
     // USE CDQ or 0 extend to setup registers for division
+    // Use IDiv for signed and Div for unsigned
     if is_signed {
         instructions.push(Instruction::Cdq(div_type.clone()));
+        instructions.push(Instruction::IDiv(src2, div_type.clone()));
     } else {
-        instructions.push(Instruction::Mov(
-            Operand::IMM(0),
-            Operand::Register(Register::DX),
-            div_type.clone(),
-        ));
-    }
-    // Rewrite constant divisors into register
-    if let Operand::IMM(_) = src2 {
-        instructions.push(Instruction::Mov(
-            src2,
-            Operand::Register(Register::R10),
-            div_type.clone(),
-        ));
-        src2 = Operand::Register(Register::R10);
-    }
-    // IDiv instruction for signed, Div for unsigned
-    if is_signed {
-        instructions.push(Instruction::IDiv(src2.clone(), div_type.clone()));
-    } else {
+        instructions.push(Instruction::Mov(IMM(0), Reg(DX), div_type.clone()));
         instructions.push(Instruction::Div(src2, div_type.clone()));
     }
     // Division result is in AX, Remainder in DX
-    instructions.push(Instruction::Mov(
-        Operand::Register(result_reg),
-        dst,
-        div_type,
-    ));
+    instructions.push(Instruction::Mov(Reg(result_reg), dst, div_type));
 }
 
 fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {

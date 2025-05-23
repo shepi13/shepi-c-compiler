@@ -1,4 +1,9 @@
+use crate::assembly::BinaryOperator;
 use crate::assembly::{self, Function, Instruction, Operand, Program, TopLevelDecl};
+
+use assembly::Operand::IMM;
+use assembly::Operand::Register as Reg;
+use assembly::Register::*;
 
 pub fn rewrite_assembly(program: Program) -> Program {
     let decls = program.program.into_iter().map(rewrite_decl);
@@ -23,8 +28,23 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
     let mut instructions = Vec::new();
     for instruction in old_instructions {
         match instruction {
-            Instruction::Mov(_, _, _) => {
-                rewrite_mov(&mut instructions, instruction);
+            Instruction::Mov(_, _, _) => rewrite_mov(&mut instructions, instruction),
+            Instruction::Div(_, _) | Instruction::IDiv(_, _) => {
+                rewrite_div(&mut instructions, instruction)
+            }
+            // Arithmetic and bitwise binary operations
+            Instruction::Binary(
+                BinaryOperator::Add
+                | BinaryOperator::BitAnd
+                | BinaryOperator::BitOr
+                | BinaryOperator::BitXor
+                | BinaryOperator::Mult
+                | BinaryOperator::Sub,
+                _,
+                _,
+                _,
+            ) => {
+                rewrite_arithmetic_binary(&mut instructions, instruction);
             }
             _ => instructions.push(instruction),
         }
@@ -34,17 +54,54 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
 
 fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
-    use Operand::Register;
-    use assembly::Register::*;
     let Instruction::Mov(src, dst, mov_type) = mov else {
         panic!("Expected mov!")
     };
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
-        instructions.push(Instruction::Mov(src, Register(R10), mov_type.clone()));
-        instructions.push(Instruction::Mov(Register(R10), dst, mov_type));
+        instructions.push(Instruction::Mov(src, Reg(R10), mov_type.clone()));
+        instructions.push(Instruction::Mov(Reg(R10), dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
+    }
+}
+
+fn rewrite_div(instructions: &mut Vec<Instruction>, div: Instruction) {
+    match div {
+        Instruction::Div(IMM(val), asm_type) => {
+            instructions.push(Instruction::Mov(IMM(val), Reg(R10), asm_type.clone()));
+            instructions.push(Instruction::Div(Reg(R10), asm_type));
+        }
+        Instruction::IDiv(IMM(val), asm_type) => {
+            instructions.push(Instruction::Mov(IMM(val), Reg(R10), asm_type.clone()));
+            instructions.push(Instruction::IDiv(Reg(R10), asm_type));
+        }
+        _ => instructions.push(div),
+    };
+}
+
+fn rewrite_arithmetic_binary(instructions: &mut Vec<Instruction>, bin_op: Instruction) {
+    let Instruction::Binary(operator, mut src, dst, op_type) = bin_op else {
+        panic!("Expected binary operator!")
+    };
+    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
+    let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
+    if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
+        instructions.push(Instruction::Mov(src, Reg(R10), op_type.clone()));
+        src = Reg(R10);
+    }
+    // Rewrite dst (currently only if mult tries to put result in memory)
+    if operator == BinaryOperator::Mult && matches!(dst, Operand::Data(_) | Operand::Stack(_)) {
+        instructions.push(Instruction::Mov(dst.clone(), Reg(R11), op_type.clone()));
+        instructions.push(Instruction::Binary(
+            operator,
+            src,
+            Reg(R11),
+            op_type.clone(),
+        ));
+        instructions.push(Instruction::Mov(Reg(R11), dst, op_type));
+    } else {
+        instructions.push(Instruction::Binary(operator, src, dst, op_type));
     }
 }
 
