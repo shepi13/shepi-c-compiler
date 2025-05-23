@@ -59,7 +59,7 @@ fn emit_instructions(
                 let t = get_size_suffix(move_type);
                 writeln!(file, "    mov{t} {src}, {dst}").unwrap();
             }
-            assembly::Instruction::MovSX(src, dst) => {
+            assembly::Instruction::MovSignExtend(src, dst) => {
                 let src = get_operand(src, &AssemblyType::Longword);
                 let dst = get_operand(dst, &AssemblyType::Quadword);
                 writeln!(file, "    movslq {src}, {dst}").unwrap();
@@ -83,6 +83,11 @@ fn emit_instructions(
                 let t = get_size_suffix(asm_type);
                 let operand = get_operand(operand, asm_type);
                 writeln!(file, "    idiv{t} {operand}").unwrap();
+            }
+            assembly::Instruction::Div(operand, asm_type) => {
+                let t = get_size_suffix(asm_type);
+                let operand = get_operand(operand, asm_type);
+                writeln!(file, "    div{t} {operand}").unwrap();
             }
             assembly::Instruction::Binary(operator, left, right, asm_type) => {
                 let operator = get_binary_operator(operator);
@@ -121,7 +126,7 @@ fn emit_instructions(
                     writeln!(file, "    call {}@PLT", label).unwrap();
                 }
             }
-            _ => panic!("Not implemented!"),
+            assembly::Instruction::NOP => panic!("Noop should just be a placeholder"),
         }
     }
 }
@@ -197,6 +202,10 @@ fn get_cond_code(condition: &assembly::Condition) -> &str {
         Condition::GreaterThanEqual => "ge",
         Condition::LessThan => "l",
         Condition::LessThanEqual => "le",
+        Condition::UnsignedGreaterThan => "a",
+        Condition::UnsignedGreaterEqual => "ae",
+        Condition::UnsignedLessThan => "b",
+        Condition::UnsignedLessEqual => "be",
     }
 }
 
@@ -216,7 +225,9 @@ fn get_binary_operator(operator: &assembly::BinaryOperator) -> &str {
         assembly::BinaryOperator::BitOr => "or",
         assembly::BinaryOperator::BitXor => "xor",
         assembly::BinaryOperator::LeftShift => "sal",
+        assembly::BinaryOperator::LeftShiftUnsigned => "shl",
         assembly::BinaryOperator::RightShift => "sar",
+        assembly::BinaryOperator::RightShiftUnsigned => "shr",
     }
 }
 
