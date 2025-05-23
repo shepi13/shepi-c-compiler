@@ -126,6 +126,9 @@ fn emit_instructions(
                     writeln!(file, "    call {}@PLT", label).unwrap();
                 }
             }
+            assembly::Instruction::MovZeroExtend(_, _) => {
+                panic!("Should be replaced with Mov instructions by rewriter!")
+            }
             assembly::Instruction::NOP => panic!("Noop should just be a placeholder"),
         }
     }

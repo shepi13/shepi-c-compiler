@@ -1,9 +1,8 @@
 use crate::assembly::BinaryOperator;
 use crate::assembly::{
-    self, AssemblyType::Quadword, Function, Instruction, Operand, Operand::IMM,
-    Operand::Register as Reg, Program, TopLevelDecl,
+    self, AssemblyType::Longword, AssemblyType::Quadword, Function, Instruction, Operand,
+    Operand::IMM, Operand::Register as Reg, Program, TopLevelDecl,
 };
-
 use assembly::Register::*;
 
 pub fn rewrite_assembly(program: Program) -> Program {
@@ -45,6 +44,7 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
             }
             Instruction::Compare(_, _, _) => rewrite_cmp(&mut instructions, instruction),
             Instruction::Push(_) => rewrite_push(&mut instructions, instruction),
+            Instruction::MovZeroExtend(_, _) => rewrite_zero_extend(&mut instructions, instruction),
             _ => instructions.push(instruction),
         }
     }
@@ -65,10 +65,24 @@ fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
     }
 }
 
+fn rewrite_zero_extend(instructions: &mut Vec<Instruction>, zero_x: Instruction) {
+    let Instruction::MovZeroExtend(src, dst) = zero_x else {
+        panic!("Expected movZX!")
+    };
+    // Zero extend is just a move using an intermediate register if necessary
+    if is_mem_operand(&dst) {
+        instructions.push(Instruction::Mov(src, Reg(R11), Longword));
+        instructions.push(Instruction::Mov(Reg(R11), dst, Quadword));
+    } else {
+        instructions.push(Instruction::Mov(src, dst, Longword));
+    }
+}
+
 fn rewrite_push(instructions: &mut Vec<Instruction>, push: Instruction) {
     let Instruction::Push(operand) = push else {
         panic!("Expected push!")
     };
+    // Immediate operands to push need to be size int, otherwise we use a register
     if check_overflow(&operand, i32::MAX as i128) {
         instructions.push(Instruction::Mov(operand, Reg(R10), Quadword));
         instructions.push(Instruction::Push(Reg(R10)));
@@ -97,6 +111,7 @@ fn rewrite_cmp(instructions: &mut Vec<Instruction>, cmp: Instruction) {
 }
 
 fn rewrite_div(instructions: &mut Vec<Instruction>, div: Instruction) {
+    // Div and IDiv cannot take immediate values as operands
     match div {
         Instruction::Div(IMM(val), asm_type) => {
             instructions.push(Instruction::Mov(IMM(val), Reg(R10), asm_type.clone()));

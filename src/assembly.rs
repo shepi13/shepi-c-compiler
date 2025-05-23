@@ -45,6 +45,7 @@ pub struct Function {
 pub enum Instruction {
     Mov(Operand, Operand, AssemblyType),
     MovSignExtend(Operand, Operand),
+    MovZeroExtend(Operand, Operand),
     Unary(UnaryOperator, Operand, AssemblyType),
     Binary(BinaryOperator, Operand, Operand, AssemblyType),
     Compare(Operand, Operand, AssemblyType),
@@ -345,27 +346,7 @@ fn gen_instructions(
             generator::Instruction::ZeroExtend(src, dst) => {
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
-                match (&src, &dst) {
-                    (_, Operand::Register(_)) => {
-                        assembly_instructions.push(Instruction::Mov(
-                            src,
-                            dst,
-                            AssemblyType::Longword,
-                        ));
-                    }
-                    _ => {
-                        assembly_instructions.push(Instruction::Mov(
-                            src,
-                            Operand::Register(Register::R11),
-                            AssemblyType::Longword,
-                        ));
-                        assembly_instructions.push(Instruction::Mov(
-                            Operand::Register(Register::R11),
-                            dst,
-                            AssemblyType::Quadword,
-                        ));
-                    }
-                }
+                assembly_instructions.push(Instruction::MovZeroExtend(src, dst));
             }
         }
     }
