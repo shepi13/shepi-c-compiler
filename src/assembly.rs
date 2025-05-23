@@ -380,76 +380,54 @@ fn gen_func_call(
     dst: generator::Value,
     symbols: &Symbols,
 ) {
-    let arg_registers = [
-        Register::DI,
-        Register::SI,
-        Register::DX,
-        Register::CX,
-        Register::R8,
-        Register::R9,
-    ];
-    let stack_padding = if args.len() > 6 && args.len() % 2 != 0 {
-        8
-    } else {
-        0
-    };
-    if stack_padding != 0 {
+    let arg_registers = [DI, SI, DX, CX, R8, R9];
+    let mut stack_padding = 0;
+    // Pad stack to multiple of 8 if necessary
+    if args.len() > 6 && args.len() % 2 != 0 {
+        stack_padding = 8;
         instructions.push(Instruction::Binary(
             BinaryOperator::Sub,
-            Operand::IMM(stack_padding),
-            Operand::Register(Register::SP),
+            IMM(stack_padding),
+            Reg(SP),
             AssemblyType::Quadword,
         ));
     }
-    for (i, arg) in args.iter().enumerate() {
-        if i >= 6 {
-            break;
-        }
+    // Put first 6 arguments in arg_registers
+    for (arg, register) in args.get(0..6).unwrap_or(&args).iter().zip(arg_registers) {
         let arg_type = AssemblyType::from(&get_type(&arg, symbols));
-        let arg_operand = gen_operand(arg.clone(), stack, symbols);
-        instructions.push(Instruction::Mov(
-            arg_operand,
-            Operand::Register(arg_registers[i].clone()),
-            arg_type,
-        ));
+        let operand = gen_operand(arg.clone(), stack, symbols);
+        instructions.push(Instruction::Mov(operand, Reg(register.clone()), arg_type));
     }
+    // Remaining arguments go on the stack in reverse order
     for i in (6..args.len()).rev() {
         let op_type = AssemblyType::from(&get_type(&args[i as usize], symbols));
         let operand = gen_operand(args[i as usize].clone(), stack, symbols);
-        if matches!(operand, Operand::IMM(_) | Operand::Register(_))
-            || op_type == AssemblyType::Quadword
-        {
-            gen_push(instructions, &operand);
+        if matches!(operand, IMM(_) | Reg(_)) || op_type == AssemblyType::Quadword {
+            instructions.push(Instruction::Push(operand.clone()));
         } else {
-            instructions.push(Instruction::Mov(
-                operand,
-                Operand::Register(Register::AX),
-                AssemblyType::Longword,
-            ));
-            gen_push(instructions, &Operand::Register(Register::AX));
+            instructions.push(Instruction::Mov(operand, Reg(AX), AssemblyType::Longword));
+            instructions.push(Instruction::Push(Reg(AX)));
         }
     }
+    // Call function
     instructions.push(Instruction::Call(name));
-    let extra_bytes = if args.len() > 6 {
-        8 * (args.len() as i128 - 6) + stack_padding
-    } else {
-        stack_padding as i128
-    };
+    // Calculate extra bytes reserved for pushed arguments and deallocate
+    let mut extra_bytes = stack_padding;
+    if args.len() > 6 {
+        extra_bytes += 8 * (args.len() as i128 - 6)
+    }
     if extra_bytes != 0 {
         instructions.push(Instruction::Binary(
             BinaryOperator::Add,
-            Operand::IMM(extra_bytes),
-            Operand::Register(Register::SP),
+            IMM(extra_bytes),
+            Reg(SP),
             AssemblyType::Quadword,
         ));
     }
+    // Get return value from eax
     let dst_type = AssemblyType::from(&get_type(&dst, symbols));
     let dst = gen_operand(dst, stack, symbols);
-    instructions.push(Instruction::Mov(
-        Operand::Register(Register::AX),
-        dst,
-        dst_type,
-    ));
+    instructions.push(Instruction::Mov(Reg(AX), dst, dst_type));
 }
 
 fn gen_binary_op(
@@ -541,21 +519,6 @@ fn get_condition(op: parser::BinaryOperator, signed: bool) -> Condition {
             _ => panic!("Expected releational operator"),
         },
     }
-}
-
-fn gen_push(instructions: &mut Vec<Instruction>, operand: &Operand) {
-    if let Operand::IMM(val) = operand {
-        if *val > i32::MAX as i128 {
-            instructions.push(Instruction::Mov(
-                operand.clone(),
-                Operand::Register(Register::R10),
-                AssemblyType::Quadword,
-            ));
-            instructions.push(Instruction::Push(Operand::Register(Register::R10)));
-            return;
-        }
-    }
-    instructions.push(Instruction::Push(operand.clone()));
 }
 
 fn gen_shift(
