@@ -256,12 +256,11 @@ fn gen_instructions(
                         let src_type = AssemblyType::from(&get_type(&val.src, symbols));
                         let src = gen_operand(val.src, stack, symbols);
                         let dst = gen_operand(val.dst, stack, symbols);
-                        gen_compare(
-                            &mut assembly_instructions,
-                            &Operand::IMM(0),
-                            &src,
+                        assembly_instructions.push(Instruction::Compare(
+                            IMM(0),
+                            src,
                             src_type.clone(),
-                        );
+                        ));
                         assembly_instructions.push(Instruction::Mov(
                             Operand::IMM(0),
                             dst.clone(),
@@ -290,7 +289,7 @@ fn gen_instructions(
                 };
                 let cmp_type = AssemblyType::from(&get_type(&jump.condition, symbols));
                 let dst = gen_operand(jump.condition, stack, symbols);
-                gen_compare(&mut assembly_instructions, &Operand::IMM(0), &dst, cmp_type);
+                assembly_instructions.push(Instruction::Compare(IMM(0), dst, cmp_type));
                 assembly_instructions.push(Instruction::JmpCond(condition, jump.target));
             }
             generator::Instruction::Copy(copy) => {
@@ -554,51 +553,6 @@ fn gen_push(instructions: &mut Vec<Instruction>, operand: &Operand) {
     instructions.push(Instruction::Push(operand.clone()));
 }
 
-fn gen_compare(
-    instructions: &mut Vec<Instruction>,
-    mut src: &Operand,
-    dst: &Operand,
-    cmp_type: AssemblyType,
-) {
-    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
-    let operands_in_mem = matches!(
-        (&src, &dst),
-        (
-            Operand::Stack(_) | Operand::Data(_),
-            Operand::Stack(_) | Operand::Data(_)
-        )
-    );
-    let int_overflow = if let Operand::IMM(val) = src {
-        *val > i32::MAX as i128
-    } else {
-        false
-    };
-    if operands_in_mem || int_overflow {
-        instructions.push(Instruction::Mov(
-            src.clone(),
-            Operand::Register(Register::R10),
-            cmp_type.clone(),
-        ));
-        src = &Operand::Register(Register::R10);
-    }
-
-    // Rewrite dst if it's a constant
-    if matches!(dst, Operand::IMM(_)) {
-        instructions.push(Instruction::Mov(
-            dst.clone(),
-            Operand::Register(Register::R11),
-            cmp_type.clone(),
-        ));
-        instructions.push(Instruction::Compare(
-            src.clone(),
-            Operand::Register(Register::R11),
-            cmp_type,
-        ));
-    } else {
-        instructions.push(Instruction::Compare(src.clone(), dst.clone(), cmp_type));
-    }
-}
-
 fn gen_shift(
     instructions: &mut Vec<Instruction>,
     operator: BinaryOperator,
@@ -647,9 +601,9 @@ fn gen_relational_op(
             _ => panic!("Expected releational operator"),
         },
     };
-    gen_compare(instructions, &src2, &src1, op_type.clone());
+    instructions.push(Instruction::Compare(src2, src1, op_type));
     instructions.push(Instruction::Mov(
-        Operand::IMM(0),
+        IMM(0),
         dst.clone(),
         AssemblyType::Longword,
     ));
