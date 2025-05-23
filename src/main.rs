@@ -1,4 +1,5 @@
 mod assembly;
+mod assembly_rewrite;
 mod emission;
 mod generator;
 mod lexer;
@@ -123,6 +124,8 @@ fn main() {
 
     // Run Full codegen
     let assembly_ast = assembly::gen_assembly_tree(tac_ast, typed_program.symbols);
+    //Rewrite instructions
+    let assembly_ast = assembly_rewrite::rewrite_assembly(assembly_ast);
 
     if args.codegen {
         // Print generated code?
