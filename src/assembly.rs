@@ -491,51 +491,56 @@ fn gen_binary_op(
                 true => BinaryOperator::LeftShift,
                 false => BinaryOperator::LeftShiftUnsigned,
             };
-            gen_shift(instructions, operator, src1, src2, dst, asm_type.clone());
+            gen_shift(instructions, operator, src1, src2, dst, asm_type);
         }
         RightShift => {
             let operator = match src_ctype.is_signed() {
                 true => BinaryOperator::RightShift,
                 false => BinaryOperator::RightShiftUnsigned,
             };
-            gen_shift(instructions, operator, src1, src2, dst, asm_type.clone());
+            gen_shift(instructions, operator, src1, src2, dst, asm_type);
         }
         // Division is handled separately
         Divide => {
-            gen_division(
-                instructions,
-                src1,
-                src2,
-                dst,
-                Register::AX,
-                asm_type.clone(),
-                src_ctype.is_signed(),
-            );
+            let sign = src_ctype.is_signed();
+            gen_division(instructions, src1, src2, dst, Register::AX, asm_type, sign);
         }
         Remainder => {
-            gen_division(
-                instructions,
-                src1,
-                src2,
-                dst,
-                Register::DX,
-                asm_type.clone(),
-                src_ctype.is_signed(),
-            );
+            let sign = src_ctype.is_signed();
+            gen_division(instructions, src1, src2, dst, Register::DX, asm_type, sign);
         }
         GreaterThan | GreaterThanEqual | IsEqual | LessThan | LessThanEqual | LogicalAnd
         | LogicalOr | NotEqual => {
-            gen_relational_op(
-                instructions,
-                binary_instruction.operator,
-                src1,
-                src2,
-                dst,
-                asm_type.clone(),
-                src_ctype.is_signed(),
-            );
+            use AssemblyType::Longword;
+            let condition = get_condition(binary_instruction.operator, src_ctype.is_signed());
+            instructions.push(Instruction::Compare(src2, src1, asm_type));
+            instructions.push(Instruction::Mov(IMM(0), dst.clone(), Longword));
+            instructions.push(Instruction::SetCond(condition, dst));
         }
     };
+}
+
+fn get_condition(op: parser::BinaryOperator, signed: bool) -> Condition {
+    match signed {
+        true => match op {
+            parser::BinaryOperator::GreaterThan => Condition::GreaterThan,
+            parser::BinaryOperator::GreaterThanEqual => Condition::GreaterThanEqual,
+            parser::BinaryOperator::LessThan => Condition::LessThan,
+            parser::BinaryOperator::LessThanEqual => Condition::LessThanEqual,
+            parser::BinaryOperator::NotEqual => Condition::NotEqual,
+            parser::BinaryOperator::IsEqual => Condition::Equal,
+            _ => panic!("Expected relational operator!"),
+        },
+        false => match op {
+            parser::BinaryOperator::GreaterThan => Condition::UnsignedGreaterThan,
+            parser::BinaryOperator::GreaterThanEqual => Condition::UnsignedGreaterEqual,
+            parser::BinaryOperator::LessThan => Condition::UnsignedLessThan,
+            parser::BinaryOperator::LessThanEqual => Condition::UnsignedLessEqual,
+            parser::BinaryOperator::NotEqual => Condition::NotEqual,
+            parser::BinaryOperator::IsEqual => Condition::Equal,
+            _ => panic!("Expected releational operator"),
+        },
+    }
 }
 
 fn gen_push(instructions: &mut Vec<Instruction>, operand: &Operand) {
@@ -570,44 +575,6 @@ fn gen_shift(
         shift_type.clone(),
     ));
     instructions.push(Instruction::Mov(Reg(AX), dst, shift_type));
-}
-
-fn gen_relational_op(
-    instructions: &mut Vec<Instruction>,
-    operator: parser::BinaryOperator,
-    src1: Operand,
-    src2: Operand,
-    dst: Operand,
-    op_type: AssemblyType,
-    is_signed: bool,
-) {
-    let condition = match is_signed {
-        true => match operator {
-            parser::BinaryOperator::GreaterThan => Condition::GreaterThan,
-            parser::BinaryOperator::GreaterThanEqual => Condition::GreaterThanEqual,
-            parser::BinaryOperator::LessThan => Condition::LessThan,
-            parser::BinaryOperator::LessThanEqual => Condition::LessThanEqual,
-            parser::BinaryOperator::NotEqual => Condition::NotEqual,
-            parser::BinaryOperator::IsEqual => Condition::Equal,
-            _ => panic!("Expected relational operator!"),
-        },
-        false => match operator {
-            parser::BinaryOperator::GreaterThan => Condition::UnsignedGreaterThan,
-            parser::BinaryOperator::GreaterThanEqual => Condition::UnsignedGreaterEqual,
-            parser::BinaryOperator::LessThan => Condition::UnsignedLessThan,
-            parser::BinaryOperator::LessThanEqual => Condition::UnsignedLessEqual,
-            parser::BinaryOperator::NotEqual => Condition::NotEqual,
-            parser::BinaryOperator::IsEqual => Condition::Equal,
-            _ => panic!("Expected releational operator"),
-        },
-    };
-    instructions.push(Instruction::Compare(src2, src1, op_type));
-    instructions.push(Instruction::Mov(
-        IMM(0),
-        dst.clone(),
-        AssemblyType::Longword,
-    ));
-    instructions.push(Instruction::SetCond(condition, dst));
 }
 
 fn gen_division(
