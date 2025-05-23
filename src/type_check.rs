@@ -64,11 +64,14 @@ pub enum StaticInitializer {
 pub enum Initializer {
     Int(i64), // Limited to i32, but we store as i64 for matching and do our own conversion
     Long(i64),
+    UnsignedInt(u64),
+    UnsignedLong(u64),
 }
 impl Initializer {
-    pub fn value(&self) -> i64 {
+    pub fn value(&self) -> i128 {
         match self {
-            Self::Int(val) | Self::Long(val) => *val,
+            Self::Int(val) | Self::Long(val) => *val as i128,
+            Self::UnsignedInt(val) | Self::UnsignedLong(val) => *val as i128,
         }
     }
 }
@@ -81,15 +84,25 @@ pub struct TypedProgram {
 
 pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Constant {
     match &expr.expr {
-        Expression::Constant(Constant::Int(val) | Constant::Long(val)) => match ctype {
-            CType::Int => Constant::Int(val & 0xFFFFFFFF),
-            CType::Long => Constant::Long(*val),
-            _ => panic!("Invalid conversion type!"),
-        },
+        Expression::Constant(constant) => eval_int_constant(constant, ctype),
         Expression::Unary(UnaryOperator::Negate, constexpr) => {
             eval_constant_expr(&constexpr, ctype)
         }
         _ => panic!("Expected constant expression!"),
+    }
+}
+
+fn eval_int_constant(constant: &Constant, ctype: &CType) -> Constant {
+    let val = match constant {
+        Constant::Int(val) | Constant::Long(val) => *val as i128,
+        Constant::UnsignedInt(val) | Constant::UnsignedLong(val) => *val as i128,
+    };
+    match ctype {
+        CType::Int => Constant::Int((val & 0xFFFFFFFF) as i64),
+        CType::Long => Constant::Long((val & 0xFFFFFFFFFFFFFFFF) as i64),
+        CType::UnsignedInt => Constant::UnsignedInt((val as u64) & 0xFFFFFFFF),
+        CType::UnsignedLong => Constant::UnsignedLong(val as u64),
+        CType::Function(_, _) => panic!("Not a variable"),
     }
 }
 
@@ -102,11 +115,19 @@ fn set_type(mut expression: TypedExpression, ctype: &CType) -> TypedExpression {
 pub fn get_type(expression: &TypedExpression) -> CType {
     expression.ctype.clone().expect("Undefined type!")
 }
-pub fn get_common_type(left_type: &CType, right_type: &CType) -> CType {
+pub fn get_common_type(left_type: CType, right_type: CType) -> CType {
     if left_type == right_type {
-        left_type.clone()
+        left_type
+    } else if left_type.size() == right_type.size() {
+        if left_type.is_signed() {
+            right_type
+        } else {
+            left_type
+        }
+    } else if left_type.size() > right_type.size() {
+        left_type
     } else {
-        CType::Long
+        right_type
     }
 }
 fn convert_to(expression: TypedExpression, ctype: &CType) -> TypedExpression {
@@ -250,7 +271,12 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
         Expression::Constant(constant) => match constant {
             Constant::Int(_) => set_type(Expression::Constant(constant).into(), &CType::Int),
             Constant::Long(_) => set_type(Expression::Constant(constant).into(), &CType::Long),
-            _ => panic!("Not implemented!"),
+            Constant::UnsignedInt(_) => {
+                set_type(Expression::Constant(constant).into(), &CType::UnsignedInt)
+            }
+            Constant::UnsignedLong(_) => {
+                set_type(Expression::Constant(constant).into(), &CType::UnsignedLong)
+            }
         },
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_expression(*inner, table);
@@ -299,7 +325,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
                 );
                 set_type(binexpr.into(), left_type)
             } else {
-                let common_type = get_common_type(&get_type(&left), &get_type(&right));
+                let common_type = get_common_type(get_type(&left), get_type(&right));
                 let left = convert_to(left, &common_type);
                 let right = convert_to(right, &common_type);
                 let binexpr = Binary(
@@ -330,7 +356,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let condition = type_check_expression(cond.condition, table);
             let if_true = type_check_expression(cond.if_true, table);
             let if_false = type_check_expression(cond.if_false, table);
-            let common_type = get_common_type(&get_type(&if_true), &get_type(&if_false));
+            let common_type = get_common_type(get_type(&if_true), get_type(&if_false));
             let if_true = convert_to(if_true, &common_type);
             let if_false = convert_to(if_false, &common_type);
             let condition_expr = Expression::Condition(
@@ -422,15 +448,16 @@ fn type_check_function(
 
 fn parse_static_initializer(init: &Option<TypedExpression>, ctype: &CType) -> StaticInitializer {
     let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
-    let val = match init_val {
-        Some(Constant::Int(val)) | Some(Constant::Long(val)) => val,
-        None => 0,
-        _ => panic!("Not implemented"),
-    };
+    let val = init_val.unwrap_or(Constant::Int(0)).value();
+
     match ctype {
-        CType::Int => StaticInitializer::Initialized(Initializer::Int(val)),
-        CType::Long => StaticInitializer::Initialized(Initializer::Long(val)),
-        _ => panic!("Invalid static initializer!"),
+        CType::Int => StaticInitializer::Initialized(Initializer::Int(val as i64)),
+        CType::Long => StaticInitializer::Initialized(Initializer::Long(val as i64)),
+        CType::UnsignedInt => StaticInitializer::Initialized(Initializer::UnsignedInt(val as u64)),
+        CType::UnsignedLong => {
+            StaticInitializer::Initialized(Initializer::UnsignedLong(val as u64))
+        }
+        CType::Function(_, _) => panic!("Not a variable!"),
     }
 }
 

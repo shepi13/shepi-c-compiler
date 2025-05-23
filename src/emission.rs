@@ -17,14 +17,15 @@ pub fn emit_program(output_filename: &str, program: assembly::Program) {
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
 }
 fn emit_static_var(file: &mut File, var: StaticVar) {
+    use Initializer::*;
     if var.global {
         writeln!(file, "    .globl {}", var.name).unwrap();
     }
     let init = match var.init {
-        Initializer::Int(0) => String::from(".zero 4"),
-        Initializer::Long(0) => String::from(".zero 8"),
-        Initializer::Int(val) => format!(".long {}", val),
-        Initializer::Long(val) => format!(".quad {}", val),
+        Int(0) | UnsignedInt(0) => String::from(".zero 4"),
+        Long(0) | UnsignedLong(0) => String::from(".zero 8"),
+        Int(_) | UnsignedInt(_) => format!(".long {}", var.init.value()),
+        Long(_) | UnsignedLong(_) => format!(".quad {}", var.init.value()),
     };
     if var.init.value() == 0 {
         writeln!(file, "    .bss").unwrap();

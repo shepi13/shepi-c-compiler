@@ -65,6 +65,24 @@ pub enum CType {
     UnsignedLong,
     Function(Vec<CType>, Box<CType>),
 }
+
+impl CType {
+    pub fn size(&self) -> usize {
+        match self {
+            CType::Int | CType::UnsignedInt => 4,
+            CType::Long | CType::UnsignedLong => 8,
+            CType::Function(_, _) => panic!("Not a variable or constant!"),
+        }
+    }
+    pub fn is_signed(&self) -> bool {
+        match self {
+            CType::UnsignedInt | CType::UnsignedLong => false,
+            CType::Int | CType::Long => true,
+            CType::Function(_, _) => panic!("Not a variable or constant!"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct VariableDeclaration {
     pub name: String,
@@ -191,6 +209,15 @@ pub enum Constant {
     Long(i64),
     UnsignedInt(u64),
     UnsignedLong(u64),
+}
+
+impl Constant {
+    pub fn value(&self) -> i128 {
+        match self {
+            Self::Int(val) | Self::Long(val) => *val as i128,
+            Self::UnsignedInt(val) | Self::UnsignedLong(val) => *val as i128,
+        }
+    }
 }
 
 lazy_static! {
