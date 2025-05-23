@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::assembly;
 use crate::generator;
 use crate::parser;
 use crate::parser::CType;
@@ -138,6 +139,12 @@ impl StackGen {
     }
 }
 
+// Remove when done
+/*
+fn gen_move(instructions: &mut Vec<Instruction>, src: &Operand, dst: &Operand, mov_type: AssemblyType) {
+    instructions.push(Instruction::Mov(src.clone(), dst.clone(), mov_type))
+}
+*/
 pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
     let mut program = Vec::new();
     for decl in ast.into_iter() {
@@ -166,13 +173,12 @@ pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
                         _ => None,
                     };
                     match register {
-                        Some(reg) => gen_move(&mut instructions, &reg, &param, param_type),
-                        None => gen_move(
-                            &mut instructions,
-                            &Operand::Stack((4 - i as isize) * 8),
-                            &param,
+                        Some(reg) => instructions.push(Instruction::Mov(reg, param, param_type)),
+                        None => instructions.push(Instruction::Mov(
+                            Operand::Stack((4 - i as isize) * 8),
+                            param,
                             param_type,
-                        ),
+                        )),
                     }
                 }
                 instructions.append(&mut gen_instructions(
@@ -237,12 +243,11 @@ fn gen_instructions(
             generator::Instruction::Return(val) => {
                 let val_type = AssemblyType::from(&get_type(&val, symbols));
                 let val = gen_operand(val, stack, symbols);
-                gen_move(
-                    &mut assembly_instructions,
-                    &val,
-                    &Operand::Register(Register::AX),
+                assembly_instructions.push(Instruction::Mov(
+                    val,
+                    Operand::Register(Register::AX),
                     val_type,
-                );
+                ));
                 assembly_instructions.push(Instruction::Ret);
             }
             generator::Instruction::UnaryOp(val) => {
@@ -259,7 +264,11 @@ fn gen_instructions(
                             &src,
                             src_type.clone(),
                         );
-                        gen_move(&mut assembly_instructions, &Operand::IMM(0), &dst, src_type);
+                        assembly_instructions.push(Instruction::Mov(
+                            Operand::IMM(0),
+                            dst.clone(),
+                            src_type,
+                        ));
                         assembly_instructions.push(Instruction::SetCond(Condition::Equal, dst));
                         continue;
                     }
@@ -267,7 +276,7 @@ fn gen_instructions(
                 let src_type = AssemblyType::from(&get_type(&val.src, symbols));
                 let src = gen_operand(val.src, stack, symbols);
                 let dst = gen_operand(val.dst, stack, symbols);
-                gen_move(&mut assembly_instructions, &src, &dst, src_type.clone());
+                assembly_instructions.push(Instruction::Mov(src, dst.clone(), src_type.clone()));
                 assembly_instructions.push(Instruction::Unary(operator, dst, src_type));
             }
             generator::Instruction::BinaryOp(val) => {
@@ -359,12 +368,11 @@ fn gen_instructions(
                         continue;
                     }
                 };
-                gen_move(
-                    &mut assembly_instructions,
-                    &src1,
-                    &dst,
+                assembly_instructions.push(Instruction::Mov(
+                    src1,
+                    dst.clone(),
                     src_asm_type.clone(),
-                );
+                ));
                 gen_binary_op(
                     &mut assembly_instructions,
                     operator,
@@ -390,7 +398,7 @@ fn gen_instructions(
                 let src_type = AssemblyType::from(&get_type(&copy.src, symbols));
                 let src = gen_operand(copy.src, stack, symbols);
                 let dst = gen_operand(copy.dst, stack, symbols);
-                gen_move(&mut assembly_instructions, &src, &dst, src_type);
+                assembly_instructions.push(Instruction::Mov(src, dst, src_type));
             }
             generator::Instruction::Label(target) => {
                 assembly_instructions.push(Instruction::Label(target));
@@ -404,12 +412,11 @@ fn gen_instructions(
                 let mut src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 if matches!(src, Operand::IMM(_)) {
-                    gen_move(
-                        &mut assembly_instructions,
-                        &src,
-                        &Operand::Register(Register::R10),
+                    assembly_instructions.push(Instruction::Mov(
+                        src,
+                        Operand::Register(Register::R10),
                         src_type,
-                    );
+                    ));
                     src = Operand::Register(Register::R10)
                 }
 
@@ -418,12 +425,11 @@ fn gen_instructions(
                         src,
                         Operand::Register(Register::R11),
                     ));
-                    gen_move(
-                        &mut assembly_instructions,
-                        &Operand::Register(Register::R11),
-                        &dst,
+                    assembly_instructions.push(Instruction::Mov(
+                        Operand::Register(Register::R11),
+                        dst,
                         dst_type,
-                    );
+                    ));
                 } else {
                     assembly_instructions.push(Instruction::MovSignExtend(src, dst));
                 }
@@ -436,36 +442,30 @@ fn gen_instructions(
                         src = Operand::IMM(val & (0xFFFFFFFF));
                     }
                 }
-                gen_move(
-                    &mut assembly_instructions,
-                    &src,
-                    &dst,
-                    AssemblyType::Longword,
-                );
+                assembly_instructions.push(Instruction::Mov(src, dst, AssemblyType::Longword));
             }
             generator::Instruction::ZeroExtend(src, dst) => {
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 match (&src, &dst) {
-                    (_, Operand::Register(_)) => gen_move(
-                        &mut assembly_instructions,
-                        &src,
-                        &dst,
-                        AssemblyType::Longword,
-                    ),
-                    _ => {
-                        gen_move(
-                            &mut assembly_instructions,
-                            &src,
-                            &Operand::Register(Register::R11),
+                    (_, Operand::Register(_)) => {
+                        assembly_instructions.push(Instruction::Mov(
+                            src,
+                            dst,
                             AssemblyType::Longword,
-                        );
-                        gen_move(
-                            &mut assembly_instructions,
-                            &Operand::Register(Register::R11),
-                            &dst,
+                        ));
+                    }
+                    _ => {
+                        assembly_instructions.push(Instruction::Mov(
+                            src,
+                            Operand::Register(Register::R11),
+                            AssemblyType::Longword,
+                        ));
+                        assembly_instructions.push(Instruction::Mov(
+                            Operand::Register(Register::R11),
+                            dst,
                             AssemblyType::Quadword,
-                        );
+                        ));
                     }
                 }
             }
@@ -508,12 +508,11 @@ fn gen_func_call(
         }
         let arg_type = AssemblyType::from(&get_type(&arg, symbols));
         let arg_operand = gen_operand(arg.clone(), stack, symbols);
-        gen_move(
-            instructions,
-            &arg_operand,
-            &Operand::Register(arg_registers[i].clone()),
+        instructions.push(Instruction::Mov(
+            arg_operand,
+            Operand::Register(arg_registers[i].clone()),
             arg_type,
-        );
+        ));
     }
     for i in (6..args.len()).rev() {
         let op_type = AssemblyType::from(&get_type(&args[i as usize], symbols));
@@ -523,12 +522,11 @@ fn gen_func_call(
         {
             gen_push(instructions, &operand);
         } else {
-            gen_move(
-                instructions,
-                &operand,
-                &Operand::Register(Register::AX),
+            instructions.push(Instruction::Mov(
+                operand,
+                Operand::Register(Register::AX),
                 AssemblyType::Longword,
-            );
+            ));
             gen_push(instructions, &Operand::Register(Register::AX));
         }
     }
@@ -548,57 +546,21 @@ fn gen_func_call(
     }
     let dst_type = AssemblyType::from(&get_type(&dst, symbols));
     let dst = gen_operand(dst, stack, symbols);
-    gen_move(
-        instructions,
-        &Operand::Register(Register::AX),
-        &dst,
+    instructions.push(Instruction::Mov(
+        Operand::Register(Register::AX),
+        dst,
         dst_type,
-    )
-}
-fn gen_move(
-    instructions: &mut Vec<Instruction>,
-    src: &Operand,
-    dst: &Operand,
-    mov_type: AssemblyType,
-) {
-    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
-    let operands_in_mem = matches!(
-        (&src, &dst),
-        (
-            Operand::Stack(_) | Operand::Data(_),
-            Operand::Stack(_) | Operand::Data(_)
-        )
-    );
-    let int_overflow = if let Operand::IMM(val) = src {
-        *val > i32::MAX as i128
-    } else {
-        false
-    };
-    if operands_in_mem || int_overflow {
-        instructions.push(Instruction::Mov(
-            src.clone(),
-            Operand::Register(Register::R10),
-            mov_type.clone(),
-        ));
-        instructions.push(Instruction::Mov(
-            Operand::Register(Register::R10),
-            dst.clone(),
-            mov_type,
-        ));
-    } else {
-        instructions.push(Instruction::Mov(src.clone(), dst.clone(), mov_type));
-    }
+    ));
 }
 
 fn gen_push(instructions: &mut Vec<Instruction>, operand: &Operand) {
     if let Operand::IMM(val) = operand {
         if *val > i32::MAX as i128 {
-            gen_move(
-                instructions,
-                operand,
-                &Operand::Register(Register::R10),
+            instructions.push(Instruction::Mov(
+                operand.clone(),
+                Operand::Register(Register::R10),
                 AssemblyType::Quadword,
-            );
+            ));
             instructions.push(Instruction::Push(Operand::Register(Register::R10)));
             return;
         }
@@ -626,23 +588,21 @@ fn gen_compare(
         false
     };
     if operands_in_mem || int_overflow {
-        gen_move(
-            instructions,
-            src,
-            &Operand::Register(Register::R10),
+        instructions.push(Instruction::Mov(
+            src.clone(),
+            Operand::Register(Register::R10),
             cmp_type.clone(),
-        );
+        ));
         src = &Operand::Register(Register::R10);
     }
 
     // Rewrite dst if it's a constant
     if matches!(dst, Operand::IMM(_)) {
-        gen_move(
-            instructions,
-            dst,
-            &Operand::Register(Register::R11),
+        instructions.push(Instruction::Mov(
+            dst.clone(),
+            Operand::Register(Register::R11),
             cmp_type.clone(),
-        );
+        ));
         instructions.push(Instruction::Compare(
             src.clone(),
             Operand::Register(Register::R11),
@@ -661,30 +621,17 @@ fn gen_shift(
     dst: Operand,
     shift_type: AssemblyType,
 ) {
-    gen_move(
-        instructions,
-        &src1,
-        &Operand::Register(Register::AX),
-        shift_type.clone(),
-    );
-    gen_move(
-        instructions,
-        &src2,
-        &Operand::Register(Register::CX),
-        shift_type.clone(),
-    );
+    use Operand::Register as Reg;
+    use assembly::Register::*;
+    instructions.push(Instruction::Mov(src1, Reg(AX), shift_type.clone()));
+    instructions.push(Instruction::Mov(src2, Reg(CX), shift_type.clone()));
     instructions.push(Instruction::Binary(
         operator,
-        Operand::Register(Register::CL),
-        Operand::Register(Register::AX),
+        Reg(CL),
+        Reg(AX),
         shift_type.clone(),
     ));
-    gen_move(
-        instructions,
-        &Operand::Register(Register::AX),
-        &dst,
-        shift_type,
-    );
+    instructions.push(Instruction::Mov(Reg(AX), dst, shift_type));
 }
 
 fn gen_binary_op(
@@ -708,35 +655,32 @@ fn gen_binary_op(
         false
     };
     if operands_in_mem || int_overflow {
-        gen_move(
-            instructions,
-            &src1,
-            &Operand::Register(Register::R10),
+        instructions.push(Instruction::Mov(
+            src1,
+            Operand::Register(Register::R10),
             op_type.clone(),
-        );
+        ));
         src1 = Operand::Register(Register::R10);
     }
 
     // Rewrite dst (currently only if mult tries to put result in memory)
     if operator == BinaryOperator::Mult && matches!(src2, Operand::Data(_) | Operand::Stack(_)) {
-        gen_move(
-            instructions,
-            &src2,
-            &Operand::Register(Register::R11),
+        instructions.push(Instruction::Mov(
+            src2.clone(),
+            Operand::Register(Register::R11),
             op_type.clone(),
-        );
+        ));
         instructions.push(Instruction::Binary(
             operator,
             src1,
             Operand::Register(Register::R11),
             op_type.clone(),
         ));
-        gen_move(
-            instructions,
-            &Operand::Register(Register::R11),
-            &src2,
+        instructions.push(Instruction::Mov(
+            Operand::Register(Register::R11),
+            src2,
             op_type,
-        );
+        ));
     } else {
         instructions.push(Instruction::Binary(operator, src1, src2, op_type));
     }
@@ -790,31 +734,29 @@ fn gen_division(
     is_signed: bool,
 ) {
     // Move dividend into AX
-    gen_move(
-        instructions,
-        &src1,
-        &Operand::Register(Register::AX),
+    instructions.push(Instruction::Mov(
+        src1,
+        Operand::Register(Register::AX),
         div_type.clone(),
-    );
+    ));
+
     // USE CDQ or 0 extend to setup registers for division
     if is_signed {
         instructions.push(Instruction::Cdq(div_type.clone()));
     } else {
-        gen_move(
-            instructions,
-            &Operand::IMM(0),
-            &Operand::Register(Register::DX),
+        instructions.push(Instruction::Mov(
+            Operand::IMM(0),
+            Operand::Register(Register::DX),
             div_type.clone(),
-        );
+        ));
     }
     // Rewrite constant divisors into register
     if let Operand::IMM(_) = src2 {
-        gen_move(
-            instructions,
-            &src2,
-            &Operand::Register(Register::R10),
+        instructions.push(Instruction::Mov(
+            src2,
+            Operand::Register(Register::R10),
             div_type.clone(),
-        );
+        ));
         src2 = Operand::Register(Register::R10);
     }
     // IDiv instruction for signed, Div for unsigned
@@ -824,7 +766,11 @@ fn gen_division(
         instructions.push(Instruction::Div(src2, div_type.clone()));
     }
     // Division result is in AX, Remainder in DX
-    gen_move(instructions, &Operand::Register(result_reg), &dst, div_type);
+    instructions.push(Instruction::Mov(
+        Operand::Register(result_reg),
+        dst,
+        div_type,
+    ));
 }
 
 fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
