@@ -32,6 +32,7 @@ pub struct StaticVariable {
 pub enum Instruction {
     Return(Value),
     SignExtend(Value, Value),
+    ZeroExtend(Value, Value),
     Truncate(Value, Value),
     UnaryOp(InstructionUnary),
     BinaryOp(InstructionBinary),
@@ -117,6 +118,8 @@ pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &mut Symbols) -> Progra
                     let initializer = match &entry.ctype {
                         CType::Int => Initializer::Int(0),
                         CType::Long => Initializer::Long(0),
+                        CType::UnsignedInt => Initializer::UnsignedInt(0),
+                        CType::UnsignedLong => Initializer::UnsignedLong(0),
                         _ => panic!("Not a variable"),
                     };
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
@@ -444,10 +447,18 @@ fn gen_expression(
                 return result;
             }
             let dst = gen_temp_var(new_type.clone(), symbols);
-            match new_type {
-                CType::Long => instructions.push(Instruction::SignExtend(result, dst.clone())),
-                CType::Int => instructions.push(Instruction::Truncate(result, dst.clone())),
-                _ => panic!("Not a variable!"),
+
+            if new_type.size() == old_type.size() {
+                instructions.push(Instruction::Copy(InstructionCopy {
+                    src: result,
+                    dst: dst.clone(),
+                }));
+            } else if new_type.size() < old_type.size() {
+                instructions.push(Instruction::Truncate(result, dst.clone()));
+            } else if old_type.is_signed() {
+                instructions.push(Instruction::SignExtend(result, dst.clone()));
+            } else {
+                instructions.push(Instruction::ZeroExtend(result, dst.clone()));
             }
             dst
         }
