@@ -1,8 +1,9 @@
 use crate::assembly::BinaryOperator;
-use crate::assembly::{self, Function, Instruction, Operand, Program, TopLevelDecl};
+use crate::assembly::{
+    self, AssemblyType::Quadword, Function, Instruction, Operand, Operand::IMM,
+    Operand::Register as Reg, Program, TopLevelDecl,
+};
 
-use assembly::Operand::IMM;
-use assembly::Operand::Register as Reg;
 use assembly::Register::*;
 
 pub fn rewrite_assembly(program: Program) -> Program {
@@ -43,6 +44,7 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
                 }
             }
             Instruction::Compare(_, _, _) => rewrite_cmp(&mut instructions, instruction),
+            Instruction::Push(_) => rewrite_push(&mut instructions, instruction),
             _ => instructions.push(instruction),
         }
     }
@@ -60,6 +62,18 @@ fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
         instructions.push(Instruction::Mov(Reg(R10), dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
+    }
+}
+
+fn rewrite_push(instructions: &mut Vec<Instruction>, push: Instruction) {
+    let Instruction::Push(operand) = push else {
+        panic!("Expected push!")
+    };
+    if check_overflow(&operand, i32::MAX as i128) {
+        instructions.push(Instruction::Mov(operand, Reg(R10), Quadword));
+        instructions.push(Instruction::Push(Reg(R10)));
+    } else {
+        instructions.push(Instruction::Push(operand));
     }
 }
 
