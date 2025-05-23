@@ -256,12 +256,11 @@ fn gen_instructions(
                         let src_type = AssemblyType::from(&get_type(&val.src, symbols));
                         let src = gen_operand(val.src, stack, symbols);
                         let dst = gen_operand(val.dst, stack, symbols);
-                        gen_compare(
-                            &mut assembly_instructions,
-                            &Operand::IMM(0),
-                            &src,
+                        assembly_instructions.push(Instruction::Compare(
+                            IMM(0),
+                            src,
                             src_type.clone(),
-                        );
+                        ));
                         assembly_instructions.push(Instruction::Mov(
                             Operand::IMM(0),
                             dst.clone(),
@@ -290,7 +289,7 @@ fn gen_instructions(
                 };
                 let cmp_type = AssemblyType::from(&get_type(&jump.condition, symbols));
                 let dst = gen_operand(jump.condition, stack, symbols);
-                gen_compare(&mut assembly_instructions, &Operand::IMM(0), &dst, cmp_type);
+                assembly_instructions.push(Instruction::Compare(IMM(0), dst, cmp_type));
                 assembly_instructions.push(Instruction::JmpCond(condition, jump.target));
             }
             generator::Instruction::Copy(copy) => {
@@ -492,51 +491,56 @@ fn gen_binary_op(
                 true => BinaryOperator::LeftShift,
                 false => BinaryOperator::LeftShiftUnsigned,
             };
-            gen_shift(instructions, operator, src1, src2, dst, asm_type.clone());
+            gen_shift(instructions, operator, src1, src2, dst, asm_type);
         }
         RightShift => {
             let operator = match src_ctype.is_signed() {
                 true => BinaryOperator::RightShift,
                 false => BinaryOperator::RightShiftUnsigned,
             };
-            gen_shift(instructions, operator, src1, src2, dst, asm_type.clone());
+            gen_shift(instructions, operator, src1, src2, dst, asm_type);
         }
         // Division is handled separately
         Divide => {
-            gen_division(
-                instructions,
-                src1,
-                src2,
-                dst,
-                Register::AX,
-                asm_type.clone(),
-                src_ctype.is_signed(),
-            );
+            let sign = src_ctype.is_signed();
+            gen_division(instructions, src1, src2, dst, Register::AX, asm_type, sign);
         }
         Remainder => {
-            gen_division(
-                instructions,
-                src1,
-                src2,
-                dst,
-                Register::DX,
-                asm_type.clone(),
-                src_ctype.is_signed(),
-            );
+            let sign = src_ctype.is_signed();
+            gen_division(instructions, src1, src2, dst, Register::DX, asm_type, sign);
         }
         GreaterThan | GreaterThanEqual | IsEqual | LessThan | LessThanEqual | LogicalAnd
         | LogicalOr | NotEqual => {
-            gen_relational_op(
-                instructions,
-                binary_instruction.operator,
-                src1,
-                src2,
-                dst,
-                asm_type.clone(),
-                src_ctype.is_signed(),
-            );
+            use AssemblyType::Longword;
+            let condition = get_condition(binary_instruction.operator, src_ctype.is_signed());
+            instructions.push(Instruction::Compare(src2, src1, asm_type));
+            instructions.push(Instruction::Mov(IMM(0), dst.clone(), Longword));
+            instructions.push(Instruction::SetCond(condition, dst));
         }
     };
+}
+
+fn get_condition(op: parser::BinaryOperator, signed: bool) -> Condition {
+    match signed {
+        true => match op {
+            parser::BinaryOperator::GreaterThan => Condition::GreaterThan,
+            parser::BinaryOperator::GreaterThanEqual => Condition::GreaterThanEqual,
+            parser::BinaryOperator::LessThan => Condition::LessThan,
+            parser::BinaryOperator::LessThanEqual => Condition::LessThanEqual,
+            parser::BinaryOperator::NotEqual => Condition::NotEqual,
+            parser::BinaryOperator::IsEqual => Condition::Equal,
+            _ => panic!("Expected relational operator!"),
+        },
+        false => match op {
+            parser::BinaryOperator::GreaterThan => Condition::UnsignedGreaterThan,
+            parser::BinaryOperator::GreaterThanEqual => Condition::UnsignedGreaterEqual,
+            parser::BinaryOperator::LessThan => Condition::UnsignedLessThan,
+            parser::BinaryOperator::LessThanEqual => Condition::UnsignedLessEqual,
+            parser::BinaryOperator::NotEqual => Condition::NotEqual,
+            parser::BinaryOperator::IsEqual => Condition::Equal,
+            _ => panic!("Expected releational operator"),
+        },
+    }
 }
 
 fn gen_push(instructions: &mut Vec<Instruction>, operand: &Operand) {
@@ -552,51 +556,6 @@ fn gen_push(instructions: &mut Vec<Instruction>, operand: &Operand) {
         }
     }
     instructions.push(Instruction::Push(operand.clone()));
-}
-
-fn gen_compare(
-    instructions: &mut Vec<Instruction>,
-    mut src: &Operand,
-    dst: &Operand,
-    cmp_type: AssemblyType,
-) {
-    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
-    let operands_in_mem = matches!(
-        (&src, &dst),
-        (
-            Operand::Stack(_) | Operand::Data(_),
-            Operand::Stack(_) | Operand::Data(_)
-        )
-    );
-    let int_overflow = if let Operand::IMM(val) = src {
-        *val > i32::MAX as i128
-    } else {
-        false
-    };
-    if operands_in_mem || int_overflow {
-        instructions.push(Instruction::Mov(
-            src.clone(),
-            Operand::Register(Register::R10),
-            cmp_type.clone(),
-        ));
-        src = &Operand::Register(Register::R10);
-    }
-
-    // Rewrite dst if it's a constant
-    if matches!(dst, Operand::IMM(_)) {
-        instructions.push(Instruction::Mov(
-            dst.clone(),
-            Operand::Register(Register::R11),
-            cmp_type.clone(),
-        ));
-        instructions.push(Instruction::Compare(
-            src.clone(),
-            Operand::Register(Register::R11),
-            cmp_type,
-        ));
-    } else {
-        instructions.push(Instruction::Compare(src.clone(), dst.clone(), cmp_type));
-    }
 }
 
 fn gen_shift(
@@ -616,44 +575,6 @@ fn gen_shift(
         shift_type.clone(),
     ));
     instructions.push(Instruction::Mov(Reg(AX), dst, shift_type));
-}
-
-fn gen_relational_op(
-    instructions: &mut Vec<Instruction>,
-    operator: parser::BinaryOperator,
-    src1: Operand,
-    src2: Operand,
-    dst: Operand,
-    op_type: AssemblyType,
-    is_signed: bool,
-) {
-    let condition = match is_signed {
-        true => match operator {
-            parser::BinaryOperator::GreaterThan => Condition::GreaterThan,
-            parser::BinaryOperator::GreaterThanEqual => Condition::GreaterThanEqual,
-            parser::BinaryOperator::LessThan => Condition::LessThan,
-            parser::BinaryOperator::LessThanEqual => Condition::LessThanEqual,
-            parser::BinaryOperator::NotEqual => Condition::NotEqual,
-            parser::BinaryOperator::IsEqual => Condition::Equal,
-            _ => panic!("Expected relational operator!"),
-        },
-        false => match operator {
-            parser::BinaryOperator::GreaterThan => Condition::UnsignedGreaterThan,
-            parser::BinaryOperator::GreaterThanEqual => Condition::UnsignedGreaterEqual,
-            parser::BinaryOperator::LessThan => Condition::UnsignedLessThan,
-            parser::BinaryOperator::LessThanEqual => Condition::UnsignedLessEqual,
-            parser::BinaryOperator::NotEqual => Condition::NotEqual,
-            parser::BinaryOperator::IsEqual => Condition::Equal,
-            _ => panic!("Expected releational operator"),
-        },
-    };
-    gen_compare(instructions, &src2, &src1, op_type.clone());
-    instructions.push(Instruction::Mov(
-        Operand::IMM(0),
-        dst.clone(),
-        AssemblyType::Longword,
-    ));
-    instructions.push(Instruction::SetCond(condition, dst));
 }
 
 fn gen_division(

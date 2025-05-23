@@ -27,25 +27,22 @@ fn rewrite_decl(decl: TopLevelDecl) -> TopLevelDecl {
 fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> {
     let mut instructions = Vec::new();
     for instruction in old_instructions {
-        match instruction {
+        match &instruction {
             Instruction::Mov(_, _, _) => rewrite_mov(&mut instructions, instruction),
             Instruction::Div(_, _) | Instruction::IDiv(_, _) => {
                 rewrite_div(&mut instructions, instruction)
             }
             // Arithmetic and bitwise binary operations
-            Instruction::Binary(
-                BinaryOperator::Add
-                | BinaryOperator::BitAnd
-                | BinaryOperator::BitOr
-                | BinaryOperator::BitXor
-                | BinaryOperator::Mult
-                | BinaryOperator::Sub,
-                _,
-                _,
-                _,
-            ) => {
-                rewrite_arithmetic_binary(&mut instructions, instruction);
+            Instruction::Binary(op, _, _, _) => {
+                use BinaryOperator::*;
+                match op {
+                    Add | BitAnd | BitOr | BitXor | Mult | Sub => {
+                        rewrite_arithmetic_binary(&mut instructions, instruction)
+                    }
+                    _ => instructions.push(instruction),
+                }
             }
+            Instruction::Compare(_, _, _) => rewrite_cmp(&mut instructions, instruction),
             _ => instructions.push(instruction),
         }
     }
@@ -53,16 +50,35 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
 }
 
 fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
-    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
     let Instruction::Mov(src, dst, mov_type) = mov else {
         panic!("Expected mov!")
     };
+    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
         instructions.push(Instruction::Mov(src, Reg(R10), mov_type.clone()));
         instructions.push(Instruction::Mov(Reg(R10), dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
+    }
+}
+
+fn rewrite_cmp(instructions: &mut Vec<Instruction>, cmp: Instruction) {
+    let Instruction::Compare(mut src, dst, cmp_type) = cmp else {
+        panic!("Expected cmp!")
+    };
+    // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
+    let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
+    if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
+        instructions.push(Instruction::Mov(src, Reg(R10), cmp_type.clone()));
+        src = Reg(R10);
+    }
+    // Rewrite dst if it's a constant
+    if matches!(dst, IMM(_)) {
+        instructions.push(Instruction::Mov(dst, Reg(R11), cmp_type.clone()));
+        instructions.push(Instruction::Compare(src, Reg(R11), cmp_type));
+    } else {
+        instructions.push(Instruction::Compare(src, dst, cmp_type));
     }
 }
 
