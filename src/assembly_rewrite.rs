@@ -1,9 +1,8 @@
-use crate::assembly::BinaryOperator;
 use crate::assembly::{
-    self, AssemblyType::Quadword, Function, Instruction, Operand, Operand::IMM,
-    Operand::Register as Reg, Program, TopLevelDecl,
+    self, AssemblyType::Longword, AssemblyType::Quadword, Function, Instruction, Operand,
+    Operand::IMM, Operand::Register as Reg, Program, TopLevelDecl,
 };
-
+use crate::assembly::{AssemblyType, BinaryOperator};
 use assembly::Register::*;
 
 pub fn rewrite_assembly(program: Program) -> Program {
@@ -45,6 +44,7 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
             }
             Instruction::Compare(_, _, _) => rewrite_cmp(&mut instructions, instruction),
             Instruction::Push(_) => rewrite_push(&mut instructions, instruction),
+            Instruction::MovZeroExtend(_, _) => rewrite_zero_extend(&mut instructions, instruction),
             _ => instructions.push(instruction),
         }
     }
@@ -62,6 +62,18 @@ fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
         instructions.push(Instruction::Mov(Reg(R10), dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
+    }
+}
+
+fn rewrite_zero_extend(instructions: &mut Vec<Instruction>, zero_x: Instruction) {
+    let Instruction::MovZeroExtend(src, dst) = zero_x else {
+        panic!("Expected movZX!")
+    };
+    if is_mem_operand(&dst) {
+        instructions.push(Instruction::Mov(src, Reg(R11), Longword));
+        instructions.push(Instruction::Mov(Reg(R11), dst, Quadword));
+    } else {
+        instructions.push(Instruction::Mov(src, dst, Longword));
     }
 }
 
