@@ -467,8 +467,17 @@ fn gen_binary_op(
     let dst = gen_operand(binary_instruction.dst, stack, symbols);
 
     let mut gen_arithmetic = |operator| {
-        instructions.push(Instruction::Mov(src1.clone(), dst.clone(), asm_type.clone()));
-        instructions.push(Instruction::Binary(operator, src2.clone(), dst.clone(), asm_type.clone()));
+        instructions.push(Instruction::Mov(
+            src1.clone(),
+            dst.clone(),
+            asm_type.clone(),
+        ));
+        instructions.push(Instruction::Binary(
+            operator,
+            src2.clone(),
+            dst.clone(),
+            asm_type.clone(),
+        ));
     };
     match &binary_instruction.operator {
         // Handle arithmetic binary operators
