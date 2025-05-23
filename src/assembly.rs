@@ -451,8 +451,7 @@ fn gen_func_call(
             arg_type,
         );
     }
-    let mut i = args.len() as isize - 1;
-    while i >= 6 {
+    for i in (6..args.len()).rev() {
         let (operand, op_type) = gen_operand(args[i as usize].clone(), stack, symbols);
         if matches!(operand, Operand::IMM(_) | Operand::Register(_))
             || op_type == AssemblyType::Quadword
@@ -467,7 +466,6 @@ fn gen_func_call(
             );
             gen_push(instructions, &Operand::Register(Register::AX));
         }
-        i -= 1;
     }
     instructions.push(Instruction::Call(name));
     let extra_bytes = if args.len() > 6 {
@@ -745,6 +743,7 @@ fn gen_operand(
         generator::Value::ConstValue(constexpr) => match constexpr {
             parser::Constant::Int(val) => (Operand::IMM(val), AssemblyType::Longword),
             parser::Constant::Long(val) => (Operand::IMM(val), AssemblyType::Quadword),
+            _ => panic!("Not implemented!"),
         },
         generator::Value::Variable(name) => {
             let symbol = &symbols[&name];
