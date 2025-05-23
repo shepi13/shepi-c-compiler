@@ -139,12 +139,6 @@ impl StackGen {
     }
 }
 
-// Remove when done
-/*
-fn gen_move(instructions: &mut Vec<Instruction>, src: &Operand, dst: &Operand, mov_type: AssemblyType) {
-    instructions.push(Instruction::Mov(src.clone(), dst.clone(), mov_type))
-}
-*/
 pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
     let mut program = Vec::new();
     for decl in ast.into_iter() {
