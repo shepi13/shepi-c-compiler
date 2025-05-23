@@ -406,6 +406,9 @@ fn gen_instructions(
                     AssemblyType::Longword,
                 );
             }
+            generator::Instruction::ZeroExtend(_, _) => {
+                panic!("Not implemented")
+            }
         }
     }
     assembly_instructions
