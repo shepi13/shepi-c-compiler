@@ -61,6 +61,8 @@ pub enum Declaration {
 pub enum CType {
     Int,
     Long,
+    UnsignedInt,
+    UnsignedLong,
     Function(Vec<CType>, Box<CType>),
 }
 #[derive(Debug)]
@@ -187,13 +189,8 @@ pub enum BinaryOperator {
 pub enum Constant {
     Int(i64), // Limited to i32, but we'll store it as i64 for convenient conversions
     Long(i64),
-}
-impl Constant {
-    pub fn value(&self) -> i64 {
-        match self {
-            Self::Int(val) | Self::Long(val) => *val,
-        }
-    }
+    UnsignedInt(u64),
+    UnsignedLong(u64),
 }
 
 lazy_static! {
@@ -231,6 +228,12 @@ lazy_static! {
     ]);
 }
 
+fn consume<'a>(tokens: &mut &[TokenType<'a>]) -> TokenType<'a> {
+    let next_token;
+    (next_token, *tokens) = tokens.split_first().expect("Unexpected EOF");
+    next_token.clone()
+}
+
 fn try_consume(tokens: &mut &[TokenType], token: TokenType) -> bool {
     let is_match = tokens[0] == token;
     if is_match {
@@ -258,46 +261,47 @@ fn switch_name() -> String {
 }
 
 fn is_type_specifier(token: &TokenType) -> bool {
-    matches!(
-        *token,
-        TokenType::Specifier("int") | TokenType::Specifier("long")
-    )
+    use TokenType::Specifier;
+    match token {
+        Specifier("int") | Specifier("long") | Specifier("signed") | Specifier("unsigned") => true,
+        _ => false,
+    }
 }
 fn is_assignment_token(token: &TokenType) -> bool {
     use TokenType::*;
-    matches!(
-        token,
-        PlusEqual
-            | HyphenEqual
-            | StarEqual
-            | ForwardSlashEqual
-            | PercentEqual
-            | AmpersandEqual
-            | PipeEqual
-            | CaretEqual
-            | LeftShiftEqual
-            | RightShiftEqual
-    )
+    match token {
+        PlusEqual | HyphenEqual | StarEqual | ForwardSlashEqual | PercentEqual | AmpersandEqual
+        | PipeEqual | CaretEqual | LeftShiftEqual | RightShiftEqual => true,
+        _ => false,
+    }
 }
 
 fn parse_type(tokens: &mut &[TokenType]) -> CType {
     use TokenType::Specifier;
     let index = tokens.iter().position(|token| !is_type_specifier(token));
-    let index = index.unwrap_or(tokens.len());
-    let type_tokens = &tokens[..index];
-    *tokens = &tokens[index..];
+    let type_tokens;
+    (type_tokens, *tokens) = tokens.split_at(index.unwrap_or(tokens.len()));
 
     let count_token = |token| type_tokens.iter().filter(|elem| **elem == token).count();
+    let signed_count = count_token(Specifier("signed"));
+    let unsigned_count = count_token(Specifier("unsigned"));
     let int_count = count_token(Specifier("int"));
     let long_count = count_token(Specifier("long"));
-    if int_count == 1 && long_count == 0 {
-        CType::Int
-    } else if (int_count == 0 || int_count == 1) && long_count == 1 {
-        CType::Long
-    } else if (int_count == 0 || int_count == 1) && long_count == 2 {
-        CType::Long // Long Long but we represent it the same as they are both 8 bits
-    } else {
-        panic!("Invalid type!")
+
+    let is_signed = match (signed_count, unsigned_count) {
+        (0, 0) | (1, 0) => true,
+        (0, 1) => false,
+        _ => panic!("Cannot specify signed or unsigned more than once!"),
+    };
+    assert!(type_tokens.len() > 0, "Must specify type!");
+    assert!(int_count <= 1, "Repeated int keyword!");
+
+    match (long_count, is_signed) {
+        (0, false) => CType::UnsignedInt,
+        (0, true) => CType::Int,
+        (1 | 2, false) => CType::UnsignedLong,
+        (1 | 2, true) => CType::Long,
+        _ => panic!("Too many long specifiers"),
     }
 }
 
@@ -312,18 +316,16 @@ fn parse_specifiers(tokens: &mut &[TokenType]) -> (CType, Option<StorageClass>) 
         }
         *tokens = &tokens[1..];
     }
-    if storage_classes.len() > 1 {
-        panic!("Invalid storage class!")
-    }
-    let c_type = parse_type(&mut &types[..]);
-    let storage_class = storage_classes.pop();
-    (c_type, storage_class)
+    assert!(
+        storage_classes.len() <= 1,
+        "Can only have one storage class!"
+    );
+    (parse_type(&mut &types[..]), storage_classes.pop())
 }
 
 fn parse_identifier<'a>(tokens: &mut &[TokenType<'a>]) -> &'a str {
     // Parses an identifier and advances the cursor
-    let next_token = &tokens[0];
-    *tokens = &tokens[1..];
+    let next_token = consume(tokens);
     match next_token {
         TokenType::Identifier(name) => name,
         _ => panic!("Expected identifier"),
@@ -332,8 +334,7 @@ fn parse_identifier<'a>(tokens: &mut &[TokenType<'a>]) -> &'a str {
 fn parse_binop(tokens: &mut &[TokenType]) -> BinaryOperator {
     // Advance cursor, and map tokens representing binary operations to binary op type
     use TokenType::*;
-    let next_token = &tokens[0];
-    *tokens = &tokens[1..];
+    let next_token = consume(tokens);
     match next_token {
         // Math or Assignment
         Plus | PlusEqual => BinaryOperator::Add,
@@ -393,8 +394,7 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -
 }
 fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
     // Parses a factor (unary value/operator) of a larger expression
-    let token = &tokens[0];
-    *tokens = &tokens[1..];
+    let token = consume(tokens);
     match token {
         TokenType::Constant(val) => match val.parse::<i32>() {
             Ok(val) => Expression::Constant(Constant::Int(val.into())).into(),
@@ -403,8 +403,21 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
             ))
             .into(),
         },
-        TokenType::LongConstant(val) => Expression::Constant(Constant::Long(
+        TokenType::ConstantLong(val) => Expression::Constant(Constant::Long(
             val.parse().expect("Failed to convert constant to long"),
+        ))
+        .into(),
+        TokenType::Unsigned(val) => match val.parse::<u32>() {
+            Ok(val) => Expression::Constant(Constant::UnsignedInt(val.into())).into(),
+            Err(_) => Expression::Constant(Constant::UnsignedLong(
+                val.parse()
+                    .expect("Failed to convert unsigned constant to int"),
+            ))
+            .into(),
+        },
+        TokenType::UnsignedLong(val) => Expression::Constant(Constant::UnsignedLong(
+            val.parse()
+                .expect("Failed to convert unsigend constant to long"),
         ))
         .into(),
         TokenType::Hyphen => {
@@ -496,13 +509,11 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> TypedExpressi
     left
 }
 fn parse_optional_expression(tokens: &mut &[TokenType]) -> Option<TypedExpression> {
+    use TokenType::*;
     match tokens[0] {
-        TokenType::Constant(_)
-        | TokenType::Hyphen
-        | TokenType::Tilde
-        | TokenType::Exclam
-        | TokenType::OpenParen
-        | TokenType::Identifier(_) => Some(parse_expression(tokens, 0)),
+        Constant(_) | Hyphen | Tilde | Exclam | OpenParen | Identifier(_) => {
+            Some(parse_expression(tokens, 0))
+        }
         _ => None,
     }
 }
@@ -647,12 +658,9 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
             ctype: CType::Function(param_types, ctype.into()),
         })
     } else {
-        let value = match tokens[0] {
-            TokenType::Equal => {
-                *tokens = &tokens[1..];
-                Some(parse_expression(tokens, 0))
-            }
-            _ => None,
+        let value = match try_consume(tokens, TokenType::Equal) {
+            true => Some(parse_expression(tokens, 0)),
+            false => None,
         };
         expect(tokens, TokenType::SemiColon);
         Declaration::Variable(VariableDeclaration {

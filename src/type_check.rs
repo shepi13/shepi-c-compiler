@@ -81,14 +81,11 @@ pub struct TypedProgram {
 
 pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Constant {
     match &expr.expr {
-        Expression::Constant(constexpr) => {
-            let val = constexpr.value();
-            match ctype {
-                CType::Int => Constant::Int(val & 0xFFFFFFFF),
-                CType::Long => Constant::Long(val),
-                _ => panic!("Invalid conversion type!"),
-            }
-        }
+        Expression::Constant(Constant::Int(val) | Constant::Long(val)) => match ctype {
+            CType::Int => Constant::Int(val & 0xFFFFFFFF),
+            CType::Long => Constant::Long(*val),
+            _ => panic!("Invalid conversion type!"),
+        },
         Expression::Unary(UnaryOperator::Negate, constexpr) => {
             eval_constant_expr(&constexpr, ctype)
         }
@@ -212,9 +209,8 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
             let mut case_vals = HashSet::new();
             for case in switch.cases {
                 let constexpr = eval_constant_expr(&case.1, &cond_type);
-                let val = constexpr.value();
-                assert!(!case_vals.contains(&val), "Duplicate case!");
-                case_vals.insert(val);
+                assert!(!case_vals.contains(&constexpr), "Duplicate case!");
+                case_vals.insert(constexpr.clone());
                 new_cases.push((case.0, Expression::Constant(constexpr).into()));
             }
             switch.cases = new_cases;
@@ -254,6 +250,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
         Expression::Constant(constant) => match constant {
             Constant::Int(_) => set_type(Expression::Constant(constant).into(), &CType::Int),
             Constant::Long(_) => set_type(Expression::Constant(constant).into(), &CType::Long),
+            _ => panic!("Not implemented!"),
         },
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_expression(*inner, table);
@@ -425,7 +422,11 @@ fn type_check_function(
 
 fn parse_static_initializer(init: &Option<TypedExpression>, ctype: &CType) -> StaticInitializer {
     let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
-    let val = init_val.map_or(0, |constexpr| constexpr.value());
+    let val = match init_val {
+        Some(Constant::Int(val)) | Some(Constant::Long(val)) => val,
+        None => 0,
+        _ => panic!("Not implemented"),
+    };
     match ctype {
         CType::Int => StaticInitializer::Initialized(Initializer::Int(val)),
         CType::Long => StaticInitializer::Initialized(Initializer::Long(val)),
@@ -492,14 +493,12 @@ fn type_check_var_declaration(
 }
 
 fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
-    let mut init_value = if var.value.is_none() {
-        if var.storage == Some(StorageClass::Extern) {
-            StaticInitializer::None
-        } else {
-            StaticInitializer::Tentative
-        }
-    } else {
-        parse_static_initializer(&var.value, &var.ctype)
+    let mut init_value = match &var.value {
+        Some(_) => parse_static_initializer(&var.value, &var.ctype),
+        None => match var.storage {
+            Some(StorageClass::Extern) => StaticInitializer::None,
+            _ => StaticInitializer::Tentative,
+        },
     };
 
     let mut global = var.storage != Some(StorageClass::Static);

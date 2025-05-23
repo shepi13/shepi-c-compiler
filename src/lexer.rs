@@ -7,7 +7,9 @@ pub enum TokenType<'a> {
     Keyword(&'a str),
     Identifier(&'a str),
     Constant(&'a str),
-    LongConstant(&'a str),
+    ConstantLong(&'a str),
+    Unsigned(&'a str),
+    UnsignedLong(&'a str),
     // Symbols
     OpenParen,
     CloseParen,
@@ -66,8 +68,10 @@ impl<'a> TokenType<'a> {
             TokenType::Keyword(_) => TokenType::Keyword(data),
             TokenType::Identifier(_) => TokenType::Identifier(data),
             TokenType::Constant(_) => TokenType::Constant(data),
-            TokenType::LongConstant(_) => TokenType::LongConstant(&data[..data.len() - 1]),
+            TokenType::ConstantLong(_) => TokenType::ConstantLong(&data[..data.len() - 1]),
             TokenType::Specifier(_) => TokenType::Specifier(data),
+            TokenType::Unsigned(_) => TokenType::Unsigned(&data[..data.len() - 1]),
+            TokenType::UnsignedLong(_) => TokenType::UnsignedLong(&data[..data.len() - 2]),
             _ => token_type.clone(),
         }
     }
@@ -82,6 +86,8 @@ lazy_static! {
             r"(^long\b)",
             r"(^static\b)",
             r"(^extern\b)",
+            r"(^signed\b)",
+            r"(^unsigned\b)",
         ].join("|")).unwrap()));
         regexes.push((TokenType::Keyword(""), Regex::new(&[
             r"(^void\b)",
@@ -104,8 +110,16 @@ lazy_static! {
             Regex::new(r"^[a-zA-Z_]\w*\b").unwrap(),
         ));
         regexes.push((
-            TokenType::LongConstant(""),
+            TokenType::Unsigned(""),
+            Regex::new(r"^[0-9]+[uU]\b").unwrap(),
+        ));
+        regexes.push((
+            TokenType::ConstantLong(""),
             Regex::new(r"^[0-9]+[lL]\b").unwrap(),
+        ));
+        regexes.push((
+            TokenType::UnsignedLong(""),
+            Regex::new(r"^[0-9]+([lL][uU]|[uU][lL])\b").unwrap(),
         ));
         regexes.push((
             TokenType::Constant(""),
