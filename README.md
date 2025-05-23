@@ -14,3 +14,13 @@ Currently supports:
 - Arithmetic/Relational/Bitwise Operators (with short circuting && and || as well as precedence climbing)
 - static/extern
 - signed/unsigned int/long types with proper C conversions and casting
+----------------
+In progress:
+
+- Structs/Unions
+- Floats and Doubles
+- Pointers/Arrays (including cstrings)
+- Dynamic memory allocation
+- const / enum
+
+- Optimizations
