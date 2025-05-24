@@ -10,6 +10,7 @@ pub enum TokenType<'a> {
     ConstantLong(&'a str),
     Unsigned(&'a str),
     UnsignedLong(&'a str),
+    Double(&'a str),
     // Symbols
     OpenParen,
     CloseParen,
@@ -64,14 +65,16 @@ pub enum TokenType<'a> {
 
 impl<'a> TokenType<'a> {
     fn from(data: &'a str, token_type: &'a TokenType) -> TokenType<'a> {
+        println!("{:#?}", token_type);
         match token_type {
             TokenType::Keyword(_) => TokenType::Keyword(data),
             TokenType::Identifier(_) => TokenType::Identifier(data),
             TokenType::Constant(_) => TokenType::Constant(data),
-            TokenType::ConstantLong(_) => TokenType::ConstantLong(&data[..data.len() - 1]),
+            TokenType::ConstantLong(_) => TokenType::ConstantLong(data),
             TokenType::Specifier(_) => TokenType::Specifier(data),
-            TokenType::Unsigned(_) => TokenType::Unsigned(&data[..data.len() - 1]),
-            TokenType::UnsignedLong(_) => TokenType::UnsignedLong(&data[..data.len() - 2]),
+            TokenType::Unsigned(_) => TokenType::Unsigned(data),
+            TokenType::UnsignedLong(_) => TokenType::UnsignedLong(data),
+            TokenType::Double(_) => TokenType::Double(data),
             _ => token_type.clone(),
         }
     }
@@ -82,48 +85,53 @@ lazy_static! {
         let mut regexes: Vec<(TokenType, Regex)> = Vec::new();
         // Keywords
         regexes.push((TokenType::Specifier(""), Regex::new(&[
-            r"(^int\b)",
-            r"(^long\b)",
-            r"(^static\b)",
-            r"(^extern\b)",
-            r"(^signed\b)",
-            r"(^unsigned\b)",
+            r"^int\b",
+            r"^long\b",
+            r"^static\b",
+            r"^extern\b",
+            r"^signed\b",
+            r"^unsigned\b",
+            r"^double\b",
         ].join("|")).unwrap()));
         regexes.push((TokenType::Keyword(""), Regex::new(&[
-            r"(^void\b)",
-            r"(^return\b)",
-            r"(^if\b)",
-            r"(^else\b)",
-            r"(^goto\b)",
-            r"(^do\b)",
-            r"(^for\b)",
-            r"(^while\b)",
-            r"(^break\b)",
-            r"(^continue\b)",
-            r"(^switch\b)",
-            r"(^case\b)",
-            r"(^default\b)",
+            r"^void\b",
+            r"^return\b",
+            r"^if\b",
+            r"^else\b",
+            r"^goto\b",
+            r"^do\b",
+            r"^for\b",
+            r"^while\b",
+            r"^break\b",
+            r"^continue\b",
+            r"^switch\b",
+            r"^case\b",
+            r"^default\b",
         ].join("|")).unwrap()));
         // Identifiers and Constants
         regexes.push((
             TokenType::Identifier(""),
-            Regex::new(r"^[a-zA-Z_]\w*\b").unwrap(),
+            Regex::new(r"(^[a-zA-Z_]\w*\b)").unwrap(),
         ));
         regexes.push((
             TokenType::Unsigned(""),
-            Regex::new(r"^[0-9]+[uU]\b").unwrap(),
+            Regex::new(r"^((?<val>[0-9]+)[uU])[^\w.]").unwrap(),
         ));
         regexes.push((
             TokenType::ConstantLong(""),
-            Regex::new(r"^[0-9]+[lL]\b").unwrap(),
+            Regex::new(r"^((?<val>[0-9]+)[lL])[^\w.]").unwrap(),
         ));
         regexes.push((
             TokenType::UnsignedLong(""),
-            Regex::new(r"^[0-9]+([lL][uU]|[uU][lL])\b").unwrap(),
+            Regex::new(r"^((?<val>[0-9]+)(?:[lL][uU]|[uU][lL]))[^\w.]").unwrap(),
+        ));
+        regexes.push((
+            TokenType::Double(""),
+            Regex::new(r"^(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]").unwrap(),
         ));
         regexes.push((
             TokenType::Constant(""),
-            Regex::new(r"^[0-9]+\b").unwrap(),
+            Regex::new(r"^(?<val>[0-9]+)[^\w.]").unwrap(),
         ));
         // 3 Character Symbols
         regexes.push((TokenType::LeftShiftEqual, Regex::new(r"^<<=").unwrap()));
@@ -184,12 +192,23 @@ pub fn parse<'a>(mut data: &'a str) -> Vec<TokenType<'a>> {
             data = &data[1..];
             continue;
         }
-        if let Some((result, token)) = token_regexes
+        if let Some((captures, token)) = token_regexes
             .iter()
-            .find_map(|token_re| token_re.1.find(data).map(|m| (m.as_str(), &token_re.0)))
+            .find_map(|token_re| token_re.1.captures(data).map(|m| (m, &token_re.0)))
         {
-            data = &data[result.len()..];
-            tokens.push(TokenType::from(result, token));
+            // Use the first capture group instead of 0 so we can exclude characters (fake lookahead). Defaults to 0 if no match
+            let fullmatch = captures
+                .get(1)
+                .map(|m| m.as_str())
+                .unwrap_or(captures.get(0).unwrap().as_str());
+            // Use val capture group to capture data, defaults to full match if it doesn't exist
+            let datamatch = captures
+                .name("val")
+                .map(|m| m.as_str())
+                .unwrap_or(fullmatch);
+            // Consume data and push token
+            data = &data[fullmatch.len()..];
+            tokens.push(TokenType::from(datamatch, token));
         } else {
             panic!("Failed to match token '{}'", first_char);
         }

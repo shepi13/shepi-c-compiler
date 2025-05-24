@@ -37,41 +37,43 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum SymbolAttr {
     Function(FunctionAttributes),
     Static(StaticAttributes),
     Local,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionAttributes {
     pub defined: bool,
     pub global: bool,
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct StaticAttributes {
     pub init: StaticInitializer,
     pub global: bool,
 }
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum StaticInitializer {
     Tentative,
     Initialized(Initializer),
     None,
 }
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Initializer {
     Int(i64), // Limited to i32, but we store as i64 for matching and do our own conversion
     Long(i64),
     UnsignedInt(u64),
     UnsignedLong(u64),
+    Double(f64),
 }
 impl Initializer {
-    pub fn value(&self) -> i128 {
+    pub fn int_value(&self) -> i128 {
         match self {
             Self::Int(val) | Self::Long(val) => *val as i128,
             Self::UnsignedInt(val) | Self::UnsignedLong(val) => *val as i128,
+            Self::Double(val) => *val as i128,
         }
     }
 }
@@ -84,7 +86,7 @@ pub struct TypedProgram {
 
 pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Constant {
     match &expr.expr {
-        Expression::Constant(constant) => eval_int_constant(constant, ctype),
+        Expression::Constant(constant) => eval_constant(constant, ctype),
         Expression::Unary(UnaryOperator::Negate, constexpr) => {
             eval_constant_expr(&constexpr, ctype)
         }
@@ -92,16 +94,16 @@ pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Constant {
     }
 }
 
-fn eval_int_constant(constant: &Constant, ctype: &CType) -> Constant {
-    let val = match constant {
-        Constant::Int(val) | Constant::Long(val) => *val as i128,
-        Constant::UnsignedInt(val) | Constant::UnsignedLong(val) => *val as i128,
-    };
+fn eval_constant(constant: &Constant, ctype: &CType) -> Constant {
     match ctype {
-        CType::Int => Constant::Int((val & 0xFFFFFFFF) as i64),
-        CType::Long => Constant::Long((val & 0xFFFFFFFFFFFFFFFF) as i64),
-        CType::UnsignedInt => Constant::UnsignedInt((val as u64) & 0xFFFFFFFF),
-        CType::UnsignedLong => Constant::UnsignedLong(val as u64),
+        CType::Int => Constant::Int((constant.int_value() & 0xFFFFFFFF) as i64),
+        CType::Long => Constant::Long((constant.int_value() & 0xFFFFFFFFFFFFFFFF) as i64),
+        CType::UnsignedInt => Constant::UnsignedInt((constant.int_value() as u64) & 0xFFFFFFFF),
+        CType::UnsignedLong => Constant::UnsignedLong(constant.int_value() as u64),
+        CType::Double => match constant {
+            Constant::Double(val) => Constant::Double(*val),
+            _ => Constant::Double(constant.int_value() as f64),
+        },
         CType::Function(_, _) => panic!("Not a variable"),
     }
 }
@@ -116,7 +118,9 @@ pub fn get_type(expression: &TypedExpression) -> CType {
     expression.ctype.clone().expect("Undefined type!")
 }
 pub fn get_common_type(left_type: CType, right_type: CType) -> CType {
-    if left_type == right_type {
+    if left_type == CType::Double || right_type == CType::Double {
+        CType::Double
+    } else if left_type == right_type {
         left_type
     } else if left_type.size() == right_type.size() {
         if left_type.is_signed() {
@@ -229,8 +233,17 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
             let mut case_vals = HashSet::new();
             for case in switch.cases {
                 let constexpr = eval_constant_expr(&case.1, &cond_type);
-                assert!(!case_vals.contains(&constexpr), "Duplicate case!");
-                case_vals.insert(constexpr.clone());
+                let case_typed = type_check_expression(case.1, table);
+                assert!(
+                    get_type(&case_typed).is_int(),
+                    "Switch case must be integer type!"
+                );
+                assert!(cond_type.is_int(), "Switch condition must be integer type!");
+                assert!(
+                    !case_vals.contains(&constexpr.int_value()),
+                    "Duplicate case!"
+                );
+                case_vals.insert(constexpr.int_value());
                 new_cases.push((case.0, Expression::Constant(constexpr).into()));
             }
             switch.cases = new_cases;
@@ -276,6 +289,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             Constant::UnsignedLong(_) => {
                 set_type(Expression::Constant(constant).into(), &CType::UnsignedLong)
             }
+            Constant::Double(_) => set_type(Expression::Constant(constant).into(), &CType::Double),
         },
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_expression(*inner, table);
@@ -287,61 +301,58 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let new_type = get_type(&typed_inner);
             let unary_expr = Expression::Unary(op.clone(), typed_inner.into()).into();
             match op {
-                UnaryOperator::LogicalNot => set_type(unary_expr, &CType::Int),
-                _ => set_type(unary_expr, &new_type),
+                UnaryOperator::LogicalNot => return set_type(unary_expr, &CType::Int),
+                UnaryOperator::Complement => {
+                    assert!(new_type.is_int(), "Invalid operand for operator `~`")
+                }
+                _ => (),
             }
+            set_type(unary_expr, &new_type)
         }
         Expression::Binary(binary) => {
             use BinaryOperator::*;
             use Expression::Binary;
             let left = type_check_expression(binary.left, table);
             let right = type_check_expression(binary.right, table);
-            if matches!(
-                binary.operator,
-                BinaryOperator::LogicalAnd | BinaryOperator::LogicalOr
-            ) {
-                let binexpr = Binary(
-                    BinaryExpression {
-                        left,
-                        right,
-                        ..*binary
-                    }
-                    .into(),
-                );
-                set_type(binexpr.into(), &CType::Int)
-            } else if matches!(
-                binary.operator,
-                BinaryOperator::LeftShift | BinaryOperator::RightShift
-            ) {
-                let left_type = &get_type(&left);
-                let binexpr = Binary(
-                    BinaryExpression {
-                        left,
-                        right,
-                        ..*binary
-                    }
-                    .into(),
-                );
-                set_type(binexpr.into(), left_type)
-            } else {
-                let common_type = get_common_type(get_type(&left), get_type(&right));
-                let left = convert_to(left, &common_type);
-                let right = convert_to(right, &common_type);
-                let binexpr = Binary(
-                    BinaryExpression {
-                        left,
-                        right,
-                        operator: binary.operator.clone(),
-                        ..*binary
-                    }
-                    .into(),
-                );
-                match binary.operator {
-                    Add | Subtract | Multiply | Divide | Remainder | BitAnd | BitOr | BitXor
-                    | LeftShift | RightShift => set_type(binexpr.into(), &common_type),
-                    _ => set_type(binexpr.into(), &CType::Int),
+            let common_type = get_common_type(get_type(&left), get_type(&right));
+            // Generate type for expression
+            let ctype = match binary.operator {
+                Add | Subtract | Multiply | Divide => common_type.clone(),
+                BitAnd | BitOr | BitXor => {
+                    assert!(
+                        common_type.is_int(),
+                        "Operands for bitwise operators must be integer types!"
+                    );
+                    common_type.clone()
                 }
-            }
+                Remainder => {
+                    assert!(
+                        common_type.is_int(),
+                        "Operands for remainder must be integer types!"
+                    );
+                    common_type.clone()
+                }
+                LeftShift | RightShift => {
+                    assert!(
+                        common_type.is_int(),
+                        "Operands for bitshift must be integer types!"
+                    );
+                    get_type(&left)
+                }
+                _ => CType::Int,
+            };
+            // Generate necessary casts
+            let expr = match binary.operator {
+                LogicalAnd | LogicalOr | LeftShift | RightShift => {
+                    BinaryExpression { left, right, ..*binary }
+                }
+                _ => {
+                    let left = convert_to(left, &common_type);
+                    let right = convert_to(right, &common_type);
+                    BinaryExpression { left, right, ..*binary }
+                }
+            };
+            set_type(Binary(expr.into()).into(), &ctype)
         }
         Expression::Assignment(assign) => {
             let left = type_check_expression(assign.left, table);
@@ -358,14 +369,8 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let common_type = get_common_type(get_type(&if_true), get_type(&if_false));
             let if_true = convert_to(if_true, &common_type);
             let if_false = convert_to(if_false, &common_type);
-            let condition_expr = Expression::Condition(
-                ConditionExpression {
-                    condition,
-                    if_true,
-                    if_false,
-                }
-                .into(),
-            );
+            let condition_expr =
+                Expression::Condition(ConditionExpression { condition, if_true, if_false }.into());
             set_type(condition_expr.into(), &common_type)
         }
         Expression::FunctionCall(name, args) => {
@@ -447,15 +452,27 @@ fn type_check_function(
 
 fn parse_static_initializer(init: &Option<TypedExpression>, ctype: &CType) -> StaticInitializer {
     let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
-    let val = init_val.unwrap_or(Constant::Int(0)).value();
+    let init_val = init_val.unwrap_or(Constant::Int(0));
+    use Constant::*;
+    match init_val {
+        Int(val) | Long(val) => gen_initializer(val as i128, ctype),
+        UnsignedInt(val) | UnsignedLong(val) => gen_initializer(val as i128, ctype),
+        Double(val) => gen_initializer(val, ctype),
+    }
+}
 
+fn gen_initializer<T>(val: T, ctype: &CType) -> StaticInitializer
+where
+    T: num_traits::AsPrimitive<i64>,
+    T: num_traits::AsPrimitive<u64>,
+    T: num_traits::AsPrimitive<f64>,
+{
     match ctype {
-        CType::Int => StaticInitializer::Initialized(Initializer::Int(val as i64)),
-        CType::Long => StaticInitializer::Initialized(Initializer::Long(val as i64)),
-        CType::UnsignedInt => StaticInitializer::Initialized(Initializer::UnsignedInt(val as u64)),
-        CType::UnsignedLong => {
-            StaticInitializer::Initialized(Initializer::UnsignedLong(val as u64))
-        }
+        CType::Int => StaticInitializer::Initialized(Initializer::Int(val.as_())),
+        CType::Long => StaticInitializer::Initialized(Initializer::Long(val.as_())),
+        CType::UnsignedInt => StaticInitializer::Initialized(Initializer::UnsignedInt(val.as_())),
+        CType::UnsignedLong => StaticInitializer::Initialized(Initializer::UnsignedLong(val.as_())),
+        CType::Double => StaticInitializer::Initialized(Initializer::Double(val.as_())),
         CType::Function(_, _) => panic!("Not a variable!"),
     }
 }
@@ -492,10 +509,7 @@ fn type_check_var_declaration(
                 var.name.clone(),
                 Symbol {
                     ctype: var.ctype.clone(),
-                    attrs: SymbolAttr::Static(StaticAttributes {
-                        init: init_value,
-                        global: false,
-                    }),
+                    attrs: SymbolAttr::Static(StaticAttributes { init: init_value, global: false }),
                 },
             );
             var
@@ -510,10 +524,7 @@ fn type_check_var_declaration(
             );
             let new_init = var.value.map(|init| type_check_expression(init, table));
             let new_init = new_init.map(|init| convert_to(init, &var.ctype));
-            VariableDeclaration {
-                value: new_init,
-                ..var
-            }
+            VariableDeclaration { value: new_init, ..var }
         }
     }
 }
@@ -553,10 +564,7 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
         var.name.clone(),
         Symbol {
             ctype: var.ctype.clone(),
-            attrs: SymbolAttr::Static(StaticAttributes {
-                init: init_value,
-                global,
-            }),
+            attrs: SymbolAttr::Static(StaticAttributes { init: init_value, global }),
         },
     );
 }

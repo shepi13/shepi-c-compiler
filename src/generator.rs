@@ -509,13 +509,7 @@ fn gen_short_circuit(
 fn gen_temp_var(ctype: CType, symbols: &mut Symbols) -> Value {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let tmp_name = format!("tmp.{}", COUNTER.fetch_add(1, Ordering::Relaxed));
-    symbols.insert(
-        tmp_name.clone(),
-        Symbol {
-            ctype,
-            attrs: SymbolAttr::Local,
-        },
-    );
+    symbols.insert(tmp_name.clone(), Symbol { ctype, attrs: SymbolAttr::Local });
     Value::Variable(tmp_name)
 }
 

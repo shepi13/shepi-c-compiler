@@ -63,6 +63,7 @@ pub enum CType {
     Long,
     UnsignedInt,
     UnsignedLong,
+    Double,
     Function(Vec<CType>, Box<CType>),
 }
 
@@ -71,6 +72,7 @@ impl CType {
         match self {
             CType::Int | CType::UnsignedInt => 4,
             CType::Long | CType::UnsignedLong => 8,
+            CType::Double => 8,
             CType::Function(_, _) => panic!("Not a variable or constant!"),
         }
     }
@@ -78,7 +80,14 @@ impl CType {
         match self {
             CType::UnsignedInt | CType::UnsignedLong => false,
             CType::Int | CType::Long => true,
-            CType::Function(_, _) => panic!("Not a variable or constant!"),
+            CType::Double => panic!("Not an integer type!"),
+            CType::Function(_, _) => panic!("Not an integer type!"),
+        }
+    }
+    pub fn is_int(&self) -> bool {
+        match self {
+            Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong => true,
+            Self::Double | Self::Function(_, _) => false,
         }
     }
 }
@@ -120,19 +129,12 @@ pub struct TypedExpression {
 }
 impl From<Expression> for TypedExpression {
     fn from(value: Expression) -> Self {
-        Self {
-            ctype: None,
-            expr: value,
-        }
+        Self { ctype: None, expr: value }
     }
 }
 impl From<Expression> for Box<TypedExpression> {
     fn from(value: Expression) -> Self {
-        TypedExpression {
-            ctype: None,
-            expr: value,
-        }
-        .into()
+        TypedExpression { ctype: None, expr: value }.into()
     }
 }
 #[derive(Debug)]
@@ -203,19 +205,21 @@ pub enum BinaryOperator {
     GreaterThan,
     GreaterThanEqual,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Int(i64), // Limited to i32, but we'll store it as i64 for convenient conversions
     Long(i64),
     UnsignedInt(u64),
     UnsignedLong(u64),
+    Double(f64),
 }
 
 impl Constant {
-    pub fn value(&self) -> i128 {
+    pub fn int_value(&self) -> i128 {
         match self {
             Self::Int(val) | Self::Long(val) => *val as i128,
             Self::UnsignedInt(val) | Self::UnsignedLong(val) => *val as i128,
+            Self::Double(val) => *val as i128,
         }
     }
 }
@@ -290,7 +294,11 @@ fn switch_name() -> String {
 fn is_type_specifier(token: &TokenType) -> bool {
     use TokenType::Specifier;
     match token {
-        Specifier("int") | Specifier("long") | Specifier("signed") | Specifier("unsigned") => true,
+        Specifier("int")
+        | Specifier("long")
+        | Specifier("signed")
+        | Specifier("unsigned")
+        | Specifier("double") => true,
         _ => false,
     }
 }
@@ -308,12 +316,13 @@ fn parse_type(tokens: &mut &[TokenType]) -> CType {
     let index = tokens.iter().position(|token| !is_type_specifier(token));
     let type_tokens;
     (type_tokens, *tokens) = tokens.split_at(index.unwrap_or(tokens.len()));
-
+    // Count specifier tokens
     let count_token = |token| type_tokens.iter().filter(|elem| **elem == token).count();
     let signed_count = count_token(Specifier("signed"));
     let unsigned_count = count_token(Specifier("unsigned"));
     let int_count = count_token(Specifier("int"));
     let long_count = count_token(Specifier("long"));
+    let double_count = count_token(Specifier("double"));
 
     let is_signed = match (signed_count, unsigned_count) {
         (0, 0) | (1, 0) => true,
@@ -322,6 +331,15 @@ fn parse_type(tokens: &mut &[TokenType]) -> CType {
     };
     assert!(type_tokens.len() > 0, "Must specify type!");
     assert!(int_count <= 1, "Repeated int keyword!");
+
+    // Doubles must be either double or long double
+    if double_count == 1 && [0, 1].contains(&long_count) {
+        assert!(unsigned_count == 0, "Double cannot be unsigned!");
+        assert!(signed_count == 0, "Double cannot be signed!");
+        assert!(int_count == 0, "Mixed int/double declaration!");
+        return CType::Double;
+    }
+    assert!(double_count == 0, "Invalid double declaration");
 
     match (long_count, is_signed) {
         (0, false) => CType::UnsignedInt,
@@ -444,7 +462,11 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
         },
         TokenType::UnsignedLong(val) => Expression::Constant(Constant::UnsignedLong(
             val.parse()
-                .expect("Failed to convert unsigend constant to long"),
+                .expect("Failed to convert unsigned constant to long"),
+        ))
+        .into(),
+        TokenType::Double(val) => Expression::Constant(Constant::Double(
+            val.parse().expect("Failed to convert to double!"),
         ))
         .into(),
         TokenType::Hyphen => {
@@ -505,12 +527,7 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> TypedExpressi
             expect(tokens, TokenType::Colon);
             let if_false = parse_expression(tokens, token_prec);
             left = Expression::Condition(
-                ConditionExpression {
-                    condition: left,
-                    if_true,
-                    if_false,
-                }
-                .into(),
+                ConditionExpression { condition: left, if_true, if_false }.into(),
             )
             .into();
         } else {
@@ -522,13 +539,7 @@ fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> TypedExpressi
                 parse_expression(tokens, token_prec + 1)
             };
             left = Expression::Binary(
-                BinaryExpression {
-                    operator,
-                    left,
-                    right,
-                    is_assignment,
-                }
-                .into(),
+                BinaryExpression { operator, left, right, is_assignment }.into(),
             )
             .into();
         }
