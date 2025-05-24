@@ -44,6 +44,7 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
             }
             Instruction::Compare(_, _, _) => rewrite_cmp(&mut instructions, instruction),
             Instruction::Push(_) => rewrite_push(&mut instructions, instruction),
+            Instruction::MovSignExtend(_, _) => rewrite_sign_extend(&mut instructions, instruction),
             Instruction::MovZeroExtend(_, _) => rewrite_zero_extend(&mut instructions, instruction),
             _ => instructions.push(instruction),
         }
@@ -62,6 +63,24 @@ fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
         instructions.push(Instruction::Mov(Reg(R10), dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
+    }
+}
+
+fn rewrite_sign_extend(instructions: &mut Vec<Instruction>, sign_x: Instruction) {
+    let Instruction::MovSignExtend(mut src, dst) = sign_x else {
+        panic!("Expected moveSX!")
+    };
+    // src cannot be constant
+    if matches!(src, IMM(_)) {
+        instructions.push(Instruction::Mov(src, Reg(R10), Longword));
+        src = Reg(R10)
+    }
+    // dst cannot be in memory
+    if is_mem_operand(&dst) {
+        instructions.push(Instruction::MovSignExtend(src, Reg(R11)));
+        instructions.push(Instruction::Mov(Reg(R11), dst, Quadword))
+    } else {
+        instructions.push(Instruction::MovSignExtend(src, dst));
     }
 }
 
@@ -150,13 +169,13 @@ fn rewrite_arithmetic_binary(instructions: &mut Vec<Instruction>, bin_op: Instru
     }
 }
 
-fn check_overflow(operand: &Operand, max_size: i128) -> bool {
+pub fn check_overflow(operand: &Operand, max_size: i128) -> bool {
     match operand {
         Operand::IMM(val) => *val > max_size,
         _ => false,
     }
 }
 
-fn is_mem_operand(operand: &Operand) -> bool {
+pub fn is_mem_operand(operand: &Operand) -> bool {
     matches!(operand, Operand::Data(_) | Operand::Stack(_))
 }
