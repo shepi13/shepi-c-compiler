@@ -510,6 +510,7 @@ fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
             parser::Constant::UnsignedInt(_) => CType::UnsignedInt,
             parser::Constant::Long(_) => CType::Long,
             parser::Constant::UnsignedLong(_) => CType::UnsignedLong,
+            parser::Constant::Double(_) => CType::Double,
         },
     }
 }
@@ -521,6 +522,7 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
             parser::Constant::UnsignedInt(val) | parser::Constant::UnsignedLong(val) => {
                 Operand::IMM(val.into())
             }
+            parser::Constant::Double(_) => panic!("Not implemented!"),
         },
         generator::Value::Variable(name) => {
             let symbol = &symbols[&name];
