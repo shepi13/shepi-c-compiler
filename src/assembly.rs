@@ -536,7 +536,6 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
                         stack.stack_offset += 8 + (8 - stack.stack_offset % 8);
                     }
                 }
-                println!("Var: {name} -> {}", stack.stack_offset);
                 stack.variables.insert(name.to_string(), stack.stack_offset);
                 Operand::Stack(stack.stack_offset as isize)
             }

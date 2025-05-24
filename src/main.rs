@@ -19,6 +19,16 @@ struct Args {
     /// File to compile
     filename: String,
 
+    ///Libraries to link
+    #[arg(short = 'l')]
+    libraries: Vec<String>,
+
+    #[arg(short = 'L')]
+    library_paths: Vec<String>,
+
+    #[arg(long)]
+    print_commands: bool,
+
     /// Only run the lexer
     #[arg(short, long)]
     lex: bool,
@@ -71,10 +81,12 @@ fn main() {
     let output_file = path_with_extension(&args.filename, "");
 
     // Run preprocessor
-    let status = Command::new("gcc")
-        .args(["-E", "-P", &args.filename, "-o", &preprocess_file])
-        .status()
-        .expect("Preprocessor failed to run!");
+    let mut preprocessor = Command::new("gcc");
+    preprocessor.args(["-E", "-P", &args.filename, "-o", &preprocess_file]);
+    if args.print_commands {
+        println!("Running preprocessor: {:?}", preprocessor);
+    }
+    let status = preprocessor.status().expect("Preprocessor failed to run!");
     if !status.success() {
         panic!("Preprocessor exited with failure");
     }
@@ -142,17 +154,35 @@ fn main() {
     }
 
     if args.compile_only {
-        let status = Command::new("gcc")
-            .args([&assembly_file, "-c", "-o", &object_file])
-            .status()
-            .expect("Assembler failed to run!");
+        let mut assembler = Command::new("gcc");
+        assembler.args([&assembly_file, "-c", "-o", &object_file]);
+        if args.print_commands {
+            println!("Running assembler: {:?}", assembler);
+        }
+        let status = assembler.status().expect("Assembler failed to run!");
         if !status.success() {
             panic!("Assembler exited with error!");
         }
     } else {
         // Run linker
-        let status = Command::new("gcc")
-            .args([&assembly_file, "-o", &output_file])
+        let linker_args = [
+            vec![assembly_file, String::from("-o"), output_file],
+            args.libraries
+                .iter()
+                .map(|lib| format!("-l{}", &lib))
+                .collect(),
+            args.library_paths
+                .iter()
+                .map(|path| format!("-L{}", &path))
+                .collect(),
+        ]
+        .concat();
+        let mut linker = Command::new("gcc");
+        linker.args(linker_args);
+        if args.print_commands {
+            println!("Running linker: {:?}", linker);
+        }
+        let status = linker
             .status()
             .expect("Assembly and Linking failed to run!");
         if !status.success() {

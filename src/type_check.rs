@@ -225,7 +225,6 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
         Switch(mut switch) => {
             switch.condition = type_check_expression(switch.condition, table);
             let cond_type = get_type(&switch.condition);
-            println!("Condition type: {:#?}", cond_type);
             let mut new_cases = Vec::new();
             let mut case_vals = HashSet::new();
             for case in switch.cases {
