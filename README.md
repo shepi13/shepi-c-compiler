@@ -11,9 +11,11 @@ Currently supports:
 - Loops
 - Functions
 - If, Conditionals, and Switch Statements
+- Gotos and Labels
 - Arithmetic/Relational/Bitwise Operators (with short circuting && and || as well as precedence climbing)
-- static/extern
-- signed/unsigned int/long types with proper C conversions and casting
+- Compound assignment, Increment and Decrement operators
+- Static and Extern variables
+- Signed/Unsigned integer types with proper C conversions and casting, including long/long long
 ----------------
 In progress:
 
