@@ -34,6 +34,10 @@ pub enum Instruction {
     SignExtend(Value, Value),
     ZeroExtend(Value, Value),
     Truncate(Value, Value),
+    DoubleToInt(Value, Value),
+    DoubleToUInt(Value, Value),
+    IntToDouble(Value, Value),
+    UIntToDouble(Value, Value),
     UnaryOp(InstructionUnary),
     BinaryOp(InstructionBinary),
     Copy(InstructionCopy),
@@ -120,6 +124,7 @@ pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &mut Symbols) -> Progra
                         CType::Long => Initializer::Long(0),
                         CType::UnsignedInt => Initializer::UnsignedInt(0),
                         CType::UnsignedLong => Initializer::UnsignedLong(0),
+                        CType::Double => Initializer::Double(0.0),
                         _ => panic!("Not a variable"),
                     };
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
@@ -448,7 +453,15 @@ fn gen_expression(
             }
             let dst = gen_temp_var(new_type.clone(), symbols);
 
-            if new_type.size() == old_type.size() {
+            if old_type == CType::Double && new_type.is_signed() {
+                instructions.push(Instruction::DoubleToInt(result, dst.clone()));
+            } else if old_type == CType::Double {
+                instructions.push(Instruction::DoubleToUInt(result, dst.clone()));
+            } else if new_type == CType::Double && old_type.is_signed() {
+                instructions.push(Instruction::IntToDouble(result, dst.clone()))
+            } else if new_type == CType::Double {
+                instructions.push(Instruction::UIntToDouble(result, dst.clone()))
+            } else if new_type.size() == old_type.size() {
                 instructions.push(Instruction::Copy(InstructionCopy {
                     src: result,
                     dst: dst.clone(),
