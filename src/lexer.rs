@@ -65,7 +65,6 @@ pub enum TokenType<'a> {
 
 impl<'a> TokenType<'a> {
     fn from(data: &'a str, token_type: &'a TokenType) -> TokenType<'a> {
-        println!("{:#?}", token_type);
         match token_type {
             TokenType::Keyword(_) => TokenType::Keyword(data),
             TokenType::Identifier(_) => TokenType::Identifier(data),
