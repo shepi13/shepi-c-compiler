@@ -305,6 +305,10 @@ fn gen_instructions(
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Instruction::MovZeroExtend(src, dst));
             }
+            generator::Instruction::DoubleToInt(_, _)
+            | generator::Instruction::DoubleToUInt(_, _)
+            | generator::Instruction::IntToDouble(_, _)
+            | generator::Instruction::UIntToDouble(_, _) => panic!("Not implemented!"),
         }
     }
     asm_instructions
