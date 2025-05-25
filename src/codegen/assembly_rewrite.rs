@@ -1,9 +1,8 @@
-use crate::assembly::BinaryOperator;
-use crate::assembly::{
-    self, AssemblyType::Longword, AssemblyType::Quadword, Function, Instruction, Operand,
+use super::assembly_gen::Register::*;
+use super::assembly_gen::{
+    AssemblyType::Longword, AssemblyType::Quadword, BinaryOperator, Function, Instruction, Operand,
     Operand::IMM, Operand::Register as Reg, Program, TopLevelDecl,
 };
-use assembly::Register::*;
 
 pub fn rewrite_assembly(program: Program) -> Program {
     let decls = program.program.into_iter().map(rewrite_decl);

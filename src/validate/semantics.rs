@@ -1,4 +1,4 @@
-use crate::parser::{
+use crate::parse::parse_tree::{
     self, AssignmentExpression, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop,
     Program, Statement, StorageClass, SwitchStatement, TypedExpression, VariableDeclaration,
 };
@@ -146,7 +146,7 @@ impl SymbolTable {
         let decl = self.declare_local_variable(VariableDeclaration {
             name: name.clone(),
             value: None,
-            ctype: parser::CType::Int,
+            ctype: parse_tree::CType::Int,
             storage: None,
         });
         decl.name
@@ -284,7 +284,7 @@ fn resolve_block_item<'a>(block_item: BlockItem, symbols: &mut SymbolTable) -> B
     }
 }
 fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Statement {
-    use parser::Statement::*;
+    use parse_tree::Statement::*;
     match statement {
         Return(expr) => Return(resolve_expression(expr, symbols)),
         ExprStmt(expr) => ExprStmt(resolve_expression(expr, symbols)),
@@ -387,11 +387,11 @@ fn resolve_variable_declaration(
 }
 
 fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> TypedExpression {
-    use parser::Expression::*;
+    use parse_tree::Expression::*;
     let expr = expr.expr;
     match expr {
         Unary(operator, expr) => {
-            if matches!(operator, parser::UnaryOperator::Increment(_)) {
+            if matches!(operator, parse_tree::UnaryOperator::Increment(_)) {
                 assert!(matches!(expr.expr, Variable(_)), "Invalid lvalue!");
             }
             Unary(operator, resolve_expression(*expr, symbols).into()).into()

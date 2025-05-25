@@ -3,7 +3,7 @@ use std::{
     iter::zip,
 };
 
-use crate::parser::{
+use crate::parse::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, CType,
     ConditionExpression, Constant, Declaration, Expression, ForInit, FunctionDeclaration, Program,
     Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
