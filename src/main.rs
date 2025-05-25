@@ -1,11 +1,7 @@
-mod assembly;
-mod assembly_rewrite;
-mod emission;
-mod generator;
-mod lexer;
-mod parser;
-mod semantics;
-mod type_check;
+mod codegen;
+mod parse;
+mod tac_generation;
+mod validate;
 
 use std::fs;
 use std::path::PathBuf;
@@ -93,32 +89,26 @@ fn main() {
 
     // Run Lexer
     let program = fs::read_to_string(&preprocess_file).expect("Failed to read preprocessed code!");
-    let tokens = lexer::parse(&program);
-
+    let tokens = parse::lexer::parse(&program);
     if args.lex {
         println!("Tokens:\n\n {:#?}", tokens);
         return;
     }
-
     // Run Parser
-    let parser_ast = parser::parse(&mut &tokens[..]);
-
+    let parser_ast = parse::parser::parse(&mut &tokens[..]);
     if args.parse {
         println!("Parser AST: {:#?}", parser_ast);
         return;
     }
 
     // Run Semantics Analysis Pass
-    let resolved_ast = semantics::resolve_program(parser_ast);
-
+    let resolved_ast = validate::semantics::resolve_program(parser_ast);
     if args.semantics {
         println!("Resolved AST: {:#?}", resolved_ast);
         return;
     }
-
     // Run type checking
-    let mut typed_program = type_check::type_check_program(resolved_ast);
-
+    let mut typed_program = validate::type_check::type_check_program(resolved_ast);
     if args.validate {
         println!("Resolved AST: {:#?}", typed_program.program);
         println!("Symbols: {:#?}", typed_program.symbols);
@@ -126,8 +116,8 @@ fn main() {
     }
 
     // Run TAC Generation
-    let tac_ast = generator::gen_tac_ast(typed_program.program, &mut typed_program.symbols);
-
+    let tac_ast =
+        tac_generation::generator::gen_tac_ast(typed_program.program, &mut typed_program.symbols);
     if args.tacky {
         println!("Tacky AST: {:#?}", tac_ast);
         println!("Tacky symbols: {:#?}", typed_program.symbols);
@@ -135,10 +125,9 @@ fn main() {
     }
 
     // Run Full codegen
-    let assembly_ast = assembly::gen_assembly_tree(tac_ast, typed_program.symbols);
+    let assembly_ast = codegen::assembly_gen::gen_assembly_tree(tac_ast, typed_program.symbols);
     //Rewrite instructions
-    let assembly_ast = assembly_rewrite::rewrite_assembly(assembly_ast);
-
+    let assembly_ast = codegen::assembly_rewrite::rewrite_assembly(assembly_ast);
     if args.codegen {
         // Print generated code?
         println!("Assembly AST: {:#?}", assembly_ast);
@@ -146,7 +135,7 @@ fn main() {
     }
 
     // Code emission
-    emission::emit_program(&assembly_file, assembly_ast);
+    codegen::emission::emit_program(&assembly_file, assembly_ast);
 
     if args.assembler_only {
         // Print assembly?

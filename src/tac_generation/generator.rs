@@ -3,8 +3,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    parser::{self, BinaryOperator, CType, StorageClass},
-    type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
+    parse::parse_tree::{self, BinaryOperator, CType, StorageClass},
+    validate::type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
 };
 
 pub type Program = Vec<TopLevelDecl>;
@@ -59,11 +59,11 @@ pub enum UnaryOperator {
     LogicalNot,
 }
 impl InstructionUnary {
-    fn from(operator: parser::UnaryOperator, src: Value, dst: Value) -> Self {
+    fn from(operator: parse_tree::UnaryOperator, src: Value, dst: Value) -> Self {
         let operator = match operator {
-            parser::UnaryOperator::Complement => UnaryOperator::Complement,
-            parser::UnaryOperator::LogicalNot => UnaryOperator::LogicalNot,
-            parser::UnaryOperator::Negate => UnaryOperator::Negate,
+            parse_tree::UnaryOperator::Complement => UnaryOperator::Complement,
+            parse_tree::UnaryOperator::LogicalNot => UnaryOperator::LogicalNot,
+            parse_tree::UnaryOperator::Negate => UnaryOperator::Negate,
             _ => panic!("Invalid TAC operator"),
         };
         Self { operator, src, dst }
@@ -95,15 +95,15 @@ pub enum JumpType {
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    ConstValue(parser::Constant),
+    ConstValue(parse_tree::Constant),
     Variable(String),
 }
 
-pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &mut Symbols) -> Program {
+pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Program {
     let mut program: Program = Vec::new();
 
     for decl in parser_ast {
-        if let parser::Declaration::Function(function) = decl {
+        if let parse_tree::Declaration::Function(function) = decl {
             program.push(TopLevelDecl::Function(gen_function(function, symbols)));
         }
     }
@@ -140,12 +140,12 @@ pub fn gen_tac_ast(parser_ast: parser::Program, symbols: &mut Symbols) -> Progra
     }
     program
 }
-fn gen_function(function: parser::FunctionDeclaration, symbols: &mut Symbols) -> Function {
+fn gen_function(function: parse_tree::FunctionDeclaration, symbols: &mut Symbols) -> Function {
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions, symbols);
         instructions.push(Instruction::Return(Value::ConstValue(
-            parser::Constant::Int(0),
+            parse_tree::Constant::Int(0),
         )));
     }
     let global = symbols[&function.name].get_function_attrs().global;
@@ -156,21 +156,21 @@ fn gen_function(function: parser::FunctionDeclaration, symbols: &mut Symbols) ->
         instructions,
     }
 }
-fn gen_block(block: parser::Block, instructions: &mut Vec<Instruction>, symbols: &mut Symbols) {
+fn gen_block(block: parse_tree::Block, instructions: &mut Vec<Instruction>, symbols: &mut Symbols) {
     for block_item in block {
         match block_item {
-            parser::BlockItem::StatementItem(statement) => {
+            parse_tree::BlockItem::StatementItem(statement) => {
                 gen_instructions(statement, instructions, symbols)
             }
-            parser::BlockItem::DeclareItem(parser::Declaration::Variable(decl)) => {
+            parse_tree::BlockItem::DeclareItem(parse_tree::Declaration::Variable(decl)) => {
                 gen_declaration(decl, instructions, symbols);
             }
-            parser::BlockItem::DeclareItem(parser::Declaration::Function(_)) => (),
+            parse_tree::BlockItem::DeclareItem(parse_tree::Declaration::Function(_)) => (),
         }
     }
 }
 fn gen_declaration(
-    declaration: parser::VariableDeclaration,
+    declaration: parse_tree::VariableDeclaration,
     instructions: &mut Vec<Instruction>,
     symbols: &mut Symbols,
 ) {
@@ -188,20 +188,20 @@ fn gen_declaration(
     }
 }
 fn gen_instructions(
-    statement: parser::Statement,
+    statement: parse_tree::Statement,
     instructions: &mut Vec<Instruction>,
     symbols: &mut Symbols,
 ) {
     match statement {
-        parser::Statement::Return(value) => {
+        parse_tree::Statement::Return(value) => {
             let dst = gen_expression(value, instructions, symbols);
             instructions.push(Instruction::Return(dst));
         }
-        parser::Statement::Null => (),
-        parser::Statement::ExprStmt(value) => {
+        parse_tree::Statement::Null => (),
+        parse_tree::Statement::ExprStmt(value) => {
             gen_expression(value, instructions, symbols);
         }
-        parser::Statement::If(condition, if_true, if_false) => {
+        parse_tree::Statement::If(condition, if_true, if_false) => {
             let end_label = gen_label("end");
             let else_label = gen_label("else");
             let condition = gen_expression(condition, instructions, symbols);
@@ -218,23 +218,23 @@ fn gen_instructions(
             }
             instructions.push(Instruction::Label(end_label));
         }
-        parser::Statement::Goto(target) => {
+        parse_tree::Statement::Goto(target) => {
             instructions.push(Instruction::Jump(target.to_string()));
         }
-        parser::Statement::Label(name, statement) => {
+        parse_tree::Statement::Label(name, statement) => {
             instructions.push(Instruction::Label(name.to_string()));
             gen_instructions(*statement, instructions, symbols);
         }
-        parser::Statement::Compound(block) => gen_block(block, instructions, symbols),
-        parser::Statement::Break(name) => {
+        parse_tree::Statement::Compound(block) => gen_block(block, instructions, symbols),
+        parse_tree::Statement::Break(name) => {
             let target = format!("break_{}", name);
             instructions.push(Instruction::Jump(target));
         }
-        parser::Statement::Continue(name) => {
+        parse_tree::Statement::Continue(name) => {
             let target = format!("continue_{}", name);
             instructions.push(Instruction::Jump(target));
         }
-        parser::Statement::DoWhile(loop_data) => {
+        parse_tree::Statement::DoWhile(loop_data) => {
             let start = format!("start_{}", loop_data.label);
             instructions.push(Instruction::Label(start.clone()));
             gen_instructions(*loop_data.body, instructions, symbols);
@@ -247,7 +247,7 @@ fn gen_instructions(
             }));
             instructions.push(Instruction::Label(format!("break_{}", loop_data.label)));
         }
-        parser::Statement::While(loop_data) => {
+        parse_tree::Statement::While(loop_data) => {
             let break_label = format!("break_{}", loop_data.label);
             let continue_label = format!("continue_{}", loop_data.label);
             instructions.push(Instruction::Label(continue_label.clone()));
@@ -261,12 +261,12 @@ fn gen_instructions(
             instructions.push(Instruction::Jump(continue_label));
             instructions.push(Instruction::Label(break_label));
         }
-        parser::Statement::For(init, loop_data, post_loop) => {
+        parse_tree::Statement::For(init, loop_data, post_loop) => {
             match init {
-                parser::ForInit::Decl(decl) => {
+                parse_tree::ForInit::Decl(decl) => {
                     gen_declaration(decl, instructions, symbols);
                 }
-                parser::ForInit::Expr(Some(expr)) => {
+                parse_tree::ForInit::Expr(Some(expr)) => {
                     gen_expression(expr, instructions, symbols);
                 }
                 _ => (),
@@ -288,7 +288,7 @@ fn gen_instructions(
             instructions.push(Instruction::Jump(start_label));
             instructions.push(Instruction::Label(break_label));
         }
-        parser::Statement::Switch(switch) => {
+        parse_tree::Statement::Switch(switch) => {
             let src1 = gen_expression(switch.condition, instructions, symbols);
             let dst = gen_temp_var(CType::Int, symbols);
             for case in switch.cases {
@@ -313,21 +313,24 @@ fn gen_instructions(
             gen_instructions(*switch.statement, instructions, symbols);
             instructions.push(Instruction::Label(format!("break_{}", switch.label)));
         }
-        parser::Statement::Case(_, _) | parser::Statement::Default(_) => {
+        parse_tree::Statement::Case(_, _) | parse_tree::Statement::Default(_) => {
             panic!("Compiler error: case/default should be replaced in typecheck pass")
         }
     }
 }
 fn gen_expression(
-    expression: parser::TypedExpression,
+    expression: parse_tree::TypedExpression,
     instructions: &mut Vec<Instruction>,
     symbols: &mut Symbols,
 ) -> Value {
     let expr_type = || expression.ctype.expect("Undefined type!");
     match expression.expr {
-        parser::Expression::Constant(constexpr) => Value::ConstValue(constexpr),
-        parser::Expression::Unary(parser::UnaryOperator::Increment(increment_type), expr) => {
-            use parser::Increment::*;
+        parse_tree::Expression::Constant(constexpr) => Value::ConstValue(constexpr),
+        parse_tree::Expression::Unary(
+            parse_tree::UnaryOperator::Increment(increment_type),
+            expr,
+        ) => {
+            use parse_tree::Increment::*;
             let dst = gen_expression(*expr, instructions, symbols);
             let operator = match increment_type {
                 PreIncrement | PostIncrement => BinaryOperator::Add,
@@ -336,7 +339,7 @@ fn gen_expression(
             let bin_instruction = Instruction::BinaryOp(InstructionBinary {
                 operator,
                 src1: dst.clone(),
-                src2: Value::ConstValue(parser::Constant::Int(1)),
+                src2: Value::ConstValue(parse_tree::Constant::Int(1)),
                 dst: dst.clone(),
             });
             match increment_type {
@@ -355,7 +358,7 @@ fn gen_expression(
                 }
             }
         }
-        parser::Expression::Unary(operator, expr) => {
+        parse_tree::Expression::Unary(operator, expr) => {
             let src = gen_expression(*expr, instructions, symbols);
             let dst = gen_temp_var(expr_type(), symbols);
             instructions.push(Instruction::UnaryOp(InstructionUnary::from(
@@ -365,9 +368,9 @@ fn gen_expression(
             )));
             dst
         }
-        parser::Expression::Binary(operator) => {
+        parse_tree::Expression::Binary(operator) => {
             // Short circuiting needs special handling
-            if let parser::BinaryOperator::LogicalAnd | parser::BinaryOperator::LogicalOr =
+            if let parse_tree::BinaryOperator::LogicalAnd | parse_tree::BinaryOperator::LogicalOr =
                 operator.operator
             {
                 return gen_short_circuit(
@@ -393,11 +396,11 @@ fn gen_expression(
             }));
             dst
         }
-        parser::Expression::Variable(name) => Value::Variable(name.to_string()),
-        parser::Expression::Assignment(assignment) => {
+        parse_tree::Expression::Variable(name) => Value::Variable(name.to_string()),
+        parse_tree::Expression::Assignment(assignment) => {
             let result = gen_expression(assignment.right, instructions, symbols);
             match &assignment.left.expr {
-                parser::Expression::Variable(name) => {
+                parse_tree::Expression::Variable(name) => {
                     instructions.push(Instruction::Copy(InstructionCopy {
                         src: result,
                         dst: Value::Variable(name.to_string()),
@@ -407,7 +410,7 @@ fn gen_expression(
                 _ => panic!("Left hand side of assignment should be variable!"),
             }
         }
-        parser::Expression::Condition(condition) => {
+        parse_tree::Expression::Condition(condition) => {
             let dst = gen_temp_var(expr_type(), symbols);
             let end_label = gen_label("cond_end");
             let e2_label = gen_label("cond_e2");
@@ -432,7 +435,7 @@ fn gen_expression(
             instructions.push(Instruction::Label(end_label));
             dst
         }
-        parser::Expression::FunctionCall(name, args) => {
+        parse_tree::Expression::FunctionCall(name, args) => {
             let results = args
                 .into_iter()
                 .map(|arg| gen_expression(arg, instructions, symbols))
@@ -445,7 +448,7 @@ fn gen_expression(
             ));
             dst
         }
-        parser::Expression::Cast(new_type, castexpr) => {
+        parse_tree::Expression::Cast(new_type, castexpr) => {
             let old_type = get_type(&castexpr);
             let result = gen_expression(*castexpr, instructions, symbols);
             if new_type == old_type {
@@ -480,14 +483,14 @@ fn gen_expression(
 
 fn gen_short_circuit(
     instructions: &mut Vec<Instruction>,
-    operator: parser::BinaryOperator,
-    left: parser::TypedExpression,
-    right: parser::TypedExpression,
+    operator: parse_tree::BinaryOperator,
+    left: parse_tree::TypedExpression,
+    right: parse_tree::TypedExpression,
     symbols: &mut Symbols,
 ) -> Value {
     let (jump_type, label_type) = match operator {
-        parser::BinaryOperator::LogicalAnd => (JumpType::JumpIfZero, false),
-        parser::BinaryOperator::LogicalOr => (JumpType::JumpIfNotZero, true),
+        parse_tree::BinaryOperator::LogicalAnd => (JumpType::JumpIfZero, false),
+        parse_tree::BinaryOperator::LogicalOr => (JumpType::JumpIfNotZero, true),
         _ => panic!("Expected a short circuiting operator!"),
     };
     let target = gen_label(&label_type.to_string());
@@ -506,13 +509,13 @@ fn gen_short_circuit(
         target: target.clone(),
     }));
     instructions.push(Instruction::Copy(InstructionCopy {
-        src: Value::ConstValue(parser::Constant::Int(!label_type as i64)),
+        src: Value::ConstValue(parse_tree::Constant::Int(!label_type as i64)),
         dst: dst.clone(),
     }));
     instructions.push(Instruction::Jump(end.clone()));
     instructions.push(Instruction::Label(target));
     instructions.push(Instruction::Copy(InstructionCopy {
-        src: Value::ConstValue(parser::Constant::Int(label_type as i64)),
+        src: Value::ConstValue(parse_tree::Constant::Int(label_type as i64)),
         dst: dst.clone(),
     }));
     instructions.push(Instruction::Label(end));

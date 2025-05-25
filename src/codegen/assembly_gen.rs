@@ -1,16 +1,14 @@
 use std::collections::HashMap;
 
-use crate::assembly;
-use crate::assembly_rewrite::check_overflow;
-use crate::generator;
-use crate::parser;
-use crate::parser::CType;
-use crate::type_check::Initializer;
-use crate::type_check::{SymbolAttr, Symbols};
+use super::assembly_rewrite::check_overflow;
+use crate::parse::parse_tree;
+use crate::parse::parse_tree::CType;
+use crate::tac_generation::generator;
+use crate::validate::type_check::{Initializer, SymbolAttr, Symbols};
 
 use Operand::IMM;
 use Operand::Register as Reg;
-use assembly::Register::*;
+use Register::*;
 
 pub type BackendSymbols = HashMap<String, AsmSymbol>;
 #[derive(Debug)]
@@ -377,7 +375,7 @@ fn gen_binary_op(
     stack: &mut StackGen,
     symbols: &Symbols,
 ) {
-    use parser::BinaryOperator::*;
+    use parse_tree::BinaryOperator::*;
     let src_ctype = get_type(&binary_instruction.src1, symbols);
     let asm_type = AssemblyType::from(&src_ctype);
     let src1 = gen_operand(binary_instruction.src1, stack, symbols);
@@ -439,24 +437,24 @@ fn gen_binary_op(
     };
 }
 
-fn get_condition(op: parser::BinaryOperator, signed: bool) -> Condition {
+fn get_condition(op: parse_tree::BinaryOperator, signed: bool) -> Condition {
     match signed {
         true => match op {
-            parser::BinaryOperator::GreaterThan => Condition::GreaterThan,
-            parser::BinaryOperator::GreaterThanEqual => Condition::GreaterThanEqual,
-            parser::BinaryOperator::LessThan => Condition::LessThan,
-            parser::BinaryOperator::LessThanEqual => Condition::LessThanEqual,
-            parser::BinaryOperator::NotEqual => Condition::NotEqual,
-            parser::BinaryOperator::IsEqual => Condition::Equal,
+            parse_tree::BinaryOperator::GreaterThan => Condition::GreaterThan,
+            parse_tree::BinaryOperator::GreaterThanEqual => Condition::GreaterThanEqual,
+            parse_tree::BinaryOperator::LessThan => Condition::LessThan,
+            parse_tree::BinaryOperator::LessThanEqual => Condition::LessThanEqual,
+            parse_tree::BinaryOperator::NotEqual => Condition::NotEqual,
+            parse_tree::BinaryOperator::IsEqual => Condition::Equal,
             _ => panic!("Expected relational operator!"),
         },
         false => match op {
-            parser::BinaryOperator::GreaterThan => Condition::UnsignedGreaterThan,
-            parser::BinaryOperator::GreaterThanEqual => Condition::UnsignedGreaterEqual,
-            parser::BinaryOperator::LessThan => Condition::UnsignedLessThan,
-            parser::BinaryOperator::LessThanEqual => Condition::UnsignedLessEqual,
-            parser::BinaryOperator::NotEqual => Condition::NotEqual,
-            parser::BinaryOperator::IsEqual => Condition::Equal,
+            parse_tree::BinaryOperator::GreaterThan => Condition::UnsignedGreaterThan,
+            parse_tree::BinaryOperator::GreaterThanEqual => Condition::UnsignedGreaterEqual,
+            parse_tree::BinaryOperator::LessThan => Condition::UnsignedLessThan,
+            parse_tree::BinaryOperator::LessThanEqual => Condition::UnsignedLessEqual,
+            parse_tree::BinaryOperator::NotEqual => Condition::NotEqual,
+            parse_tree::BinaryOperator::IsEqual => Condition::Equal,
             _ => panic!("Expected releational operator"),
         },
     }
@@ -510,11 +508,11 @@ fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
     match &value {
         generator::Value::Variable(name) => symbols[name].ctype.clone(),
         generator::Value::ConstValue(constexpr) => match constexpr {
-            parser::Constant::Int(_) => CType::Int,
-            parser::Constant::UnsignedInt(_) => CType::UnsignedInt,
-            parser::Constant::Long(_) => CType::Long,
-            parser::Constant::UnsignedLong(_) => CType::UnsignedLong,
-            parser::Constant::Double(_) => CType::Double,
+            parse_tree::Constant::Int(_) => CType::Int,
+            parse_tree::Constant::UnsignedInt(_) => CType::UnsignedInt,
+            parse_tree::Constant::Long(_) => CType::Long,
+            parse_tree::Constant::UnsignedLong(_) => CType::UnsignedLong,
+            parse_tree::Constant::Double(_) => CType::Double,
         },
     }
 }
@@ -522,11 +520,13 @@ fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
 fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols) -> Operand {
     match value {
         generator::Value::ConstValue(constexpr) => match constexpr {
-            parser::Constant::Int(val) | parser::Constant::Long(val) => Operand::IMM(val.into()),
-            parser::Constant::UnsignedInt(val) | parser::Constant::UnsignedLong(val) => {
+            parse_tree::Constant::Int(val) | parse_tree::Constant::Long(val) => {
                 Operand::IMM(val.into())
             }
-            parser::Constant::Double(_) => panic!("Not implemented!"),
+            parse_tree::Constant::UnsignedInt(val) | parse_tree::Constant::UnsignedLong(val) => {
+                Operand::IMM(val.into())
+            }
+            parse_tree::Constant::Double(_) => panic!("Not implemented!"),
         },
         generator::Value::Variable(name) => {
             let symbol = &symbols[&name];
