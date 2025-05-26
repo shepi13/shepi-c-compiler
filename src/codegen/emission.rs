@@ -263,6 +263,7 @@ fn get_cond_code(condition: &assembly_gen::Condition) -> &str {
         Condition::UnsignedGreaterEqual => "ae",
         Condition::UnsignedLessThan => "b",
         Condition::UnsignedLessEqual => "be",
+        Condition::Parity => "p",
     }
 }
 

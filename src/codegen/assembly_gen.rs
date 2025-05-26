@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter::zip;
+use std::ops::Not;
 use std::sync::atomic::AtomicUsize;
 
 use super::assembly_rewrite::check_overflow;
@@ -154,6 +155,7 @@ pub enum Condition {
     UnsignedGreaterEqual,
     UnsignedLessThan,
     UnsignedLessEqual,
+    Parity,
 }
 
 struct StackGen {
@@ -344,6 +346,8 @@ fn gen_instructions(
                     generator::UnaryOperator::LogicalNot => {
                         // Logical not uses cmp instead of unary operators
                         if src_type == AssemblyType::Double {
+                            let nan_label = gen_label("nan");
+                            let end_label = gen_label("end");
                             asm_instructions.push(Binary(
                                 BitXor,
                                 Reg(XMM0),
@@ -351,11 +355,18 @@ fn gen_instructions(
                                 src_type.clone(),
                             ));
                             asm_instructions.push(Compare(src, Reg(XMM0), src_type));
+                            asm_instructions.push(JmpCond(Condition::Parity, nan_label.clone()));
+                            asm_instructions.push(Mov(IMM(0), dst.clone(), dst_type.clone()));
+                            asm_instructions.push(SetCond(Condition::Equal, dst.clone()));
+                            asm_instructions.push(Jmp(end_label.clone()));
+                            asm_instructions.push(Label(nan_label));
+                            asm_instructions.push(Mov(IMM(0), dst, dst_type));
+                            asm_instructions.push(Label(end_label));
                         } else {
                             asm_instructions.push(Compare(IMM(0), src, src_type.clone()));
+                            asm_instructions.push(Mov(IMM(0), dst.clone(), dst_type));
+                            asm_instructions.push(SetCond(Condition::Equal, dst));
                         }
-                        asm_instructions.push(Mov(IMM(0), dst.clone(), dst_type));
-                        asm_instructions.push(SetCond(Condition::Equal, dst));
                         continue;
                     }
                 };
@@ -377,12 +388,23 @@ fn gen_instructions(
                 let cmp_type = AssemblyType::from(&get_type(&jump.condition, symbols));
                 let dst = gen_operand(jump.condition, stack, symbols);
                 if cmp_type == AssemblyType::Double {
+                    let end_label = gen_label("jumpcond_end");
                     asm_instructions.push(Binary(BitXor, Reg(XMM0), Reg(XMM0), cmp_type.clone()));
                     asm_instructions.push(Compare(dst, Reg(XMM0), cmp_type));
+                    match jump.jump_type {
+                        generator::JumpType::JumpIfNotZero => {
+                            asm_instructions.push(JmpCond(Condition::Parity, jump.target.clone()))
+                        }
+                        generator::JumpType::JumpIfZero => {
+                            asm_instructions.push(JmpCond(Condition::Parity, end_label.clone()))
+                        }
+                    }
+                    asm_instructions.push(JmpCond(condition, jump.target));
+                    asm_instructions.push(Label(end_label));
                 } else {
                     asm_instructions.push(Compare(IMM(0), dst, cmp_type));
+                    asm_instructions.push(JmpCond(condition, jump.target));
                 }
-                asm_instructions.push(JmpCond(condition, jump.target));
             }
             generator::Instruction::Copy(copy) => {
                 let src_type = AssemblyType::from(&get_type(&copy.src, symbols));
@@ -663,10 +685,24 @@ fn gen_binary_op(
             use AssemblyType::Longword;
             let signed =
                 if asm_type == AssemblyType::Double { false } else { src_ctype.is_signed() };
+            // NAN returns true for !=, false otherwise
+            let nan_result = (binary_instruction.operator == NotEqual) as i128;
             let condition = get_condition(binary_instruction.operator, signed);
-            instructions.push(Instruction::Compare(src2, src1, asm_type));
+            let nan_label = gen_label("is_nan");
+            let end_label = gen_label("end");
+            instructions.push(Instruction::Compare(src2, src1, asm_type.clone()));
+            // Double skips the set and defaults to false if either value is NaN
+            if asm_type == AssemblyType::Double {
+                instructions.push(Instruction::JmpCond(Condition::Parity, nan_label.clone()));
+            }
             instructions.push(Instruction::Mov(IMM(0), dst.clone(), Longword));
-            instructions.push(Instruction::SetCond(condition, dst));
+            instructions.push(Instruction::SetCond(condition, dst.clone()));
+            if asm_type == AssemblyType::Double {
+                instructions.push(Instruction::Jmp(end_label.clone()));
+                instructions.push(Instruction::Label(nan_label));
+                instructions.push(Instruction::Mov(IMM(nan_result), dst, Longword));
+                instructions.push(Instruction::Label(end_label));
+            }
         }
     };
 }
