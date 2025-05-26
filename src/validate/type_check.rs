@@ -87,9 +87,7 @@ pub struct TypedProgram {
 pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Constant {
     match &expr.expr {
         Expression::Constant(constant) => eval_constant(constant, ctype),
-        Expression::Unary(UnaryOperator::Negate, constexpr) => {
-            eval_constant_expr(&constexpr, ctype)
-        }
+        Expression::Unary(UnaryOperator::Negate, constexpr) => eval_constant_expr(constexpr, ctype),
         _ => panic!("Expected constant expression!"),
     }
 }
@@ -104,7 +102,7 @@ fn eval_constant(constant: &Constant, ctype: &CType) -> Constant {
             Constant::Double(val) => Constant::Double(*val),
             _ => Constant::Double(constant.int_value() as f64),
         },
-        CType::Function(_, _) => panic!("Not a variable"),
+        _ => panic!("Not a variable"),
     }
 }
 
@@ -189,7 +187,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
                 table.current_function.as_ref().expect("Return must be inside function!");
             let cur_func_type = &table.symbols[cur_func].ctype;
             if let CType::Function(_, return_type) = cur_func_type {
-                let expr = convert_to(expr, &return_type);
+                let expr = convert_to(expr, return_type);
                 Return(expr)
             } else {
                 panic!("Failed to match function type!")
@@ -362,6 +360,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
                 _ => panic!("Variable used as function!"),
             }
         }
+        Expression::AddrOf(_) | Expression::Dereference(_) => panic!("Not implemented!"),
     }
 }
 
@@ -437,7 +436,7 @@ where
         CType::UnsignedInt => StaticInitializer::Initialized(Initializer::UnsignedInt(val.as_())),
         CType::UnsignedLong => StaticInitializer::Initialized(Initializer::UnsignedLong(val.as_())),
         CType::Double => StaticInitializer::Initialized(Initializer::Double(val.as_())),
-        CType::Function(_, _) => panic!("Not a variable!"),
+        CType::Function(_, _) | CType::Pointer(_) => panic!("Not a variable!"),
     }
 }
 

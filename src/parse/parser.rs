@@ -81,22 +81,30 @@ fn switch_name() -> String {
 
 fn is_type_specifier(token: &TokenType) -> bool {
     use TokenType::Specifier;
-    match token {
+    matches!(
+        token,
         Specifier("int")
-        | Specifier("long")
-        | Specifier("signed")
-        | Specifier("unsigned")
-        | Specifier("double") => true,
-        _ => false,
-    }
+            | Specifier("long")
+            | Specifier("signed")
+            | Specifier("unsigned")
+            | Specifier("double")
+    )
 }
 fn is_assignment_token(token: &TokenType) -> bool {
     use lexer::TokenType::*;
-    match token {
-        PlusEqual | HyphenEqual | StarEqual | ForwardSlashEqual | PercentEqual | AmpersandEqual
-        | PipeEqual | CaretEqual | LeftShiftEqual | RightShiftEqual => true,
-        _ => false,
-    }
+    matches!(
+        token,
+        PlusEqual
+            | HyphenEqual
+            | StarEqual
+            | ForwardSlashEqual
+            | PercentEqual
+            | AmpersandEqual
+            | PipeEqual
+            | CaretEqual
+            | LeftShiftEqual
+            | RightShiftEqual
+    )
 }
 
 fn parse_type(tokens: &mut &[TokenType]) -> CType {
@@ -117,7 +125,7 @@ fn parse_type(tokens: &mut &[TokenType]) -> CType {
         (0, 1) => false,
         _ => panic!("Cannot specify signed or unsigned more than once!"),
     };
-    assert!(type_tokens.len() > 0, "Must specify type!");
+    assert!(!type_tokens.is_empty(), "Must specify type!");
     assert!(int_count <= 1, "Repeated int keyword!");
 
     // Doubles must be either double or long double

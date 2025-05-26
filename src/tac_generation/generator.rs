@@ -147,7 +147,7 @@ fn gen_function(function: parse_tree::FunctionDeclaration, symbols: &mut Symbols
         instructions.push(Instruction::Return(Value::ConstValue(parse_tree::Constant::Int(0))));
     }
     let global = symbols[&function.name].get_function_attrs().global;
-    let params = function.params.into_iter().map(|param| Value::Variable(param)).collect();
+    let params = function.params.into_iter().map(Value::Variable).collect();
     Function {
         name: function.name,
         params,
@@ -465,6 +465,9 @@ fn gen_expression(
                 instructions.push(Instruction::ZeroExtend(result, dst.clone()));
             }
             dst
+        }
+        parse_tree::Expression::AddrOf(_) | parse_tree::Expression::Dereference(_) => {
+            panic!("Not implemented!")
         }
     }
 }

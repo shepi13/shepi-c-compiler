@@ -58,6 +58,7 @@ pub enum CType {
     UnsignedLong,
     Double,
     Function(Vec<CType>, Box<CType>),
+    Pointer(Box<CType>),
 }
 
 impl CType {
@@ -67,20 +68,20 @@ impl CType {
             CType::Long | CType::UnsignedLong => 8,
             CType::Double => 8,
             CType::Function(_, _) => panic!("Not a variable or constant!"),
+            CType::Pointer(_) => 8,
         }
     }
     pub fn is_signed(&self) -> bool {
         match self {
             CType::UnsignedInt | CType::UnsignedLong => false,
             CType::Int | CType::Long => true,
-            CType::Double => panic!("Not an integer type!"),
-            CType::Function(_, _) => panic!("Not an integer type!"),
+            _ => panic!("Not an integer type!"),
         }
     }
     pub fn is_int(&self) -> bool {
         match self {
             Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong => true,
-            Self::Double | Self::Function(_, _) => false,
+            Self::Double | Self::Function(_, _) | Self::Pointer(_) => false,
         }
     }
 }
@@ -140,6 +141,8 @@ pub enum Expression {
     Condition(Box<ConditionExpression>),
     FunctionCall(String, Vec<TypedExpression>),
     Cast(CType, Box<TypedExpression>),
+    Dereference(Box<Expression>),
+    AddrOf(Box<Expression>),
 }
 #[derive(Debug)]
 pub struct BinaryExpression {
@@ -167,6 +170,7 @@ pub enum UnaryOperator {
     LogicalNot,
     Increment(Increment),
 }
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub enum Increment {
     PreIncrement,

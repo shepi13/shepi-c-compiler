@@ -47,30 +47,26 @@ impl SymbolTable {
         }
     }
     fn resolve_continue(&self) -> &str {
-        if self.loops.len() == 0 {
-            panic!("Used continue outside loop!");
-        }
+        assert!(!self.loops.is_empty(), "Used continue outside loop!");
         &self.loops[self.loops.len() - 1]
     }
     fn resolve_break(&self) -> &str {
-        if self.break_scopes.len() == 0 {
-            panic!("Used break outside loop or switch!");
-        }
+        assert!(!self.break_scopes.is_empty(), "Used break outside loop or switch!");
         &self.break_scopes[self.break_scopes.len() - 1]
     }
     fn resolve_case(&mut self, matcher: TypedExpression) -> String {
         let stack_len = self.switches.len() - 1;
-        assert!(self.switches.len() > 0, "Used case outside of switch!");
+        assert!(!self.switches.is_empty(), "Used case outside of switch!");
         let case_label = case_name(&self.switches[stack_len].label);
         self.switches[stack_len].cases.push((case_label.clone(), matcher));
         case_label
     }
     fn resolve_default(&mut self) -> String {
-        if self.switches.len() == 0 {
+        if self.switches.is_empty() {
             panic!("Used default outside of switch!");
         }
         let stack_len = self.switches.len() - 1;
-        assert!(matches!(&self.switches[stack_len].default, None), "duplicate default!");
+        assert!(self.switches[stack_len].default.is_none(), "duplicate default!");
         let default_label = format!("{}.default", &self.switches[stack_len].label);
         self.switches[stack_len].default = Some(default_label.clone());
         default_label
@@ -110,11 +106,12 @@ impl SymbolTable {
         let labels = self.labels.pop().expect("Scope missing from symbol table");
         let gotos = self.gotos.pop().expect("Scope missing from symbol table");
 
-        let mut set_diff = gotos.difference(&labels);
-        match set_diff.next() {
-            Some(label) => panic!("Tried to goto '{}', but label doesn't exist", label),
-            _ => (),
-        };
+        let set_diff = gotos.difference(&labels).next();
+        assert!(
+            set_diff.is_none(),
+            "Tried to goto '{}', but label doesn't exist",
+            set_diff.unwrap()
+        );
         self.current_function = None;
     }
     fn _lookup_identifier(&self, name: &str) -> Option<&Identifier> {
@@ -159,7 +156,7 @@ impl SymbolTable {
             self.declare_global_variable(decl.name.clone());
             decl
         } else {
-            let unique_name = variable_name(&name);
+            let unique_name = variable_name(name);
             self.identifiers[stack_len].insert(
                 decl.name,
                 Identifier {
@@ -194,7 +191,8 @@ impl SymbolTable {
         );
     }
     fn resolve_identifier(&self, name: &str) -> String {
-        let ident = self._lookup_identifier(name).expect(&format!("Undeclared variable {}", name));
+        let ident =
+            self._lookup_identifier(name).unwrap_or_else(|| panic!("Undeclared variable {}", name));
         ident.unique_name.to_string()
     }
     fn resolve_label(&mut self, target: String) -> String {
@@ -249,7 +247,7 @@ fn resolve_function(
     symbols.leave_scope();
     function
 }
-fn resolve_block_item<'a>(block_item: BlockItem, symbols: &mut SymbolTable) -> BlockItem {
+fn resolve_block_item(block_item: BlockItem, symbols: &mut SymbolTable) -> BlockItem {
     match block_item {
         BlockItem::StatementItem(statement) => {
             BlockItem::StatementItem(resolve_statement(statement, symbols))
@@ -259,7 +257,7 @@ fn resolve_block_item<'a>(block_item: BlockItem, symbols: &mut SymbolTable) -> B
         }
     }
 }
-fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Statement {
+fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Statement {
     use parse_tree::Statement::*;
     match statement {
         Return(expr) => Return(resolve_expression(expr, symbols)),
@@ -271,11 +269,7 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             let result = If(
                 resolve_expression(cond, symbols),
                 resolve_statement(*if_true, symbols).into(),
-                match *if_false {
-                    Some(if_false) => Some(resolve_statement(if_false, symbols)),
-                    None => None,
-                }
-                .into(),
+                if_false.map(|stmt| resolve_statement(stmt, symbols)).into(),
             );
             symbols.leave_scope();
             result
@@ -302,11 +296,15 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
                         decl.storage.is_none(),
                         "For loop initializer cannot be static or extern"
                     );
-                    ForInit::Decl(resolve_variable_declaration(decl, symbols, false))
+                    let mut decl = symbols.declare_local_variable(decl);
+                    decl.value = decl.value.map(|expr| resolve_expression(expr, symbols));
+                    ForInit::Decl(decl)
                 }
-                ForInit::Expr(expr) => ForInit::Expr(resolve_optional_expression(expr, symbols)),
+                ForInit::Expr(expr) => {
+                    ForInit::Expr(expr.map(|expr| resolve_expression(expr, symbols)))
+                }
             };
-            let post = resolve_optional_expression(post, symbols);
+            let post = post.map(|expr| resolve_expression(expr, symbols));
             let loop_data = resolve_loop(loop_data, symbols, false);
             symbols.leave_scope();
             For(init, loop_data, post)
@@ -333,27 +331,19 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
 
 fn resolve_declaration(decl: Declaration, symbols: &mut SymbolTable, global: bool) -> Declaration {
     match decl {
-        Declaration::Variable(var_decl) => {
-            Declaration::Variable(resolve_variable_declaration(var_decl, symbols, global))
+        Declaration::Variable(mut var_decl) => {
+            if global {
+                symbols.declare_global_variable(var_decl.name.clone());
+            } else {
+                var_decl = symbols.declare_local_variable(var_decl);
+            }
+            var_decl.value = var_decl.value.map(|expr| resolve_expression(expr, symbols));
+            Declaration::Variable(var_decl)
         }
         Declaration::Function(func_decl) => {
             Declaration::Function(resolve_function(func_decl, symbols))
         }
     }
-}
-
-fn resolve_variable_declaration(
-    mut decl: VariableDeclaration,
-    symbols: &mut SymbolTable,
-    global: bool,
-) -> VariableDeclaration {
-    if global {
-        symbols.declare_global_variable(decl.name.clone());
-    } else {
-        decl = symbols.declare_local_variable(decl)
-    };
-    decl.value = resolve_optional_expression(decl.value, symbols);
-    decl
 }
 
 fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> TypedExpression {
@@ -406,16 +396,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
             FunctionCall(name, args).into()
         }
         Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()).into(),
-    }
-}
-
-fn resolve_optional_expression(
-    expr: Option<TypedExpression>,
-    symbols: &mut SymbolTable,
-) -> Option<TypedExpression> {
-    match expr {
-        Some(expr) => Some(resolve_expression(expr, symbols)),
-        None => None,
+        Dereference(_) | AddrOf(_) => panic!("Not implemented!"),
     }
 }
 

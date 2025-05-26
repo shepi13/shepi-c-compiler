@@ -80,10 +80,9 @@ impl<'a> TokenType<'a> {
 }
 
 lazy_static! {
-    static ref token_regexes: Vec<(TokenType<'static>, Regex)> = {
-        let mut regexes: Vec<(TokenType, Regex)> = Vec::new();
-        // Keywords
-        regexes.push((TokenType::Specifier(""), Regex::new(&[
+    static ref token_regexes: Vec<(TokenType<'static>, Regex)> = vec![
+        // Type specifiers
+        (TokenType::Specifier(""), Regex::new(&[
             r"^int\b",
             r"^long\b",
             r"^static\b",
@@ -91,8 +90,9 @@ lazy_static! {
             r"^signed\b",
             r"^unsigned\b",
             r"^double\b",
-        ].join("|")).unwrap()));
-        regexes.push((TokenType::Keyword(""), Regex::new(&[
+        ].join("|")).unwrap()),
+        // Other keywords
+        (TokenType::Keyword(""), Regex::new(&[
             r"^void\b",
             r"^return\b",
             r"^if\b",
@@ -106,87 +106,70 @@ lazy_static! {
             r"^switch\b",
             r"^case\b",
             r"^default\b",
-        ].join("|")).unwrap()));
+        ].join("|")).unwrap()),
         // Identifiers and Constants
-        regexes.push((
-            TokenType::Identifier(""),
-            Regex::new(r"(^[a-zA-Z_]\w*\b)").unwrap(),
-        ));
-        regexes.push((
-            TokenType::Unsigned(""),
-            Regex::new(r"^((?<val>[0-9]+)[uU])[^\w.]").unwrap(),
-        ));
-        regexes.push((
-            TokenType::ConstantLong(""),
-            Regex::new(r"^((?<val>[0-9]+)[lL])[^\w.]").unwrap(),
-        ));
-        regexes.push((
-            TokenType::UnsignedLong(""),
-            Regex::new(r"^((?<val>[0-9]+)(?:[lL][uU]|[uU][lL]))[^\w.]").unwrap(),
-        ));
-        regexes.push((
+        (TokenType::Identifier(""), Regex::new(r"(^[a-zA-Z_]\w*\b)").unwrap()),
+        (TokenType::Constant(""), Regex::new(r"^(?<val>[0-9]+)[^\w.]").unwrap()),
+        (TokenType::Unsigned(""), Regex::new(r"^((?<val>[0-9]+)[uU])[^\w.]").unwrap()),
+        (TokenType::ConstantLong(""), Regex::new(r"^((?<val>[0-9]+)[lL])[^\w.]").unwrap()),
+        (TokenType::UnsignedLong(""), Regex::new(r"^((?<val>[0-9]+)(?:[lL][uU]|[uU][lL]))[^\w.]").unwrap()),
+        (
             TokenType::Double(""),
             Regex::new(r"^(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]").unwrap(),
-        ));
-        regexes.push((
-            TokenType::Constant(""),
-            Regex::new(r"^(?<val>[0-9]+)[^\w.]").unwrap(),
-        ));
+        ),
         // 3 Character Symbols
-        regexes.push((TokenType::LeftShiftEqual, Regex::new(r"^<<=").unwrap()));
-        regexes.push((TokenType::RightShiftEqual, Regex::new(r"^>>=").unwrap()));
+        (TokenType::RightShiftEqual, Regex::new(r"^>>=").unwrap()),
+        (TokenType::LeftShiftEqual, Regex::new(r"^<<=").unwrap()),
         // 2 Character Symbols
-        regexes.push((TokenType::Decrement, Regex::new(r"^--").unwrap()));
-        regexes.push((TokenType::Increment, Regex::new(r"^\+\+").unwrap()));
-        regexes.push((TokenType::LeftShift, Regex::new(r"^<<").unwrap()));
-        regexes.push((TokenType::RightShift, Regex::new(r"^>>").unwrap()));
-        regexes.push((TokenType::DoubleAmpersand, Regex::new(r"^\&\&").unwrap()));
-        regexes.push((TokenType::DoubleEqual, Regex::new(r"^==").unwrap()));
-        regexes.push((TokenType::DoublePipe, Regex::new(r"^\|\|").unwrap()));
-        regexes.push((TokenType::ExclamEqual, Regex::new(r"^\!=").unwrap()));
-        regexes.push((TokenType::GreaterThanEqual, Regex::new(r"^>=").unwrap()));
-        regexes.push((TokenType::LessThanEqual, Regex::new(r"^<=").unwrap()));
-        regexes.push((TokenType::PlusEqual, Regex::new(r"^\+\=").unwrap()));
-        regexes.push((TokenType::HyphenEqual, Regex::new(r"^\-\=").unwrap()));
-        regexes.push((TokenType::StarEqual, Regex::new(r"^\*\=").unwrap()));
-        regexes.push((TokenType::ForwardSlashEqual, Regex::new(r"^\/\=").unwrap()));
-        regexes.push((TokenType::PercentEqual, Regex::new(r"^\%\=").unwrap()));
-        regexes.push((TokenType::AmpersandEqual, Regex::new(r"^\&\=").unwrap()));
-        regexes.push((TokenType::CaretEqual, Regex::new(r"^\^\=").unwrap()));
-        regexes.push((TokenType::PipeEqual, Regex::new(r"^\|\=").unwrap()));
+        (TokenType::Decrement, Regex::new(r"^--").unwrap()),
+        (TokenType::Increment, Regex::new(r"^\+\+").unwrap()),
+        (TokenType::LeftShift, Regex::new(r"^<<").unwrap()),
+        (TokenType::RightShift, Regex::new(r"^>>").unwrap()),
+        (TokenType::DoubleAmpersand, Regex::new(r"^\&\&").unwrap()),
+        (TokenType::DoubleEqual, Regex::new(r"^==").unwrap()),
+        (TokenType::DoublePipe, Regex::new(r"^\|\|").unwrap()),
+        (TokenType::ExclamEqual, Regex::new(r"^\!=").unwrap()),
+        (TokenType::GreaterThanEqual, Regex::new(r"^>=").unwrap()),
+        (TokenType::LessThanEqual, Regex::new(r"^<=").unwrap()),
+        (TokenType::PlusEqual, Regex::new(r"^\+\=").unwrap()),
+        (TokenType::HyphenEqual, Regex::new(r"^\-\=").unwrap()),
+        (TokenType::StarEqual, Regex::new(r"^\*\=").unwrap()),
+        (TokenType::ForwardSlashEqual, Regex::new(r"^\/\=").unwrap()),
+        (TokenType::PercentEqual, Regex::new(r"^\%\=").unwrap()),
+        (TokenType::AmpersandEqual, Regex::new(r"^\&\=").unwrap()),
+        (TokenType::CaretEqual, Regex::new(r"^\^\=").unwrap()),
+        (TokenType::PipeEqual, Regex::new(r"^\|\=").unwrap()),
         // Single Character Symbols
-        regexes.push((TokenType::Hyphen, Regex::new(r"^-").unwrap()));
-        regexes.push((TokenType::Tilde, Regex::new(r"^~").unwrap()));
-        regexes.push((TokenType::SemiColon, Regex::new(r"^;").unwrap()));
-        regexes.push((TokenType::Plus, Regex::new(r"^\+").unwrap()));
-        regexes.push((TokenType::Star, Regex::new(r"^\*").unwrap()));
-        regexes.push((TokenType::ForwardSlash, Regex::new(r"^\/").unwrap()));
-        regexes.push((TokenType::Percent, Regex::new(r"^\%").unwrap()));
-        regexes.push((TokenType::Pipe, Regex::new(r"^\|").unwrap()));
-        regexes.push((TokenType::Caret, Regex::new(r"^\^").unwrap()));
-        regexes.push((TokenType::Ampersand, Regex::new(r"^\&").unwrap()));
-        regexes.push((TokenType::Exclam, Regex::new(r"^\!").unwrap()));
-        regexes.push((TokenType::GreaterThan, Regex::new(r"^>").unwrap()));
-        regexes.push((TokenType::LessThan, Regex::new(r"^<").unwrap()));
-        regexes.push((TokenType::Equal, Regex::new(r"^=").unwrap()));
-        regexes.push((TokenType::QuestionMark, Regex::new(r"^\?").unwrap()));
-        regexes.push((TokenType::Colon, Regex::new(r"^\:").unwrap()));
-        regexes.push((TokenType::Comma, Regex::new(r"^\,").unwrap()));
+        (TokenType::Hyphen, Regex::new(r"^-").unwrap()),
+        (TokenType::Tilde, Regex::new(r"^~").unwrap()),
+        (TokenType::SemiColon, Regex::new(r"^;").unwrap()),
+        (TokenType::Plus, Regex::new(r"^\+").unwrap()),
+        (TokenType::Star, Regex::new(r"^\*").unwrap()),
+        (TokenType::ForwardSlash, Regex::new(r"^\/").unwrap()),
+        (TokenType::Percent, Regex::new(r"^\%").unwrap()),
+        (TokenType::Pipe, Regex::new(r"^\|").unwrap()),
+        (TokenType::Caret, Regex::new(r"^\^").unwrap()),
+        (TokenType::Ampersand, Regex::new(r"^\&").unwrap()),
+        (TokenType::Exclam, Regex::new(r"^\!").unwrap()),
+        (TokenType::GreaterThan, Regex::new(r"^>").unwrap()),
+        (TokenType::LessThan, Regex::new(r"^<").unwrap()),
+        (TokenType::Equal, Regex::new(r"^=").unwrap()),
+        (TokenType::QuestionMark, Regex::new(r"^\?").unwrap()),
+        (TokenType::Colon, Regex::new(r"^\:").unwrap()),
+        (TokenType::Comma, Regex::new(r"^\,").unwrap()),
         // Brackets
-        regexes.push((TokenType::OpenParen, Regex::new(r"^\(").unwrap()));
-        regexes.push((TokenType::CloseParen, Regex::new(r"^\)").unwrap()));
-        regexes.push((TokenType::OpenBrace, Regex::new(r"^\{").unwrap()));
-        regexes.push((TokenType::CloseBrace, Regex::new(r"^\}").unwrap()));
-        regexes.push((TokenType::OpenBracket, Regex::new(r"^\[").unwrap()));
-        regexes.push((TokenType::CloseBracket, Regex::new(r"^\]").unwrap()));
-
-        regexes
-    };
+        (TokenType::OpenParen, Regex::new(r"^\(").unwrap()),
+        (TokenType::CloseParen, Regex::new(r"^\)").unwrap()),
+        (TokenType::OpenBrace, Regex::new(r"^\{").unwrap()),
+        (TokenType::CloseBrace, Regex::new(r"^\}").unwrap()),
+        (TokenType::OpenBracket, Regex::new(r"^\[").unwrap()),
+        (TokenType::CloseBracket, Regex::new(r"^\]").unwrap()),
+    ];
 }
 
-pub fn parse<'a>(mut data: &'a str) -> Vec<TokenType<'a>> {
+pub fn parse(mut data: &str) -> Vec<TokenType> {
     let mut tokens: Vec<TokenType> = Vec::new();
-    while let Some(first_char) = data.chars().nth(0) {
+    while let Some(first_char) = data.chars().next() {
         if first_char.is_whitespace() {
             data = &data[1..];
             continue;
