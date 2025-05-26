@@ -174,7 +174,7 @@ pub enum Increment {
     PreDecrement,
     PostDecrement,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOperator {
     // Numeric
     Add,
