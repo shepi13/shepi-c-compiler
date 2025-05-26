@@ -16,11 +16,10 @@ Currently supports:
 - Compound assignment, Increment and Decrement operators
 - Static and Extern variables
 - Signed/Unsigned integer types with proper C conversions and casting, including long/long long
+- Double Precision floating point operations
 ----------------
 In progress:
-
 - Structs/Unions
-- Floats and Doubles
 - Pointers/Arrays (including cstrings)
 - Dynamic memory allocation
 - const / enum
