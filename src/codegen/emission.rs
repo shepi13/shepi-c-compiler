@@ -8,11 +8,11 @@ pub fn emit_program(output_filename: &str, program: assembly_gen::Program) {
     let mut file = File::create(output_filename).expect("Failed to create file!");
     for top_level in program.program {
         match top_level {
-            assembly_gen::TopLevelDecl::FUNCTION(function) => {
+            assembly_gen::TopLevelDecl::FunctionDecl(function) => {
                 emit_function(&mut file, function, &program.backend_symbols);
             }
-            assembly_gen::TopLevelDecl::STATICVAR(var) => emit_static_var(&mut file, var),
-            assembly_gen::TopLevelDecl::STATICCONSTANT(var) => emit_static_const(&mut file, var),
+            assembly_gen::TopLevelDecl::Var(var) => emit_static_var(&mut file, var),
+            assembly_gen::TopLevelDecl::Constant(var) => emit_static_const(&mut file, var),
         }
     }
     writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
@@ -169,7 +169,7 @@ fn emit_instructions(
                 let t = get_size_suffix(asm_type);
                 writeln!(file, "    cvtsi2sd{t} {src}, {dst}").unwrap();
             }
-            assembly_gen::Instruction::NOP => panic!("Noop should just be a placeholder"),
+            assembly_gen::Instruction::Nop => panic!("Noop should just be a placeholder"),
         }
     }
 }
@@ -196,7 +196,7 @@ fn get_operand_longword(operand: &assembly_gen::Operand) -> String {
     use assembly_gen::Operand::*;
     use assembly_gen::Register::*;
     match operand {
-        IMM(val) => format!("${val}"),
+        Imm(val) => format!("${val}"),
         // x86 int registers
         Register(AX) => String::from("%eax"),
         Register(CX) => String::from("%ecx"),

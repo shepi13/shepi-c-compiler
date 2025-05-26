@@ -63,7 +63,7 @@ struct Args {
 
 fn path_with_extension(filename: &str, extension: &str) -> String {
     let mut file = PathBuf::from(&filename);
-    file.set_extension(&extension);
+    file.set_extension(extension);
     match file.to_str() {
         Some(val) => val.to_string(),
         None => {
