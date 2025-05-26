@@ -44,6 +44,10 @@ struct Args {
     #[arg(short, long)]
     tacky: bool,
 
+    /// Run assembly generation but without rewrites
+    #[arg(long)]
+    no_rewrite: bool,
+
     /// Run the lexer, parser, and all code gen, but don't output assembly
     #[arg(short = 'g', long)]
     codegen: bool,
@@ -126,6 +130,10 @@ fn main() {
 
     // Run Full codegen
     let assembly_ast = codegen::assembly_gen::gen_assembly_tree(tac_ast, typed_program.symbols);
+    if args.no_rewrite {
+        println!("Assembly AST: {:#?}", assembly_ast);
+        return;
+    }
     //Rewrite instructions
     let assembly_ast = codegen::assembly_rewrite::rewrite_assembly(assembly_ast);
     if args.codegen {
@@ -156,14 +164,8 @@ fn main() {
         // Run linker
         let linker_args = [
             vec![assembly_file, String::from("-o"), output_file],
-            args.libraries
-                .iter()
-                .map(|lib| format!("-l{}", &lib))
-                .collect(),
-            args.library_paths
-                .iter()
-                .map(|path| format!("-L{}", &path))
-                .collect(),
+            args.libraries.iter().map(|lib| format!("-l{}", &lib)).collect(),
+            args.library_paths.iter().map(|path| format!("-L{}", &path)).collect(),
         ]
         .concat();
         let mut linker = Command::new("gcc");
@@ -171,9 +173,7 @@ fn main() {
         if args.print_commands {
             println!("Running linker: {:?}", linker);
         }
-        let status = linker
-            .status()
-            .expect("Assembly and Linking failed to run!");
+        let status = linker.status().expect("Assembly and Linking failed to run!");
         if !status.success() {
             panic!("Assembler/Linker exited with failure");
         }

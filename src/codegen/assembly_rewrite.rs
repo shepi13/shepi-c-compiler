@@ -1,4 +1,4 @@
-use super::assembly_gen::Register::*;
+use super::assembly_gen::{AssemblyType, Register::*};
 use super::assembly_gen::{
     AssemblyType::Longword, AssemblyType::Quadword, BinaryOperator, Function, Instruction, Operand,
     Operand::IMM, Operand::Register as Reg, Program, TopLevelDecl,
@@ -32,19 +32,28 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
                 rewrite_div(&mut instructions, instruction)
             }
             // Arithmetic and bitwise binary operations
-            Instruction::Binary(op, _, _, _) => {
+            Instruction::Binary(op, _, _, asm_type) => {
                 use BinaryOperator::*;
                 match op {
-                    Add | BitAnd | BitOr | BitXor | Mult | Sub => {
-                        rewrite_arithmetic_binary(&mut instructions, instruction)
+                    Add | BitAnd | BitOr | BitXor | Mult | Sub | DoubleDiv => {
+                        if *asm_type == AssemblyType::Double {
+                            rewrite_arithmetic_binary_f(&mut instructions, instruction);
+                        } else {
+                            rewrite_arithmetic_binary(&mut instructions, instruction)
+                        }
                     }
                     _ => instructions.push(instruction),
                 }
+            }
+            Instruction::Compare(_, _, AssemblyType::Double) => {
+                rewrite_comisd(&mut instructions, instruction)
             }
             Instruction::Compare(_, _, _) => rewrite_cmp(&mut instructions, instruction),
             Instruction::Push(_) => rewrite_push(&mut instructions, instruction),
             Instruction::MovSignExtend(_, _) => rewrite_sign_extend(&mut instructions, instruction),
             Instruction::MovZeroExtend(_, _) => rewrite_zero_extend(&mut instructions, instruction),
+            Instruction::Cvttsd2si(_, _, _) => rewrite_cvttsd2si(&mut instructions, instruction),
+            Instruction::Cvtsi2sd(_, _, _) => rewrite_cvtsi2sd(&mut instructions, instruction),
             _ => instructions.push(instruction),
         }
     }
@@ -52,23 +61,48 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
 }
 
 fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
-    let Instruction::Mov(src, dst, mov_type) = mov else {
-        panic!("Expected mov!")
-    };
+    let Instruction::Mov(src, dst, mov_type) = mov else { panic!("Expected mov!") };
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
+    let scratch_reg = if mov_type == AssemblyType::Double { Reg(XMM14) } else { Reg(AX) };
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
-        instructions.push(Instruction::Mov(src, Reg(R10), mov_type.clone()));
-        instructions.push(Instruction::Mov(Reg(R10), dst, mov_type));
+        instructions.push(Instruction::Mov(src, scratch_reg.clone(), mov_type.clone()));
+        instructions.push(Instruction::Mov(scratch_reg, dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
     }
 }
 
-fn rewrite_sign_extend(instructions: &mut Vec<Instruction>, sign_x: Instruction) {
-    let Instruction::MovSignExtend(mut src, dst) = sign_x else {
-        panic!("Expected moveSX!")
+fn rewrite_cvttsd2si(instructions: &mut Vec<Instruction>, cvt: Instruction) {
+    let Instruction::Cvttsd2si(src, dst, cvt_type) = cvt else {
+        panic!("Expected Cvttsd2si");
     };
+    if !matches!(dst, Reg(_)) {
+        instructions.push(Instruction::Cvttsd2si(src, Reg(R11), cvt_type.clone()));
+        instructions.push(Instruction::Mov(Reg(R11), dst, cvt_type));
+    } else {
+        instructions.push(Instruction::Cvttsd2si(src, dst, cvt_type));
+    }
+}
+
+fn rewrite_cvtsi2sd(instructions: &mut Vec<Instruction>, cvt: Instruction) {
+    let Instruction::Cvtsi2sd(mut src, dst, cvt_type) = cvt else {
+        panic!("Expected Cvtsi2sd");
+    };
+    if matches!(src, IMM(_)) {
+        instructions.push(Instruction::Mov(src, Reg(R10), cvt_type.clone()));
+        src = Reg(R10);
+    }
+    if !matches!(dst, Reg(_)) {
+        instructions.push(Instruction::Cvtsi2sd(src, Reg(XMM15), cvt_type.clone()));
+        instructions.push(Instruction::Mov(Reg(XMM15), dst, AssemblyType::Double));
+    } else {
+        instructions.push(Instruction::Cvtsi2sd(src, dst, cvt_type));
+    }
+}
+
+fn rewrite_sign_extend(instructions: &mut Vec<Instruction>, sign_x: Instruction) {
+    let Instruction::MovSignExtend(mut src, dst) = sign_x else { panic!("Expected moveSX!") };
     // src cannot be constant
     if matches!(src, IMM(_)) {
         instructions.push(Instruction::Mov(src, Reg(R10), Longword));
@@ -84,9 +118,7 @@ fn rewrite_sign_extend(instructions: &mut Vec<Instruction>, sign_x: Instruction)
 }
 
 fn rewrite_zero_extend(instructions: &mut Vec<Instruction>, zero_x: Instruction) {
-    let Instruction::MovZeroExtend(src, dst) = zero_x else {
-        panic!("Expected movZX!")
-    };
+    let Instruction::MovZeroExtend(src, dst) = zero_x else { panic!("Expected movZX!") };
     // Zero extend is just a move using an intermediate register if necessary
     if is_mem_operand(&dst) {
         instructions.push(Instruction::Mov(src, Reg(R11), Longword));
@@ -97,9 +129,7 @@ fn rewrite_zero_extend(instructions: &mut Vec<Instruction>, zero_x: Instruction)
 }
 
 fn rewrite_push(instructions: &mut Vec<Instruction>, push: Instruction) {
-    let Instruction::Push(operand) = push else {
-        panic!("Expected push!")
-    };
+    let Instruction::Push(operand) = push else { panic!("Expected push!") };
     // Immediate operands to push need to be size int, otherwise we use a register
     if check_overflow(&operand, i32::MAX as i128) {
         instructions.push(Instruction::Mov(operand, Reg(R10), Quadword));
@@ -110,9 +140,7 @@ fn rewrite_push(instructions: &mut Vec<Instruction>, push: Instruction) {
 }
 
 fn rewrite_cmp(instructions: &mut Vec<Instruction>, cmp: Instruction) {
-    let Instruction::Compare(mut src, dst, cmp_type) = cmp else {
-        panic!("Expected cmp!")
-    };
+    let Instruction::Compare(mut src, dst, cmp_type) = cmp else { panic!("Expected cmp!") };
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
@@ -123,6 +151,16 @@ fn rewrite_cmp(instructions: &mut Vec<Instruction>, cmp: Instruction) {
     if matches!(dst, IMM(_)) {
         instructions.push(Instruction::Mov(dst, Reg(R11), cmp_type.clone()));
         instructions.push(Instruction::Compare(src, Reg(R11), cmp_type));
+    } else {
+        instructions.push(Instruction::Compare(src, dst, cmp_type));
+    }
+}
+
+fn rewrite_comisd(instructions: &mut Vec<Instruction>, cmp: Instruction) {
+    let Instruction::Compare(src, dst, cmp_type) = cmp else { panic!("Expected cmp!") };
+    if !matches!(dst, Reg(_)) {
+        instructions.push(Instruction::Mov(dst, Reg(XMM14), cmp_type.clone()));
+        instructions.push(Instruction::Compare(src, Reg(XMM14), cmp_type));
     } else {
         instructions.push(Instruction::Compare(src, dst, cmp_type));
     }
@@ -156,13 +194,21 @@ fn rewrite_arithmetic_binary(instructions: &mut Vec<Instruction>, bin_op: Instru
     // Rewrite dst (currently only if mult tries to put result in memory)
     if operator == BinaryOperator::Mult && matches!(dst, Operand::Data(_) | Operand::Stack(_)) {
         instructions.push(Instruction::Mov(dst.clone(), Reg(R11), op_type.clone()));
-        instructions.push(Instruction::Binary(
-            operator,
-            src,
-            Reg(R11),
-            op_type.clone(),
-        ));
+        instructions.push(Instruction::Binary(operator, src, Reg(R11), op_type.clone()));
         instructions.push(Instruction::Mov(Reg(R11), dst, op_type));
+    } else {
+        instructions.push(Instruction::Binary(operator, src, dst, op_type));
+    }
+}
+
+fn rewrite_arithmetic_binary_f(instructions: &mut Vec<Instruction>, bin_op: Instruction) {
+    let Instruction::Binary(operator, src, dst, op_type) = bin_op else {
+        panic!("Expected binary operator!")
+    };
+    if !matches!(dst, Reg(_)) {
+        instructions.push(Instruction::Mov(dst.clone(), Reg(XMM15), op_type.clone()));
+        instructions.push(Instruction::Binary(operator, src, Reg(XMM15), op_type.clone()));
+        instructions.push(Instruction::Mov(Reg(XMM15), dst, op_type));
     } else {
         instructions.push(Instruction::Binary(operator, src, dst, op_type));
     }

@@ -123,11 +123,7 @@ pub fn get_common_type(left_type: CType, right_type: CType) -> CType {
     } else if left_type == right_type {
         left_type
     } else if left_type.size() == right_type.size() {
-        if left_type.is_signed() {
-            right_type
-        } else {
-            left_type
-        }
+        if left_type.is_signed() { right_type } else { left_type }
     } else if left_type.size() > right_type.size() {
         left_type
     } else {
@@ -138,10 +134,7 @@ fn convert_to(expression: TypedExpression, ctype: &CType) -> TypedExpression {
     if get_type(&expression) == *ctype {
         expression
     } else {
-        set_type(
-            Expression::Cast(ctype.clone(), expression.into()).into(),
-            ctype,
-        )
+        set_type(Expression::Cast(ctype.clone(), expression.into()).into(), ctype)
     }
 }
 
@@ -175,10 +168,7 @@ fn type_check_declaration(decl: Declaration, table: &mut TypeTable, global: bool
 }
 
 fn type_check_block(block: Block, table: &mut TypeTable) -> Block {
-    block
-        .into_iter()
-        .map(|item| type_check_block_item(item, table))
-        .collect()
+    block.into_iter().map(|item| type_check_block_item(item, table)).collect()
 }
 fn type_check_block_item(block_item: BlockItem, table: &mut TypeTable) -> BlockItem {
     match block_item {
@@ -195,10 +185,8 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
     match statement {
         Return(expr) => {
             let expr = type_check_expression(expr, table);
-            let cur_func = table
-                .current_function
-                .as_ref()
-                .expect("Return must be inside function!");
+            let cur_func =
+                table.current_function.as_ref().expect("Return must be inside function!");
             let cur_func_type = &table.symbols[cur_func].ctype;
             if let CType::Function(_, return_type) = cur_func_type {
                 let expr = convert_to(expr, &return_type);
@@ -234,15 +222,9 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
             for case in switch.cases {
                 let constexpr = eval_constant_expr(&case.1, &cond_type);
                 let case_typed = type_check_expression(case.1, table);
-                assert!(
-                    get_type(&case_typed).is_int(),
-                    "Switch case must be integer type!"
-                );
+                assert!(get_type(&case_typed).is_int(), "Switch case must be integer type!");
                 assert!(cond_type.is_int(), "Switch condition must be integer type!");
-                assert!(
-                    !case_vals.contains(&constexpr.int_value()),
-                    "Duplicate case!"
-                );
+                assert!(!case_vals.contains(&constexpr.int_value()), "Duplicate case!");
                 case_vals.insert(constexpr.int_value());
                 new_cases.push((case.0, Expression::Constant(constexpr).into()));
             }
@@ -274,10 +256,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
     match expr.expr {
         Expression::Variable(name) => {
             let var_type = &table.symbols[&name].ctype;
-            assert!(
-                !matches!(var_type, CType::Function(_, _)),
-                "Function name used as variable!"
-            );
+            assert!(!matches!(var_type, CType::Function(_, _)), "Function name used as variable!");
             set_type(Expression::Variable(name).into(), var_type)
         }
         Expression::Constant(constant) => match constant {
@@ -326,17 +305,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
                     common_type.clone()
                 }
                 Remainder => {
-                    assert!(
-                        common_type.is_int(),
-                        "Operands for remainder must be integer types!"
-                    );
+                    assert!(common_type.is_int(), "Operands for remainder must be integer types!");
                     common_type.clone()
                 }
                 LeftShift | RightShift => {
-                    assert!(
-                        common_type.is_int(),
-                        "Operands for bitshift must be integer types!"
-                    );
+                    assert!(common_type.is_int(), "Operands for bitshift must be integer types!");
                     get_type(&left)
                 }
                 _ => CType::Int,
@@ -377,10 +350,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let expected_type = table.symbols[&name].ctype.clone();
             match expected_type {
                 CType::Function(arg_types, ret_type) => {
-                    assert!(
-                        arg_types.len() == args.len(),
-                        "Incorrect number of arguments!"
-                    );
+                    assert!(arg_types.len() == args.len(), "Incorrect number of arguments!");
                     let mut converted_args = Vec::new();
                     for (arg, arg_type) in zip(args, arg_types) {
                         let typed_arg = type_check_expression(arg, table);
@@ -408,15 +378,9 @@ fn type_check_function(
     let mut global = function.storage != Some(StorageClass::Static);
     if let Some(symbol) = table.symbols.get(&function.name) {
         let attrs = symbol.get_function_attrs();
-        assert!(
-            symbol.ctype == *ctype,
-            "Incompatible function declarations!"
-        );
+        assert!(symbol.ctype == *ctype, "Incompatible function declarations!");
         assert!(!attrs.defined || !defined, "Function redefinition!");
-        assert!(
-            !attrs.global || global,
-            "static definition cannot follow non-static"
-        );
+        assert!(!attrs.global || global, "static definition cannot follow non-static");
         global = attrs.global;
         defined = attrs.defined;
     }
@@ -483,10 +447,7 @@ fn type_check_var_declaration(
 ) -> VariableDeclaration {
     match var.storage {
         Some(StorageClass::Extern) => {
-            assert!(
-                var.value.is_none(),
-                "Local extern variable cannot have initializer!"
-            );
+            assert!(var.value.is_none(), "Local extern variable cannot have initializer!");
             if let Some(symbol) = table.symbols.get(&var.name) {
                 assert!(symbol.ctype == var.ctype, "Declaration types don't match!");
             } else {

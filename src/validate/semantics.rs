@@ -62,9 +62,7 @@ impl SymbolTable {
         let stack_len = self.switches.len() - 1;
         assert!(self.switches.len() > 0, "Used case outside of switch!");
         let case_label = case_name(&self.switches[stack_len].label);
-        self.switches[stack_len]
-            .cases
-            .push((case_label.clone(), matcher));
+        self.switches[stack_len].cases.push((case_label.clone(), matcher));
         case_label
     }
     fn resolve_default(&mut self) -> String {
@@ -72,10 +70,7 @@ impl SymbolTable {
             panic!("Used default outside of switch!");
         }
         let stack_len = self.switches.len() - 1;
-        assert!(
-            matches!(&self.switches[stack_len].default, None),
-            "duplicate default!"
-        );
+        assert!(matches!(&self.switches[stack_len].default, None), "duplicate default!");
         let default_label = format!("{}.default", &self.switches[stack_len].label);
         self.switches[stack_len].default = Some(default_label.clone());
         default_label
@@ -104,9 +99,7 @@ impl SymbolTable {
     }
     fn leave_switch(&mut self) -> SwitchData {
         self.break_scopes.pop();
-        self.switches
-            .pop()
-            .expect("Scope missing from symbol table")
+        self.switches.pop().expect("Scope missing from symbol table")
     }
     fn enter_function(&mut self, name: String) {
         self.labels.push(HashSet::new());
@@ -201,16 +194,11 @@ impl SymbolTable {
         );
     }
     fn resolve_identifier(&self, name: &str) -> String {
-        let ident = self
-            ._lookup_identifier(name)
-            .expect(&format!("Undeclared variable {}", name));
+        let ident = self._lookup_identifier(name).expect(&format!("Undeclared variable {}", name));
         ident.unique_name.to_string()
     }
     fn resolve_label(&mut self, target: String) -> String {
-        let function = self
-            .current_function
-            .as_ref()
-            .expect("Labels must be in functions");
+        let function = self.current_function.as_ref().expect("Labels must be in functions");
         for table in &self.labels {
             if table.contains(&target) {
                 panic!("Duplicate label: {}", target);
@@ -223,10 +211,7 @@ impl SymbolTable {
     }
     fn resolve_goto(&mut self, target: String) -> String {
         let stack_len = self.gotos.len() - 1;
-        let function = &self
-            .current_function
-            .as_ref()
-            .expect("Goto must be in function!");
+        let function = &self.current_function.as_ref().expect("Goto must be in function!");
         let mangled_label = format!("{}_{}_{}", target, function, target);
         self.gotos[stack_len].insert(target);
         mangled_label
@@ -244,10 +229,7 @@ fn variable_name(name: &str) -> String {
 
 pub fn resolve_program(program: Program) -> Program {
     let symbols = &mut SymbolTable::new();
-    program
-        .into_iter()
-        .map(|decl| resolve_declaration(decl, symbols, true))
-        .collect()
+    program.into_iter().map(|decl| resolve_declaration(decl, symbols, true)).collect()
 }
 
 fn resolve_function(
@@ -256,18 +238,12 @@ fn resolve_function(
 ) -> FunctionDeclaration {
     symbols.declare_function(&function);
     symbols.enter_scope();
-    function.params = function
-        .params
-        .into_iter()
-        .map(|param| symbols.declare_parameter(param))
-        .collect();
+    function.params =
+        function.params.into_iter().map(|param| symbols.declare_parameter(param)).collect();
     if let Some(body) = function.body {
         symbols.enter_function(function.name.to_string());
-        function.body = Some(
-            body.into_iter()
-                .map(|item| resolve_block_item(item, symbols))
-                .collect(),
-        );
+        function.body =
+            Some(body.into_iter().map(|item| resolve_block_item(item, symbols)).collect());
         symbols.leave_function();
     }
     symbols.leave_scope();
@@ -309,19 +285,15 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
         Compound(statements) => {
             symbols.enter_scope();
             let result = Compound(
-                statements
-                    .into_iter()
-                    .map(|item| resolve_block_item(item, symbols))
-                    .collect(),
+                statements.into_iter().map(|item| resolve_block_item(item, symbols)).collect(),
             );
             symbols.leave_scope();
             result
         }
         Goto(label) => Goto(symbols.resolve_goto(label)),
-        Label(label, statement) => Label(
-            symbols.resolve_label(label),
-            resolve_statement(*statement, symbols).into(),
-        ),
+        Label(label, statement) => {
+            Label(symbols.resolve_label(label), resolve_statement(*statement, symbols).into())
+        }
         For(init, loop_data, post) => {
             symbols.enter_scope();
             let init = match init {
@@ -339,14 +311,12 @@ fn resolve_statement<'a>(statement: Statement, symbols: &mut SymbolTable) -> Sta
             symbols.leave_scope();
             For(init, loop_data, post)
         }
-        Case(matcher, statement) => Label(
-            symbols.resolve_case(matcher),
-            resolve_statement(*statement, symbols).into(),
-        ),
-        Default(statement) => Label(
-            symbols.resolve_default(),
-            resolve_statement(*statement, symbols).into(),
-        ),
+        Case(matcher, statement) => {
+            Label(symbols.resolve_case(matcher), resolve_statement(*statement, symbols).into())
+        }
+        Default(statement) => {
+            Label(symbols.resolve_default(), resolve_statement(*statement, symbols).into())
+        }
         Switch(mut switch) => {
             symbols.enter_switch(&switch);
             switch.condition = resolve_expression(switch.condition, symbols);
@@ -432,10 +402,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
         Constant(_) => expr.into(),
         FunctionCall(name, args) => {
             let name = symbols.resolve_identifier(&name);
-            let args = args
-                .into_iter()
-                .map(|arg| resolve_expression(arg, symbols))
-                .collect();
+            let args = args.into_iter().map(|arg| resolve_expression(arg, symbols)).collect();
             FunctionCall(name, args).into()
         }
         Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()).into(),
