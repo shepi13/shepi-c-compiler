@@ -65,10 +65,7 @@ fn try_consume(tokens: &mut &[TokenType], token: TokenType) -> bool {
 }
 fn expect(tokens: &mut &[TokenType], token: TokenType) {
     if token != tokens[0] {
-        panic!(
-            "Syntax Error: Expected `{:?}`, found `{:?}`",
-            token, tokens[0]
-        )
+        panic!("Syntax Error: Expected `{:?}`, found `{:?}`", token, tokens[0])
     }
     *tokens = &tokens[1..];
 }
@@ -152,10 +149,7 @@ fn parse_specifiers(tokens: &mut &[TokenType]) -> (CType, Option<StorageClass>) 
         }
         *tokens = &tokens[1..];
     }
-    assert!(
-        storage_classes.len() <= 1,
-        "Can only have one storage class!"
-    );
+    assert!(storage_classes.len() <= 1, "Can only have one storage class!");
     (parse_type(&mut &types[..]), storage_classes.pop())
 }
 
@@ -246,14 +240,12 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
         TokenType::Unsigned(val) => match val.parse::<u32>() {
             Ok(val) => Expression::Constant(Constant::UnsignedInt(val.into())).into(),
             Err(_) => Expression::Constant(Constant::UnsignedLong(
-                val.parse()
-                    .expect("Failed to convert unsigned constant to int"),
+                val.parse().expect("Failed to convert unsigned constant to int"),
             ))
             .into(),
         },
         TokenType::UnsignedLong(val) => Expression::Constant(Constant::UnsignedLong(
-            val.parse()
-                .expect("Failed to convert unsigned constant to long"),
+            val.parse().expect("Failed to convert unsigned constant to long"),
         ))
         .into(),
         TokenType::Double(val) => Expression::Constant(Constant::Double(
@@ -294,10 +286,7 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
             if try_consume(tokens, TokenType::OpenParen) {
                 let args = parse_argument_list(tokens);
                 expect(tokens, TokenType::CloseParen);
-                parse_post_operator(
-                    tokens,
-                    Expression::FunctionCall(name.to_string(), args).into(),
-                )
+                parse_post_operator(tokens, Expression::FunctionCall(name.to_string(), args).into())
             } else {
                 parse_post_operator(tokens, Expression::Variable(name.to_string()).into())
             }

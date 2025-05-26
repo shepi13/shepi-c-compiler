@@ -16,7 +16,7 @@ pub enum TopLevelDecl {
 #[derive(Debug)]
 pub struct Function {
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<Value>,
     pub instructions: Vec<Instruction>,
     pub global: bool,
 }
@@ -144,14 +144,13 @@ fn gen_function(function: parse_tree::FunctionDeclaration, symbols: &mut Symbols
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions, symbols);
-        instructions.push(Instruction::Return(Value::ConstValue(
-            parse_tree::Constant::Int(0),
-        )));
+        instructions.push(Instruction::Return(Value::ConstValue(parse_tree::Constant::Int(0))));
     }
     let global = symbols[&function.name].get_function_attrs().global;
+    let params = function.params.into_iter().map(|param| Value::Variable(param)).collect();
     Function {
         name: function.name,
-        params: function.params,
+        params,
         global,
         instructions,
     }
@@ -330,16 +329,19 @@ fn gen_expression(
             parse_tree::UnaryOperator::Increment(increment_type),
             expr,
         ) => {
+            use parse_tree::Constant;
             use parse_tree::Increment::*;
+            let is_double = get_type(&expr) == CType::Double;
             let dst = gen_expression(*expr, instructions, symbols);
             let operator = match increment_type {
                 PreIncrement | PostIncrement => BinaryOperator::Add,
                 PreDecrement | PostDecrement => BinaryOperator::Subtract,
             };
+            let src2 = if is_double { Constant::Double(1.0) } else { Constant::Int(1) };
             let bin_instruction = Instruction::BinaryOp(InstructionBinary {
                 operator,
                 src1: dst.clone(),
-                src2: Value::ConstValue(parse_tree::Constant::Int(1)),
+                src2: Value::ConstValue(src2),
                 dst: dst.clone(),
             });
             match increment_type {
@@ -421,31 +423,19 @@ fn gen_expression(
                 target: e2_label.clone(),
             }));
             let e1 = gen_expression(condition.if_true, instructions, symbols);
-            instructions.push(Instruction::Copy(InstructionCopy {
-                src: e1,
-                dst: dst.clone(),
-            }));
+            instructions.push(Instruction::Copy(InstructionCopy { src: e1, dst: dst.clone() }));
             instructions.push(Instruction::Jump(end_label.clone()));
             instructions.push(Instruction::Label(e2_label));
             let e2 = gen_expression(condition.if_false, instructions, symbols);
-            instructions.push(Instruction::Copy(InstructionCopy {
-                src: e2,
-                dst: dst.clone(),
-            }));
+            instructions.push(Instruction::Copy(InstructionCopy { src: e2, dst: dst.clone() }));
             instructions.push(Instruction::Label(end_label));
             dst
         }
         parse_tree::Expression::FunctionCall(name, args) => {
-            let results = args
-                .into_iter()
-                .map(|arg| gen_expression(arg, instructions, symbols))
-                .collect();
+            let results =
+                args.into_iter().map(|arg| gen_expression(arg, instructions, symbols)).collect();
             let dst = gen_temp_var(expr_type(), symbols);
-            instructions.push(Instruction::Function(
-                name.to_string(),
-                results,
-                dst.clone(),
-            ));
+            instructions.push(Instruction::Function(name.to_string(), results, dst.clone()));
             dst
         }
         parse_tree::Expression::Cast(new_type, castexpr) => {
@@ -465,10 +455,8 @@ fn gen_expression(
             } else if new_type == CType::Double {
                 instructions.push(Instruction::UIntToDouble(result, dst.clone()))
             } else if new_type.size() == old_type.size() {
-                instructions.push(Instruction::Copy(InstructionCopy {
-                    src: result,
-                    dst: dst.clone(),
-                }));
+                instructions
+                    .push(Instruction::Copy(InstructionCopy { src: result, dst: dst.clone() }));
             } else if new_type.size() < old_type.size() {
                 instructions.push(Instruction::Truncate(result, dst.clone()));
             } else if old_type.is_signed() {
@@ -529,11 +517,7 @@ fn gen_temp_var(ctype: CType, symbols: &mut Symbols) -> Value {
     Value::Variable(tmp_name)
 }
 
-fn gen_label(label_type: &str) -> String {
+pub fn gen_label(label_type: &str) -> String {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    format!(
-        "label_{}.{}",
-        label_type,
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    )
+    format!("label_{}.{}", label_type, COUNTER.fetch_add(1, Ordering::Relaxed))
 }

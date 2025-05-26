@@ -196,15 +196,10 @@ pub fn parse<'a>(mut data: &'a str) -> Vec<TokenType<'a>> {
             .find_map(|token_re| token_re.1.captures(data).map(|m| (m, &token_re.0)))
         {
             // Use the first capture group instead of 0 so we can exclude characters (fake lookahead). Defaults to 0 if no match
-            let fullmatch = captures
-                .get(1)
-                .map(|m| m.as_str())
-                .unwrap_or(captures.get(0).unwrap().as_str());
+            let fullmatch =
+                captures.get(1).map(|m| m.as_str()).unwrap_or(captures.get(0).unwrap().as_str());
             // Use val capture group to capture data, defaults to full match if it doesn't exist
-            let datamatch = captures
-                .name("val")
-                .map(|m| m.as_str())
-                .unwrap_or(fullmatch);
+            let datamatch = captures.name("val").map(|m| m.as_str()).unwrap_or(fullmatch);
             // Consume data and push token
             data = &data[fullmatch.len()..];
             tokens.push(TokenType::from(datamatch, token));
