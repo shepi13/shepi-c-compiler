@@ -192,7 +192,7 @@ fn rewrite_arithmetic_binary(instructions: &mut Vec<Instruction>, bin_op: Instru
         src = Reg(R10);
     }
     // Rewrite dst (currently only if mult tries to put result in memory)
-    if operator == BinaryOperator::Mult && matches!(dst, Operand::Data(_) | Operand::Stack(_)) {
+    if operator == BinaryOperator::Mult && is_mem_operand(&dst) {
         instructions.push(Instruction::Mov(dst.clone(), Reg(R11), op_type));
         instructions.push(Instruction::Binary(operator, src, Reg(R11), op_type));
         instructions.push(Instruction::Mov(Reg(R11), dst, op_type));
@@ -222,5 +222,5 @@ pub fn check_overflow(operand: &Operand, max_size: i128) -> bool {
 }
 
 pub fn is_mem_operand(operand: &Operand) -> bool {
-    matches!(operand, Operand::Data(_) | Operand::Stack(_))
+    matches!(operand, Operand::Data(_) | Operand::Memory(_, _))
 }

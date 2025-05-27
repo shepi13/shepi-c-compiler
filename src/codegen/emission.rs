@@ -188,6 +188,7 @@ fn get_operand_quadword(operand: &assembly_gen::Operand) -> String {
         Register(R10) => String::from("%r10"),
         Register(R11) => String::from("%r11"),
         Register(SP) => String::from("%rsp"),
+        Register(BP) => String::from("%rbp"),
         Register(CL) => String::from("%cl"),
         _ => get_operand_longword(operand),
     }
@@ -207,6 +208,8 @@ fn get_operand_longword(operand: &assembly_gen::Operand) -> String {
         Register(R9) => String::from("%r9d"),
         Register(R10) => String::from("%r10d"),
         Register(R11) => String::from("%r11d"),
+        Register(SP) => String::from("%esp"),
+        Register(BP) => String::from("%ebp"),
         //Double Registers
         Register(XMM0) => String::from("%xmm0"),
         Register(XMM1) => String::from("%xmm1"),
@@ -220,9 +223,10 @@ fn get_operand_longword(operand: &assembly_gen::Operand) -> String {
         Register(XMM15) => String::from("%xmm15"),
         // Short reg for shifts
         Register(CL) => String::from("%cl"),
-        //Stack Pointer
-        Register(SP) => String::from("%rsp"),
-        Stack(val) => format!("-{val}(%rbp)"),
+        Memory(reg, val) => {
+            let reg = get_operand_quadword(&Register(*reg));
+            format!("{val}({reg})")
+        }
         Data(name) => format!("{name}(%rip)"),
     }
 }

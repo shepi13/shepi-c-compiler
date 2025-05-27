@@ -99,7 +99,7 @@ pub enum BinaryOperator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
     Imm(i128),
-    Stack(isize),
+    Memory(Register, isize),
     Register(Register),
     Data(String),
 }
@@ -132,6 +132,7 @@ pub enum Register {
     R11,
     CL,
     SP,
+    BP,
     XMM0,
     XMM1,
     XMM2,
@@ -279,10 +280,10 @@ fn set_up_parameters(
     copy_params(param_groups.int_args, &INT_REGISTERS);
     copy_params(param_groups.float_args, &FLOAT_REGISTERS);
     // Copy remaining params from stack
-    let mut offset = -16;
+    let mut offset = 16;
     for (asm_type, param) in param_groups.stack_args {
-        instructions.push(Instruction::Mov(Operand::Stack(offset), param, asm_type));
-        offset -= 8;
+        instructions.push(Instruction::Mov(Operand::Memory(BP, offset), param, asm_type));
+        offset += 8;
     }
     instructions
 }
@@ -791,7 +792,7 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
             if matches!(symbol.attrs, SymbolAttr::Static(_)) {
                 Operand::Data(name)
             } else if let Some(location) = stack.stack_variables.get(&name) {
-                Operand::Stack(*location as isize)
+                Operand::Memory(BP, -(*location as isize))
             } else {
                 match var_type {
                     AssemblyType::Longword => stack.stack_offset += 4,
@@ -800,7 +801,7 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
                     }
                 }
                 stack.stack_variables.insert(name.to_string(), stack.stack_offset);
-                Operand::Stack(stack.stack_offset as isize)
+                Operand::Memory(BP, -(stack.stack_offset as isize))
             }
         }
     }
