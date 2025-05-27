@@ -464,6 +464,9 @@ fn gen_instructions(
                 }
                 _ => panic!("Expected an unsigned src!"),
             },
+            generator::Instruction::GetAddress(_, _)
+            | generator::Instruction::Load(_, _)
+            | generator::Instruction::Store(_, _) => panic!("Not implemented!"),
         }
     }
     asm_instructions
