@@ -8,19 +8,19 @@ use crate::{
 };
 
 pub type Program = Vec<TopLevelDecl>;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TopLevelDecl {
     Function(Function),
     StaticDecl(StaticVariable),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
     pub params: Vec<Value>,
     pub instructions: Vec<Instruction>,
     pub global: bool,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StaticVariable {
     pub identifier: String,
     pub global: bool,
@@ -28,7 +28,7 @@ pub struct StaticVariable {
     pub ctype: CType,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Instruction {
     Return(Value),
     SignExtend(Value, Value),
@@ -46,13 +46,13 @@ pub enum Instruction {
     JumpCond(InstructionJump),
     Function(String, Vec<Value>, Value),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstructionUnary {
     pub operator: UnaryOperator,
     pub src: Value,
     pub dst: Value,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum UnaryOperator {
     Complement,
     Negate,
@@ -69,25 +69,25 @@ impl InstructionUnary {
         Self { operator, src, dst }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstructionBinary {
     pub operator: BinaryOperator,
     pub src1: Value,
     pub src2: Value,
     pub dst: Value,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstructionCopy {
     pub src: Value,
     pub dst: Value,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstructionJump {
     pub jump_type: JumpType,
     pub condition: Value,
     pub target: String,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum JumpType {
     JumpIfZero,
     JumpIfNotZero,
@@ -110,11 +110,11 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
     for (name, entry) in symbols {
         if let SymbolAttr::Static(var_attrs) = &entry.attrs {
             match &var_attrs.init {
-                StaticInitializer::Initialized(initializer) => {
+                &StaticInitializer::Initialized(initializer) => {
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
-                        initializer: initializer.clone(),
+                        initializer,
                         ctype: entry.ctype.clone(),
                     }));
                 }
@@ -330,7 +330,7 @@ fn gen_expression(
             expr,
         ) => {
             use parse_tree::Constant;
-            use parse_tree::Increment::*;
+            use parse_tree::IncrementType::*;
             let is_double = get_type(&expr) == CType::Double;
             let dst = gen_expression(*expr, instructions, symbols);
             let operator = match increment_type {

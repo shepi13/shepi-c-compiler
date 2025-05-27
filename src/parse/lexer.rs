@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 pub enum TokenType<'a> {
     Specifier(&'a str),
     Keyword(&'a str),
@@ -64,7 +64,7 @@ pub enum TokenType<'a> {
 }
 
 impl<'a> TokenType<'a> {
-    fn from(data: &'a str, token_type: &'a TokenType) -> TokenType<'a> {
+    fn from(data: &'a str, token_type: TokenType<'a>) -> TokenType<'a> {
         match token_type {
             TokenType::Keyword(_) => TokenType::Keyword(data),
             TokenType::Identifier(_) => TokenType::Identifier(data),
@@ -74,7 +74,7 @@ impl<'a> TokenType<'a> {
             TokenType::Unsigned(_) => TokenType::Unsigned(data),
             TokenType::UnsignedLong(_) => TokenType::UnsignedLong(data),
             TokenType::Double(_) => TokenType::Double(data),
-            _ => token_type.clone(),
+            _ => token_type,
         }
     }
 }
@@ -185,7 +185,7 @@ pub fn parse(mut data: &str) -> Vec<TokenType> {
             let datamatch = captures.name("val").map(|m| m.as_str()).unwrap_or(fullmatch);
             // Consume data and push token
             data = &data[fullmatch.len()..];
-            tokens.push(TokenType::from(datamatch, token));
+            tokens.push(TokenType::from(datamatch, *token));
         } else {
             panic!("Failed to match token '{}'", first_char);
         }

@@ -16,7 +16,7 @@ use lexer::TokenType;
 use super::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, CType,
     ConditionExpression, Constant, Declaration, Expression, ForInit, FunctionDeclaration,
-    Increment, Loop, Program, Statement, StorageClass, SwitchStatement, TypedExpression,
+    IncrementType, Loop, Program, Statement, StorageClass, SwitchStatement, TypedExpression,
     UnaryOperator, VariableDeclaration,
 };
 
@@ -58,7 +58,7 @@ lazy_static! {
 fn consume<'a>(tokens: &mut &[TokenType<'a>]) -> TokenType<'a> {
     let next_token;
     (next_token, *tokens) = tokens.split_first().expect("Unexpected EOF");
-    next_token.clone()
+    *next_token
 }
 
 fn try_consume(tokens: &mut &[TokenType], token: TokenType) -> bool {
@@ -156,7 +156,7 @@ fn parse_specifiers(tokens: &mut &[TokenType]) -> (CType, Option<StorageClass>) 
     let mut storage_classes = Vec::new();
     while matches!(tokens[0], TokenType::Specifier(_)) {
         if is_type_specifier(&tokens[0]) {
-            types.push(tokens[0].clone());
+            types.push(tokens[0]);
         } else {
             storage_classes.push(StorageClass::from(&tokens[0]));
         }
@@ -217,7 +217,7 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -
         parse_post_operator(
             tokens,
             Expression::Unary(
-                UnaryOperator::Increment(Increment::PostIncrement),
+                UnaryOperator::Increment(IncrementType::PostIncrement),
                 expression.into(),
             )
             .into(),
@@ -226,7 +226,7 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -
         parse_post_operator(
             tokens,
             Expression::Unary(
-                UnaryOperator::Increment(Increment::PostDecrement),
+                UnaryOperator::Increment(IncrementType::PostDecrement),
                 expression.into(),
             )
             .into(),
@@ -277,12 +277,12 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
         TokenType::Ampersand => Expression::AddrOf(parse_factor(tokens).into()).into(),
         TokenType::Star => Expression::Dereference(parse_factor(tokens).into()).into(),
         TokenType::Increment => Expression::Unary(
-            UnaryOperator::Increment(Increment::PreIncrement),
+            UnaryOperator::Increment(IncrementType::PreIncrement),
             parse_factor(tokens).into(),
         )
         .into(),
         TokenType::Decrement => Expression::Unary(
-            UnaryOperator::Increment(Increment::PreDecrement),
+            UnaryOperator::Increment(IncrementType::PreDecrement),
             parse_factor(tokens).into(),
         )
         .into(),
