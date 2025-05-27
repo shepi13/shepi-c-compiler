@@ -5,7 +5,9 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use declarators::{parse_abstract_declarator, parse_declarator, process_abstract_declarator, process_declarator};
+use declarators::{
+    parse_abstract_declarator, parse_declarator, process_abstract_declarator, process_declarator,
+};
 use lazy_static::lazy_static;
 
 use super::lexer;
