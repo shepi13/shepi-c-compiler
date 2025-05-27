@@ -84,6 +84,15 @@ impl CType {
             Self::Double | Self::Function(_, _) | Self::Pointer(_) => false,
         }
     }
+    pub fn is_pointer(&self) -> bool {
+        matches!(self, Self::Pointer(_))
+    }
+    pub fn is_arithmetic(&self) -> bool {
+        match self {
+            Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong | Self::Double => true,
+            Self::Function(_, _) | Self::Pointer(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +138,11 @@ impl From<Expression> for TypedExpression {
 impl From<Expression> for Box<TypedExpression> {
     fn from(value: Expression) -> Self {
         TypedExpression { ctype: None, expr: value }.into()
+    }
+}
+impl TypedExpression {
+    pub fn is_lvalue(&self) -> bool {
+        matches!(self.expr, Expression::Variable(_) | Expression::Dereference(_))
     }
 }
 #[derive(Debug, Clone)]
