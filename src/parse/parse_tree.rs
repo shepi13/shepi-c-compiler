@@ -141,8 +141,8 @@ pub enum Expression {
     Condition(Box<ConditionExpression>),
     FunctionCall(String, Vec<TypedExpression>),
     Cast(CType, Box<TypedExpression>),
-    Dereference(Box<Expression>),
-    AddrOf(Box<Expression>),
+    Dereference(Box<TypedExpression>),
+    AddrOf(Box<TypedExpression>),
 }
 #[derive(Debug)]
 pub struct BinaryExpression {

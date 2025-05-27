@@ -1,8 +1,13 @@
+mod declarators;
+
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use declarators::{
+    parse_abstract_declarator, parse_declarator, process_abstract_declarator, process_declarator,
+};
 use lazy_static::lazy_static;
 
 use super::lexer;
@@ -269,6 +274,8 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
         TokenType::Exclam => {
             Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens).into()).into()
         }
+        TokenType::Ampersand => Expression::AddrOf(parse_factor(tokens).into()).into(),
+        TokenType::Star => Expression::Dereference(parse_factor(tokens).into()).into(),
         TokenType::Increment => Expression::Unary(
             UnaryOperator::Increment(Increment::PreIncrement),
             parse_factor(tokens).into(),
@@ -281,8 +288,9 @@ fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
         .into(),
         TokenType::OpenParen => {
             if is_type_specifier(&tokens[0]) {
-                let ctype = parse_type(tokens);
-                expect(tokens, TokenType::CloseParen);
+                let base_type = parse_type(tokens);
+                let abstract_decl = parse_abstract_declarator(tokens);
+                let ctype = process_abstract_declarator(abstract_decl, base_type);
                 Expression::Cast(ctype, parse_factor(tokens).into()).into()
             } else {
                 let expr = parse_expression(tokens, 0);
@@ -465,34 +473,33 @@ fn parse_variable_declaration(tokens: &mut &[TokenType]) -> VariableDeclaration 
 
 fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
     let (ctype, storage) = parse_specifiers(tokens);
-    let name = parse_identifier(tokens);
-    if try_consume(tokens, TokenType::OpenParen) {
-        let (params, param_types) = parse_param_list(tokens);
-        expect(tokens, TokenType::CloseParen);
-        let body = if try_consume(tokens, TokenType::SemiColon) {
-            None
-        } else if try_consume(tokens, TokenType::OpenBrace) {
+    let declarator = parse_declarator(tokens);
+    let decl_result = process_declarator(declarator, ctype);
+    if matches!(decl_result.ctype, CType::Function(_, _)) {
+        let body = if try_consume(tokens, TokenType::OpenBrace) {
             Some(parse_block(tokens))
         } else {
-            panic!("Function declaration must be followed by definition or semicolon");
+            expect(tokens, TokenType::SemiColon);
+            None
         };
         Declaration::Function(FunctionDeclaration {
-            name: name.to_string(),
-            params,
-            body,
+            name: decl_result.name,
+            ctype: decl_result.ctype,
+            params: decl_result.params,
             storage,
-            ctype: CType::Function(param_types, ctype.into()),
+            body,
         })
     } else {
-        let value = match try_consume(tokens, TokenType::Equal) {
-            true => Some(parse_expression(tokens, 0)),
-            false => None,
+        let value = if try_consume(tokens, TokenType::Equal) {
+            Some(parse_expression(tokens, 0))
+        } else {
+            None
         };
         expect(tokens, TokenType::SemiColon);
         Declaration::Variable(VariableDeclaration {
-            name: name.to_string(),
+            name: decl_result.name,
+            ctype: decl_result.ctype,
             value,
-            ctype,
             storage,
         })
     }
@@ -512,21 +519,6 @@ fn parse_block(tokens: &mut &[TokenType]) -> Block {
     }
     expect(tokens, TokenType::CloseBrace);
     body
-}
-fn parse_param_list(tokens: &mut &[TokenType]) -> (Vec<String>, Vec<CType>) {
-    if try_consume(tokens, TokenType::Keyword("void")) {
-        return (Vec::new(), Vec::new());
-    }
-    let mut params = Vec::new();
-    let mut param_types = Vec::new();
-    loop {
-        param_types.push(parse_type(tokens));
-        params.push(parse_identifier(tokens).to_string());
-        if !try_consume(tokens, TokenType::Comma) {
-            break;
-        }
-    }
-    (params, param_types)
 }
 pub fn parse(tokens: &mut &[TokenType]) -> Program {
     // Parses entire program
