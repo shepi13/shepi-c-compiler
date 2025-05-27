@@ -9,14 +9,14 @@ use crate::parse::parse_tree::{
     Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TypeTable {
     symbols: Symbols,
     current_function: Option<String>,
 }
 
 pub type Symbols = HashMap<String, Symbol>;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Symbol {
     pub ctype: CType,
     pub attrs: SymbolAttr,
@@ -37,30 +37,30 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum SymbolAttr {
     Function(FunctionAttributes),
     Static(StaticAttributes),
     Local,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionAttributes {
     pub defined: bool,
     pub global: bool,
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct StaticAttributes {
     pub init: StaticInitializer,
     pub global: bool,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum StaticInitializer {
     Tentative,
     Initialized(Initializer),
     None,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Initializer {
     Int(i64), // Limited to i32, but we store as i64 for matching and do our own conversion
     Long(i64),
@@ -513,7 +513,7 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
                 !matches!(init_value, StaticInitializer::Initialized(_)),
                 "Conflicting static initializers!"
             );
-            init_value = attrs.init.clone();
+            init_value = attrs.init;
         } else if attrs.init == StaticInitializer::Tentative
             && !matches!(init_value, StaticInitializer::Initialized(_))
         {

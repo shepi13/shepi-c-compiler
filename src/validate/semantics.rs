@@ -350,31 +350,22 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
     use parse_tree::Expression::*;
     let expr = expr.expr;
     match expr {
-        Unary(operator, expr) => {
-            if matches!(operator, parse_tree::UnaryOperator::Increment(_)) {
-                assert!(matches!(expr.expr, Variable(_)), "Invalid lvalue!");
-            }
-            Unary(operator, resolve_expression(*expr, symbols).into()).into()
-        }
+        Unary(operator, expr) => Unary(operator, resolve_expression(*expr, symbols).into()).into(),
         Binary(mut binexpr) => {
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
             if binexpr.is_assignment {
-                match &binexpr.left.expr {
-                    Variable(name) => {
-                        return Assignment(
-                            AssignmentExpression {
-                                left: Variable(name.clone()).into(),
-                                right: Binary(binexpr).into(),
-                            }
-                            .into(),
-                        )
-                        .into();
+                Assignment(
+                    AssignmentExpression {
+                        left: binexpr.left.clone(),
+                        right: Binary(binexpr).into(),
                     }
-                    _ => panic!("Invalid lvalue!"),
-                }
+                    .into(),
+                )
+                .into()
+            } else {
+                Binary(binexpr).into()
             }
-            Binary(binexpr).into()
         }
         Condition(mut cond) => {
             cond.condition = resolve_expression(cond.condition, symbols);
@@ -396,7 +387,8 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
             FunctionCall(name, args).into()
         }
         Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()).into(),
-        Dereference(_) | AddrOf(_) => panic!("Not implemented!"),
+        Dereference(inner) => Dereference(resolve_expression(*inner, symbols).into()).into(),
+        AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols).into()).into(),
     }
 }
 

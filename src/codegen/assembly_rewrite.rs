@@ -63,11 +63,11 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
 fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
     let Instruction::Mov(src, dst, mov_type) = mov else { panic!("Expected mov!") };
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
-    let scratch_reg = if mov_type == AssemblyType::Double { Reg(XMM14) } else { Reg(AX) };
+    let scratch = if mov_type == AssemblyType::Double { XMM14 } else { AX };
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
-        instructions.push(Instruction::Mov(src, scratch_reg.clone(), mov_type.clone()));
-        instructions.push(Instruction::Mov(scratch_reg, dst, mov_type));
+        instructions.push(Instruction::Mov(src, Reg(scratch), mov_type));
+        instructions.push(Instruction::Mov(Reg(scratch), dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
     }
@@ -78,7 +78,7 @@ fn rewrite_cvttsd2si(instructions: &mut Vec<Instruction>, cvt: Instruction) {
         panic!("Expected Cvttsd2si");
     };
     if !matches!(dst, Reg(_)) {
-        instructions.push(Instruction::Cvttsd2si(src, Reg(R11), cvt_type.clone()));
+        instructions.push(Instruction::Cvttsd2si(src, Reg(R11), cvt_type));
         instructions.push(Instruction::Mov(Reg(R11), dst, cvt_type));
     } else {
         instructions.push(Instruction::Cvttsd2si(src, dst, cvt_type));
@@ -90,11 +90,11 @@ fn rewrite_cvtsi2sd(instructions: &mut Vec<Instruction>, cvt: Instruction) {
         panic!("Expected Cvtsi2sd");
     };
     if matches!(src, Imm(_)) {
-        instructions.push(Instruction::Mov(src, Reg(R10), cvt_type.clone()));
+        instructions.push(Instruction::Mov(src, Reg(R10), cvt_type));
         src = Reg(R10);
     }
     if !matches!(dst, Reg(_)) {
-        instructions.push(Instruction::Cvtsi2sd(src, Reg(XMM15), cvt_type.clone()));
+        instructions.push(Instruction::Cvtsi2sd(src, Reg(XMM15), cvt_type));
         instructions.push(Instruction::Mov(Reg(XMM15), dst, AssemblyType::Double));
     } else {
         instructions.push(Instruction::Cvtsi2sd(src, dst, cvt_type));
@@ -144,12 +144,12 @@ fn rewrite_cmp(instructions: &mut Vec<Instruction>, cmp: Instruction) {
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
-        instructions.push(Instruction::Mov(src, Reg(R10), cmp_type.clone()));
+        instructions.push(Instruction::Mov(src, Reg(R10), cmp_type));
         src = Reg(R10);
     }
     // Rewrite dst if it's a constant
     if matches!(dst, Imm(_)) {
-        instructions.push(Instruction::Mov(dst, Reg(R11), cmp_type.clone()));
+        instructions.push(Instruction::Mov(dst, Reg(R11), cmp_type));
         instructions.push(Instruction::Compare(src, Reg(R11), cmp_type));
     } else {
         instructions.push(Instruction::Compare(src, dst, cmp_type));
@@ -159,7 +159,7 @@ fn rewrite_cmp(instructions: &mut Vec<Instruction>, cmp: Instruction) {
 fn rewrite_comisd(instructions: &mut Vec<Instruction>, cmp: Instruction) {
     let Instruction::Compare(src, dst, cmp_type) = cmp else { panic!("Expected cmp!") };
     if !matches!(dst, Reg(_)) {
-        instructions.push(Instruction::Mov(dst, Reg(XMM14), cmp_type.clone()));
+        instructions.push(Instruction::Mov(dst, Reg(XMM14), cmp_type));
         instructions.push(Instruction::Compare(src, Reg(XMM14), cmp_type));
     } else {
         instructions.push(Instruction::Compare(src, dst, cmp_type));
@@ -170,11 +170,11 @@ fn rewrite_div(instructions: &mut Vec<Instruction>, div: Instruction) {
     // Div and IDiv cannot take immediate values as operands
     match div {
         Instruction::Div(Imm(val), asm_type) => {
-            instructions.push(Instruction::Mov(Imm(val), Reg(R10), asm_type.clone()));
+            instructions.push(Instruction::Mov(Imm(val), Reg(R10), asm_type));
             instructions.push(Instruction::Div(Reg(R10), asm_type));
         }
         Instruction::IDiv(Imm(val), asm_type) => {
-            instructions.push(Instruction::Mov(Imm(val), Reg(R10), asm_type.clone()));
+            instructions.push(Instruction::Mov(Imm(val), Reg(R10), asm_type));
             instructions.push(Instruction::IDiv(Reg(R10), asm_type));
         }
         _ => instructions.push(div),
@@ -188,13 +188,13 @@ fn rewrite_arithmetic_binary(instructions: &mut Vec<Instruction>, bin_op: Instru
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
-        instructions.push(Instruction::Mov(src, Reg(R10), op_type.clone()));
+        instructions.push(Instruction::Mov(src, Reg(R10), op_type));
         src = Reg(R10);
     }
     // Rewrite dst (currently only if mult tries to put result in memory)
     if operator == BinaryOperator::Mult && matches!(dst, Operand::Data(_) | Operand::Stack(_)) {
-        instructions.push(Instruction::Mov(dst.clone(), Reg(R11), op_type.clone()));
-        instructions.push(Instruction::Binary(operator, src, Reg(R11), op_type.clone()));
+        instructions.push(Instruction::Mov(dst.clone(), Reg(R11), op_type));
+        instructions.push(Instruction::Binary(operator, src, Reg(R11), op_type));
         instructions.push(Instruction::Mov(Reg(R11), dst, op_type));
     } else {
         instructions.push(Instruction::Binary(operator, src, dst, op_type));
@@ -206,8 +206,8 @@ fn rewrite_arithmetic_binary_f(instructions: &mut Vec<Instruction>, bin_op: Inst
         panic!("Expected binary operator!")
     };
     if !matches!(dst, Reg(_)) {
-        instructions.push(Instruction::Mov(dst.clone(), Reg(XMM15), op_type.clone()));
-        instructions.push(Instruction::Binary(operator, src, Reg(XMM15), op_type.clone()));
+        instructions.push(Instruction::Mov(dst.clone(), Reg(XMM15), op_type));
+        instructions.push(Instruction::Binary(operator, src, Reg(XMM15), op_type));
         instructions.push(Instruction::Mov(Reg(XMM15), dst, op_type));
     } else {
         instructions.push(Instruction::Binary(operator, src, dst, op_type));

@@ -3,12 +3,12 @@ use super::lexer::TokenType;
 pub type Program = Vec<Declaration>;
 pub type Block = Vec<BlockItem>;
 // Statements and Declarations
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockItem {
     StatementItem(Statement),
     DeclareItem(Declaration),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     Return(TypedExpression),
     ExprStmt(TypedExpression),
@@ -26,7 +26,7 @@ pub enum Statement {
     Goto(String),
     Null,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SwitchStatement {
     pub label: String,
     pub condition: TypedExpression,
@@ -34,23 +34,23 @@ pub struct SwitchStatement {
     pub statement: Box<Statement>,
     pub default: Option<String>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Loop {
     pub label: String,
     pub condition: TypedExpression,
     pub body: Box<Statement>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ForInit {
     Decl(VariableDeclaration),
     Expr(Option<TypedExpression>),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Declaration {
     Variable(VariableDeclaration),
     Function(FunctionDeclaration),
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum CType {
     Int,
     Long,
@@ -86,14 +86,14 @@ impl CType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VariableDeclaration {
     pub name: String,
     pub value: Option<TypedExpression>,
     pub ctype: CType,
     pub storage: Option<StorageClass>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionDeclaration {
     pub name: String,
     pub ctype: CType,
@@ -101,7 +101,7 @@ pub struct FunctionDeclaration {
     pub body: Option<Block>,
     pub storage: Option<StorageClass>,
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageClass {
     Static,
     Extern,
@@ -116,7 +116,7 @@ impl StorageClass {
     }
 }
 // Expressions
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypedExpression {
     pub ctype: Option<CType>,
     pub expr: Expression,
@@ -131,7 +131,7 @@ impl From<Expression> for Box<TypedExpression> {
         TypedExpression { ctype: None, expr: value }.into()
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     Constant(Constant),
     Variable(String),
@@ -144,41 +144,40 @@ pub enum Expression {
     Dereference(Box<TypedExpression>),
     AddrOf(Box<TypedExpression>),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryExpression {
     pub operator: BinaryOperator,
     pub left: TypedExpression,
     pub right: TypedExpression,
     pub is_assignment: bool,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssignmentExpression {
     pub left: TypedExpression,
     pub right: TypedExpression,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 
 pub struct ConditionExpression {
     pub condition: TypedExpression,
     pub if_true: TypedExpression,
     pub if_false: TypedExpression,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnaryOperator {
     Complement,
     Negate,
     LogicalNot,
-    Increment(Increment),
+    Increment(IncrementType),
 }
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone)]
-pub enum Increment {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum IncrementType {
     PreIncrement,
     PostIncrement,
     PreDecrement,
     PostDecrement,
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinaryOperator {
     // Numeric
     Add,
@@ -202,7 +201,7 @@ pub enum BinaryOperator {
     GreaterThan,
     GreaterThanEqual,
 }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Constant {
     Int(i64), // Limited to i32, but we'll store it as i64 for convenient conversions
     Long(i64),

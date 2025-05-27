@@ -14,45 +14,45 @@ use Operand::Register as Reg;
 use Register::*;
 
 pub type BackendSymbols = HashMap<String, AsmSymbol>;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub program: Vec<TopLevelDecl>,
     pub backend_symbols: HashMap<String, AsmSymbol>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TopLevelDecl {
     FunctionDecl(Function),
     Var(StaticVar),
     Constant(StaticConstant),
 }
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AsmSymbol {
     ObjectEntry(AssemblyType, bool),
     FunctionEntry(bool),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StaticVar {
     pub name: String,
     pub global: bool,
     pub alignment: i32,
     pub init: Initializer,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StaticConstant {
     pub name: String,
     pub alignment: i32,
     pub init: Initializer,
     pub neg_zero: bool,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
     pub instructions: Vec<Instruction>,
     pub global: bool,
 }
 // Instructions
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Instruction {
     Mov(Operand, Operand, AssemblyType),
     MovSignExtend(Operand, Operand),
@@ -75,13 +75,13 @@ pub enum Instruction {
     Ret,
     Nop,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum UnaryOperator {
     Not,
     Neg,
     Shr,
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOperator {
     Add,
     Mult,
@@ -96,14 +96,14 @@ pub enum BinaryOperator {
     RightShiftUnsigned,
 }
 // Operands
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
     Imm(i128),
     Stack(isize),
     Register(Register),
     Data(String),
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssemblyType {
     Longword,
     Quadword,
@@ -119,7 +119,7 @@ impl AssemblyType {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Register {
     AX,
     CX,
@@ -143,7 +143,7 @@ pub enum Register {
     XMM14,
     XMM15,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Condition {
     Equal,
     NotEqual,
@@ -273,7 +273,7 @@ fn set_up_parameters(
     //Copy params from registers
     let mut copy_params = |param_group, registers: &[Register]| {
         for ((asm_type, param), reg) in zip(param_group, registers) {
-            instructions.push(Instruction::Mov(Reg(reg.clone()), param, asm_type));
+            instructions.push(Instruction::Mov(Reg(*reg), param, asm_type));
         }
     };
     copy_params(param_groups.int_args, &INT_REGISTERS);
@@ -344,12 +344,7 @@ fn gen_instructions(
                         if src_type == AssemblyType::Double {
                             let nan_label = gen_label("nan");
                             let end_label = gen_label("end");
-                            asm_instructions.push(Binary(
-                                BitXor,
-                                Reg(XMM0),
-                                Reg(XMM0),
-                                src_type.clone(),
-                            ));
+                            asm_instructions.push(Binary(BitXor, Reg(XMM0), Reg(XMM0), src_type));
                             asm_instructions.push(Compare(src, Reg(XMM0), src_type));
                             asm_instructions.push(JmpCond(Condition::Parity, nan_label.clone()));
                             asm_instructions.push(Mov(Imm(0), dst.clone(), dst_type.clone()));
@@ -359,14 +354,14 @@ fn gen_instructions(
                             asm_instructions.push(Mov(Imm(0), dst, dst_type));
                             asm_instructions.push(Label(end_label));
                         } else {
-                            asm_instructions.push(Compare(Imm(0), src, src_type.clone()));
+                            asm_instructions.push(Compare(Imm(0), src, src_type));
                             asm_instructions.push(Mov(Imm(0), dst.clone(), dst_type));
                             asm_instructions.push(SetCond(Condition::Equal, dst));
                         }
                         continue;
                     }
                 };
-                asm_instructions.push(Mov(src, dst.clone(), src_type.clone()));
+                asm_instructions.push(Mov(src, dst.clone(), src_type));
                 asm_instructions.push(Unary(operator, dst, src_type));
             }
             generator::Instruction::BinaryOp(binop) => {
@@ -385,7 +380,7 @@ fn gen_instructions(
                 let dst = gen_operand(jump.condition, stack, symbols);
                 if cmp_type == AssemblyType::Double {
                     let end_label = gen_label("jumpcond_end");
-                    asm_instructions.push(Binary(BitXor, Reg(XMM0), Reg(XMM0), cmp_type.clone()));
+                    asm_instructions.push(Binary(BitXor, Reg(XMM0), Reg(XMM0), cmp_type));
                     asm_instructions.push(Compare(dst, Reg(XMM0), cmp_type));
                     match jump.jump_type {
                         generator::JumpType::JumpIfNotZero => {
@@ -592,7 +587,7 @@ fn gen_func_call(
     // Pass arguments in registers
     let mut pass_args = |param_group, registers: &[Register]| {
         for ((arg_type, arg), reg) in zip(param_group, registers) {
-            instructions.push(Mov(arg, Reg(reg.clone()), arg_type));
+            instructions.push(Mov(arg, Reg(*reg), arg_type));
         }
     };
     pass_args(param_groups.int_args, &INT_REGISTERS);
@@ -633,13 +628,8 @@ fn gen_binary_op(
     let dst = gen_operand(binary_instruction.dst, stack, symbols);
     // Instructions for generic binary ops (addition, subtraction, mult, bitwise)
     let mut gen_arithmetic = |operator| {
-        instructions.push(Instruction::Mov(src1.clone(), dst.clone(), asm_type.clone()));
-        instructions.push(Instruction::Binary(
-            operator,
-            src2.clone(),
-            dst.clone(),
-            asm_type.clone(),
-        ));
+        instructions.push(Instruction::Mov(src1.clone(), dst.clone(), asm_type));
+        instructions.push(Instruction::Binary(operator, src2.clone(), dst.clone(), asm_type));
     };
     match &binary_instruction.operator {
         // Handle arithmetic binary operators
@@ -686,7 +676,7 @@ fn gen_binary_op(
             let condition = get_condition(binary_instruction.operator, signed);
             let nan_label = gen_label("is_nan");
             let end_label = gen_label("end");
-            instructions.push(Instruction::Compare(src2, src1, asm_type.clone()));
+            instructions.push(Instruction::Compare(src2, src1, asm_type));
             // Double skips the set and defaults to false if either value is NaN
             if asm_type == AssemblyType::Double {
                 instructions.push(Instruction::JmpCond(Condition::Parity, nan_label.clone()));
@@ -734,9 +724,9 @@ fn gen_shift(
     dst: Operand,
     shift_type: AssemblyType,
 ) {
-    instructions.push(Instruction::Mov(src1, Reg(AX), shift_type.clone()));
-    instructions.push(Instruction::Mov(src2, Reg(CX), shift_type.clone()));
-    instructions.push(Instruction::Binary(operator, Reg(CL), Reg(AX), shift_type.clone()));
+    instructions.push(Instruction::Mov(src1, Reg(AX), shift_type));
+    instructions.push(Instruction::Mov(src2, Reg(CX), shift_type));
+    instructions.push(Instruction::Binary(operator, Reg(CL), Reg(AX), shift_type));
     instructions.push(Instruction::Mov(Reg(AX), dst, shift_type));
 }
 
@@ -750,16 +740,16 @@ fn gen_division(
     is_signed: bool,
 ) {
     // Move dividend into AX
-    instructions.push(Instruction::Mov(src1, Reg(AX), div_type.clone()));
+    instructions.push(Instruction::Mov(src1, Reg(AX), div_type));
 
     // USE CDQ or 0 extend to setup registers for division
     // Use IDiv for signed and Div for unsigned
     if is_signed {
-        instructions.push(Instruction::Cdq(div_type.clone()));
-        instructions.push(Instruction::IDiv(src2, div_type.clone()));
+        instructions.push(Instruction::Cdq(div_type));
+        instructions.push(Instruction::IDiv(src2, div_type));
     } else {
-        instructions.push(Instruction::Mov(Imm(0), Reg(DX), div_type.clone()));
-        instructions.push(Instruction::Div(src2, div_type.clone()));
+        instructions.push(Instruction::Mov(Imm(0), Reg(DX), div_type));
+        instructions.push(Instruction::Div(src2, div_type));
     }
     // Division result is in AX, Remainder in DX
     instructions.push(Instruction::Mov(Reg(result_reg), dst, div_type));
