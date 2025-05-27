@@ -374,7 +374,6 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
             Condition(cond).into()
         }
         Assignment(mut assign) => {
-            assert!(matches!(assign.left.expr, Variable(_)), "Invalid lvalue!");
             assign.left = resolve_expression(assign.left, symbols);
             assign.right = resolve_expression(assign.right, symbols);
             Assignment(assign).into()
