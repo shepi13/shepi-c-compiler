@@ -692,8 +692,11 @@ fn gen_binary_op(
         GreaterThan | GreaterThanEqual | IsEqual | LessThan | LessThanEqual | LogicalAnd
         | LogicalOr | NotEqual => {
             use AssemblyType::Longword;
-            let signed =
-                if asm_type == AssemblyType::Double { false } else { src_ctype.is_arithmetic() && src_ctype.is_signed() };
+            let signed = if asm_type == AssemblyType::Double {
+                false
+            } else {
+                src_ctype.is_arithmetic() && src_ctype.is_signed()
+            };
             // NAN returns true for !=, false otherwise
             let nan_result = (binary_instruction.operator == NotEqual) as i128;
             let condition = get_condition(binary_instruction.operator, signed);
