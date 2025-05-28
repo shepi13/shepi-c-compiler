@@ -169,6 +169,11 @@ fn emit_instructions(
                 let t = get_size_suffix(asm_type);
                 writeln!(file, "    cvtsi2sd{t} {src}, {dst}").unwrap();
             }
+            assembly_gen::Instruction::Lea(src, dst) => {
+                let src = get_operand_quadword(src);
+                let dst = get_operand_quadword(dst);
+                writeln!(file, "    leaq {src}, {dst}").unwrap();
+            }
             assembly_gen::Instruction::Nop => panic!("Noop should just be a placeholder"),
         }
     }
