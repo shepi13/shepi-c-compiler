@@ -54,6 +54,7 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
             Instruction::MovZeroExtend(_, _) => rewrite_zero_extend(&mut instructions, instruction),
             Instruction::Cvttsd2si(_, _, _) => rewrite_cvttsd2si(&mut instructions, instruction),
             Instruction::Cvtsi2sd(_, _, _) => rewrite_cvtsi2sd(&mut instructions, instruction),
+            Instruction::Lea(_, _) => rewrite_lea(&mut instructions, instruction),
             _ => instructions.push(instruction),
         }
     }
@@ -63,13 +64,23 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
 fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
     let Instruction::Mov(src, dst, mov_type) = mov else { panic!("Expected mov!") };
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
-    let scratch = if mov_type == AssemblyType::Double { XMM14 } else { AX };
+    let scratch = if mov_type == AssemblyType::Double { XMM14 } else { R10 };
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
     if operands_in_mem || check_overflow(&src, i32::MAX as i128) {
         instructions.push(Instruction::Mov(src, Reg(scratch), mov_type));
         instructions.push(Instruction::Mov(Reg(scratch), dst, mov_type));
     } else {
         instructions.push(Instruction::Mov(src, dst, mov_type));
+    }
+}
+
+fn rewrite_lea(instructions: &mut Vec<Instruction>, lea: Instruction) {
+    let Instruction::Lea(src, dst) = lea else { panic!("Expected lea") };
+    if !matches!(dst, Reg(_)) {
+        instructions.push(Instruction::Lea(src, Reg(R11)));
+        instructions.push(Instruction::Mov(Reg(R11), dst, AssemblyType::Quadword));
+    } else {
+        instructions.push(Instruction::Lea(src, dst));
     }
 }
 
@@ -130,8 +141,34 @@ fn rewrite_zero_extend(instructions: &mut Vec<Instruction>, zero_x: Instruction)
 
 fn rewrite_push(instructions: &mut Vec<Instruction>, push: Instruction) {
     let Instruction::Push(operand) = push else { panic!("Expected push!") };
+    // Rewrite push if it pushes an xmm register (need to use mov instead)
+    if matches!(
+        operand,
+        Reg(XMM0)
+            | Reg(XMM1)
+            | Reg(XMM2)
+            | Reg(XMM3)
+            | Reg(XMM4)
+            | Reg(XMM5)
+            | Reg(XMM6)
+            | Reg(XMM7)
+            | Reg(XMM14)
+            | Reg(XMM15)
+    ) {
+        instructions.push(Instruction::Binary(
+            BinaryOperator::Sub,
+            Imm(8),
+            Reg(SP),
+            AssemblyType::Quadword,
+        ));
+        instructions.push(Instruction::Mov(
+            operand,
+            Operand::Memory(SP, 0),
+            AssemblyType::Quadword,
+        ));
+    }
     // Immediate operands to push need to be size int, otherwise we use a register
-    if check_overflow(&operand, i32::MAX as i128) {
+    else if check_overflow(&operand, i32::MAX as i128) {
         instructions.push(Instruction::Mov(operand, Reg(R10), Quadword));
         instructions.push(Instruction::Push(Reg(R10)));
     } else {

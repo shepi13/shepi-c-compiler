@@ -10,6 +10,7 @@ use crate::tac_generation::generator::{self, Value, gen_label};
 use crate::validate::type_check::{Initializer, SymbolAttr, Symbols};
 
 use Operand::Imm;
+use Operand::Memory;
 use Operand::Register as Reg;
 use Register::*;
 
@@ -57,6 +58,7 @@ pub enum Instruction {
     Mov(Operand, Operand, AssemblyType),
     MovSignExtend(Operand, Operand),
     MovZeroExtend(Operand, Operand),
+    Lea(Operand, Operand),
     Cvttsd2si(Operand, Operand, AssemblyType),
     Cvtsi2sd(Operand, Operand, AssemblyType),
     Unary(UnaryOperator, Operand, AssemblyType),
@@ -115,6 +117,7 @@ impl AssemblyType {
             CType::Int | CType::UnsignedInt => AssemblyType::Longword,
             CType::Long | CType::UnsignedLong => AssemblyType::Quadword,
             CType::Double => AssemblyType::Double,
+            CType::Pointer(_) => AssemblyType::Quadword,
             _ => panic!("Expected a variable!"),
         }
     }
@@ -465,9 +468,25 @@ fn gen_instructions(
                 }
                 _ => panic!("Expected an unsigned src!"),
             },
-            generator::Instruction::GetAddress(_, _)
-            | generator::Instruction::Load(_, _)
-            | generator::Instruction::Store(_, _) => panic!("Not implemented!"),
+            generator::Instruction::GetAddress(src, dst) => {
+                let src = gen_operand(src, stack, symbols);
+                let dst = gen_operand(dst, stack, symbols);
+                asm_instructions.push(Lea(src, dst));
+            }
+            generator::Instruction::Load(ptr, dst) => {
+                let dst_type = AssemblyType::from(&get_type(&dst, symbols));
+                let ptr = gen_operand(ptr, stack, symbols);
+                let dst = gen_operand(dst, stack, symbols);
+                asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
+                asm_instructions.push(Mov(Memory(AX, 0), dst, dst_type));
+            }
+            generator::Instruction::Store(src, ptr) => {
+                let src_type = AssemblyType::from(&get_type(&src, symbols));
+                let src = gen_operand(src, stack, symbols);
+                let ptr = gen_operand(ptr, stack, symbols);
+                asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
+                asm_instructions.push(Mov(src, Memory(AX, 0), src_type));
+            }
         }
     }
     asm_instructions
@@ -673,8 +692,11 @@ fn gen_binary_op(
         GreaterThan | GreaterThanEqual | IsEqual | LessThan | LessThanEqual | LogicalAnd
         | LogicalOr | NotEqual => {
             use AssemblyType::Longword;
-            let signed =
-                if asm_type == AssemblyType::Double { false } else { src_ctype.is_signed() };
+            let signed = if asm_type == AssemblyType::Double {
+                false
+            } else {
+                src_ctype.is_arithmetic() && src_ctype.is_signed()
+            };
             // NAN returns true for !=, false otherwise
             let nan_result = (binary_instruction.operator == NotEqual) as i128;
             let condition = get_condition(binary_instruction.operator, signed);
