@@ -431,20 +431,54 @@ fn gen_expression(
                     symbols,
                 ));
             };
-            let src1 = gen_expression_and_convert(operator.left, instructions, symbols);
-            let src2 = gen_expression_and_convert(operator.right, instructions, symbols);
-            let dst = if operator.is_assignment {
-                src1.clone()
+            // Handle compound assignment, we have to do some type checking here as we cannot
+            // calculate lvalues twice (if they call functions), so need to generate our casts
+            // with tmp variables
+            if operator.is_assignment {
+                let expr_t = expr_type();
+                let left_t = get_type(&operator.left);
+                // Generate and cast lvalue to common type
+                let lval = gen_expression(operator.left, instructions, symbols);
+                let src1 =
+                    lvalue_convert(instructions, lval.clone(), Some(expr_t.clone()), symbols);
+                let src1 = gen_cast(instructions, expr_t.clone(), left_t.clone(), src1, symbols);
+                // Generate rvalue/temp var for dst, push binary op
+                let src2 = gen_expression_and_convert(operator.right, instructions, symbols);
+                let dst = gen_temp_var(expr_t.clone(), symbols);
+                instructions.push(Instruction::BinaryOp(InstructionBinary {
+                    operator: operator.operator.clone(),
+                    src1,
+                    src2,
+                    dst: dst.clone(),
+                }));
+                // Cast result to assignment type
+                let result = gen_cast(instructions, left_t, expr_t.clone(), dst, symbols);
+                // Handle assigning to pointer.
+                match &lval {
+                    ExpResult::Operand(val) => {
+                        instructions.push(Instruction::Copy(InstructionCopy {
+                            src: result,
+                            dst: val.clone(),
+                        }));
+                        lval
+                    }
+                    ExpResult::DereferencedPointer(ptr) => {
+                        instructions.push(Instruction::Store(result.clone(), ptr.clone()));
+                        ExpResult::Operand(result)
+                    }
+                }
             } else {
-                gen_temp_var(expr_type(), symbols)
-            };
-            instructions.push(Instruction::BinaryOp(InstructionBinary {
-                operator: operator.operator.clone(),
-                src1,
-                src2,
-                dst: dst.clone(),
-            }));
-            ExpResult::Operand(dst)
+                let src1 = gen_expression_and_convert(operator.left, instructions, symbols);
+                let src2 = gen_expression_and_convert(operator.right, instructions, symbols);
+                let dst = gen_temp_var(expr_type(), symbols);
+                instructions.push(Instruction::BinaryOp(InstructionBinary {
+                    operator: operator.operator.clone(),
+                    src1,
+                    src2,
+                    dst: dst.clone(),
+                }));
+                ExpResult::Operand(dst)
+            }
         }
         parse_tree::Expression::Variable(name) => {
             ExpResult::Operand(Value::Variable(name.to_string()))
@@ -495,29 +529,7 @@ fn gen_expression(
         parse_tree::Expression::Cast(new_type, castexpr) => {
             let old_type = get_type(&castexpr);
             let result = gen_expression_and_convert(*castexpr, instructions, symbols);
-            if new_type == old_type {
-                return ExpResult::Operand(result);
-            }
-            let dst = gen_temp_var(new_type.clone(), symbols);
-
-            if old_type == CType::Double && new_type.is_signed() {
-                instructions.push(Instruction::DoubleToInt(result, dst.clone()));
-            } else if old_type == CType::Double {
-                instructions.push(Instruction::DoubleToUInt(result, dst.clone()));
-            } else if new_type == CType::Double && old_type.is_signed() {
-                instructions.push(Instruction::IntToDouble(result, dst.clone()))
-            } else if new_type == CType::Double {
-                instructions.push(Instruction::UIntToDouble(result, dst.clone()))
-            } else if new_type.size() == old_type.size() {
-                instructions
-                    .push(Instruction::Copy(InstructionCopy { src: result, dst: dst.clone() }));
-            } else if new_type.size() < old_type.size() {
-                instructions.push(Instruction::Truncate(result, dst.clone()));
-            } else if old_type.is_signed() {
-                instructions.push(Instruction::SignExtend(result, dst.clone()));
-            } else {
-                instructions.push(Instruction::ZeroExtend(result, dst.clone()));
-            }
+            let dst = gen_cast(instructions, new_type, old_type, result, symbols);
             ExpResult::Operand(dst)
         }
         parse_tree::Expression::Dereference(inner) => {
@@ -536,6 +548,38 @@ fn gen_expression(
             }
         }
     }
+}
+
+fn gen_cast(
+    instructions: &mut Vec<Instruction>,
+    new_type: CType,
+    old_type: CType,
+    val: Value,
+    symbols: &mut Symbols,
+) -> Value {
+    if new_type == old_type {
+        return val;
+    }
+    let dst = gen_temp_var(new_type.clone(), symbols);
+
+    if old_type == CType::Double && new_type.is_signed() {
+        instructions.push(Instruction::DoubleToInt(val, dst.clone()));
+    } else if old_type == CType::Double {
+        instructions.push(Instruction::DoubleToUInt(val, dst.clone()));
+    } else if new_type == CType::Double && old_type.is_signed() {
+        instructions.push(Instruction::IntToDouble(val, dst.clone()))
+    } else if new_type == CType::Double {
+        instructions.push(Instruction::UIntToDouble(val, dst.clone()))
+    } else if new_type.size() == old_type.size() {
+        instructions.push(Instruction::Copy(InstructionCopy { src: val, dst: dst.clone() }));
+    } else if new_type.size() < old_type.size() {
+        instructions.push(Instruction::Truncate(val, dst.clone()));
+    } else if old_type.is_signed() {
+        instructions.push(Instruction::SignExtend(val, dst.clone()));
+    } else {
+        instructions.push(Instruction::ZeroExtend(val, dst.clone()));
+    }
+    dst
 }
 
 fn gen_short_circuit(
