@@ -322,6 +322,22 @@ fn gen_instructions(
     }
 }
 
+fn lvalue_convert(
+    instructions: &mut Vec<Instruction>,
+    result: ExpResult,
+    ctype: Option<CType>,
+    symbols: &mut Symbols,
+) -> Value {
+    match result {
+        ExpResult::Operand(val) => val,
+        ExpResult::DereferencedPointer(ptr) => {
+            let dst = gen_temp_var(ctype.expect("Undefined type!"), symbols);
+            instructions.push(Instruction::Load(ptr, dst.clone()));
+            dst
+        }
+    }
+}
+
 fn gen_expression_and_convert(
     expression: parse_tree::TypedExpression,
     instructions: &mut Vec<Instruction>,
@@ -329,16 +345,9 @@ fn gen_expression_and_convert(
 ) -> Value {
     let expr_type = expression.ctype.clone();
     let result = gen_expression(expression, instructions, symbols);
-    match result {
-        ExpResult::Operand(val) => val,
-        ExpResult::DereferencedPointer(ptr) => {
-            let dst = gen_temp_var(expr_type.expect("Undefined type!"), symbols);
-            instructions.push(Instruction::Load(ptr, dst.clone()));
-            dst
-        }
-    }
+    lvalue_convert(instructions, result, expr_type, symbols)
 }
-
+#[derive(Debug, Clone)]
 enum ExpResult {
     Operand(Value),
     DereferencedPointer(Value),
@@ -359,33 +368,44 @@ fn gen_expression(
         ) => {
             use parse_tree::Constant;
             use parse_tree::IncrementType::*;
-            let is_double = get_type(&expr) == CType::Double;
-            let dst = gen_expression_and_convert(*expr, instructions, symbols);
+            let inner_type = get_type(&expr);
+            let lval = gen_expression(*expr, instructions, symbols);
             let operator = match increment_type {
                 PreIncrement | PostIncrement => BinaryOperator::Add,
                 PreDecrement | PostDecrement => BinaryOperator::Subtract,
             };
-            let src2 = if is_double { Constant::Double(1.0) } else { Constant::Int(1) };
-            let bin_instruction = Instruction::BinaryOp(InstructionBinary {
+            let src1 =
+                lvalue_convert(instructions, lval.clone(), Some(inner_type.clone()), symbols);
+            let old_value = gen_temp_var(inner_type.clone(), symbols);
+            if matches!(increment_type, PostDecrement | PostIncrement) {
+                instructions.push(Instruction::Copy(InstructionCopy {
+                    src: src1.clone(),
+                    dst: old_value.clone(),
+                }));
+            }
+            let src2 =
+                if inner_type == CType::Double { Constant::Double(1.0) } else { Constant::Int(1) };
+            let dst = gen_temp_var(inner_type.clone(), symbols);
+            instructions.push(Instruction::BinaryOp(InstructionBinary {
                 operator,
-                src1: dst.clone(),
+                src1,
                 src2: Value::ConstValue(src2),
                 dst: dst.clone(),
-            });
-            match increment_type {
-                PreDecrement | PreIncrement => {
-                    instructions.push(bin_instruction);
+            }));
+            let result = match &lval {
+                ExpResult::Operand(val) => {
+                    instructions
+                        .push(Instruction::Copy(InstructionCopy { src: dst, dst: val.clone() }));
+                    lval
+                }
+                ExpResult::DereferencedPointer(ptr) => {
+                    instructions.push(Instruction::Store(dst.clone(), ptr.clone()));
                     ExpResult::Operand(dst)
                 }
-                PostDecrement | PostIncrement => {
-                    let old_value = gen_temp_var(expr_type(), symbols);
-                    instructions.push(Instruction::Copy(InstructionCopy {
-                        src: dst.clone(),
-                        dst: old_value.clone(),
-                    }));
-                    instructions.push(bin_instruction);
-                    ExpResult::Operand(old_value)
-                }
+            };
+            match increment_type {
+                PostDecrement | PostIncrement => ExpResult::Operand(old_value),
+                _ => result,
             }
         }
         parse_tree::Expression::Unary(operator, expr) => {
