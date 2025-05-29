@@ -350,7 +350,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let common_type = if left_t.is_pointer() || right_t.is_pointer() {
                 get_common_pointer_type(&left, &right)
             } else {
-                get_common_type(left_t, right_t)
+                get_common_type(left_t.clone(), right_t)
             };
             // Generate type for expression
             let ctype = match binary.operator {
@@ -376,6 +376,13 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
                 }
                 _ => CType::Int,
             };
+            // Type check assignment
+            if binary.is_assignment {
+                assert!(left.is_lvalue(), "Can only assign to lvalue!");
+                let right = convert_to(right, &ctype);
+                let binexpr = BinaryExpression { left, right, ..*binary };
+                return set_type(Binary(binexpr.into()).into(), &ctype);
+            }
             // Generate necessary casts
             let expr = match binary.operator {
                 LeftShift | RightShift => BinaryExpression { left, right, ..*binary },

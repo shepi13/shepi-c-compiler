@@ -1,6 +1,6 @@
 use crate::parse::parse_tree::{
-    self, AssignmentExpression, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop,
-    Program, Statement, StorageClass, SwitchStatement, TypedExpression, VariableDeclaration,
+    self, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop, Program, Statement,
+    StorageClass, SwitchStatement, TypedExpression, VariableDeclaration,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -354,18 +354,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
         Binary(mut binexpr) => {
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
-            if binexpr.is_assignment {
-                Assignment(
-                    AssignmentExpression {
-                        left: binexpr.left.clone(),
-                        right: Binary(binexpr).into(),
-                    }
-                    .into(),
-                )
-                .into()
-            } else {
-                Binary(binexpr).into()
-            }
+            Binary(binexpr).into()
         }
         Condition(mut cond) => {
             cond.condition = resolve_expression(cond.condition, symbols);
