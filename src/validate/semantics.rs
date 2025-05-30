@@ -145,7 +145,6 @@ impl SymbolTable {
         let name = &decl.name;
         let stack_len = self.identifiers.len() - 1;
         if let Some(prev_declaration) = self.identifiers[stack_len].get(name) {
-            println!("{:?} and {:?}", prev_declaration.external, decl.storage);
             assert!(
                 prev_declaration.external && decl.storage == Some(StorageClass::Extern),
                 "Duplicate variable name in current scope: {}",
