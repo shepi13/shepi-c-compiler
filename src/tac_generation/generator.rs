@@ -446,7 +446,7 @@ fn gen_expression(
                 let src2 = gen_expression_and_convert(operator.right, instructions, symbols);
                 let dst = gen_temp_var(expr_t.clone(), symbols);
                 instructions.push(Instruction::BinaryOp(InstructionBinary {
-                    operator: operator.operator.clone(),
+                    operator: operator.operator,
                     src1,
                     src2,
                     dst: dst.clone(),
@@ -472,7 +472,7 @@ fn gen_expression(
                 let src2 = gen_expression_and_convert(operator.right, instructions, symbols);
                 let dst = gen_temp_var(expr_type(), symbols);
                 instructions.push(Instruction::BinaryOp(InstructionBinary {
-                    operator: operator.operator.clone(),
+                    operator: operator.operator,
                     src1,
                     src2,
                     dst: dst.clone(),
@@ -600,7 +600,7 @@ fn gen_short_circuit(
     let dst = gen_temp_var(CType::Int, symbols);
     let v1 = gen_expression_and_convert(left, instructions, symbols);
     instructions.push(Instruction::JumpCond(InstructionJump {
-        jump_type: jump_type.clone(),
+        jump_type,
         condition: v1,
         target: target.clone(),
     }));
