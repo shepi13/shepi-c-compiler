@@ -306,7 +306,6 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_expression(*inner, table);
             let old_type = get_type(&typed_inner);
-            println!("{:#?} {:#?}", old_type, new_type);
             if new_type == CType::Double && old_type.is_pointer()
                 || old_type == CType::Double && new_type.is_pointer()
             {

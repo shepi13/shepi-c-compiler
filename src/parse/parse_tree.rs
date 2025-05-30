@@ -80,11 +80,11 @@ pub enum CType {
     Double,
     Function(Vec<CType>, Box<CType>),
     Pointer(Box<CType>),
-    Array(Box<CType>, usize),
+    Array(Box<CType>, u64),
 }
 
 impl CType {
-    pub fn size(&self) -> usize {
+    pub fn size(&self) -> u64 {
         match self {
             CType::Int | CType::UnsignedInt => 4,
             CType::Long | CType::UnsignedLong => 8,
@@ -255,5 +255,8 @@ impl Constant {
             Self::UnsignedInt(val) | Self::UnsignedLong(val) => *val as i128,
             Self::Double(val) => *val as i128,
         }
+    }
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Self::Int(_) | Self::Long(_) | Self::UnsignedInt(_) | Self::UnsignedLong(_))
     }
 }

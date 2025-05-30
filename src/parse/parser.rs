@@ -242,80 +242,83 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -
         expression
     }
 }
+
+fn parse_constant(token: &TokenType) -> Constant {
+    match token {
+        TokenType::Constant(val) => match val.parse::<i32>() {
+            Ok(val) => Constant::Int(val.into()),
+            Err(_) => Constant::Long(val.parse().expect("Failed to convert constant to int")),
+        },
+        TokenType::ConstantLong(val) => {
+            Constant::Long(val.parse().expect("Failed to convert constant to long"))
+        }
+        TokenType::Unsigned(val) => match val.parse::<u32>() {
+            Ok(val) => Constant::UnsignedInt(val.into()),
+            Err(_) => Constant::UnsignedLong(
+                val.parse().expect("Failed to convert unsigned constant to int"),
+            ),
+        },
+        TokenType::UnsignedLong(val) => Constant::UnsignedLong(
+            val.parse().expect("Failed to convert unsigned constant to long"),
+        ),
+        TokenType::Double(val) => {
+            Constant::Double(val.parse().expect("Failed to convert to double!"))
+        }
+        _ => panic!("Expected constant!"),
+    }
+}
+
 fn parse_factor(tokens: &mut &[TokenType]) -> TypedExpression {
     // Parses a factor (unary value/operator) of a larger expression
     let token = consume(tokens);
-    match token {
-        TokenType::Constant(val) => match val.parse::<i32>() {
-            Ok(val) => Expression::Constant(Constant::Int(val.into())).into(),
-            Err(_) => Expression::Constant(Constant::Long(
-                val.parse().expect("Failed to convert constant to int"),
-            ))
-            .into(),
-        },
-        TokenType::ConstantLong(val) => Expression::Constant(Constant::Long(
-            val.parse().expect("Failed to convert constant to long"),
-        ))
-        .into(),
-        TokenType::Unsigned(val) => match val.parse::<u32>() {
-            Ok(val) => Expression::Constant(Constant::UnsignedInt(val.into())).into(),
-            Err(_) => Expression::Constant(Constant::UnsignedLong(
-                val.parse().expect("Failed to convert unsigned constant to int"),
-            ))
-            .into(),
-        },
-        TokenType::UnsignedLong(val) => Expression::Constant(Constant::UnsignedLong(
-            val.parse().expect("Failed to convert unsigned constant to long"),
-        ))
-        .into(),
-        TokenType::Double(val) => Expression::Constant(Constant::Double(
-            val.parse().expect("Failed to convert to double!"),
-        ))
-        .into(),
-        TokenType::Hyphen => {
-            Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()).into()
-        }
+    let expr = match token {
+        TokenType::Constant(_)
+        | TokenType::ConstantLong(_)
+        | TokenType::Unsigned(_)
+        | TokenType::UnsignedLong(_)
+        | TokenType::Double(_) => Expression::Constant(parse_constant(&token)),
+        TokenType::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()),
         TokenType::Tilde => {
-            Expression::Unary(UnaryOperator::Complement, parse_factor(tokens).into()).into()
+            Expression::Unary(UnaryOperator::Complement, parse_factor(tokens).into())
         }
         TokenType::Exclam => {
-            Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens).into()).into()
+            Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens).into())
         }
-        TokenType::Ampersand => Expression::AddrOf(parse_factor(tokens).into()).into(),
-        TokenType::Star => Expression::Dereference(parse_factor(tokens).into()).into(),
+        TokenType::Ampersand => Expression::AddrOf(parse_factor(tokens).into()),
+        TokenType::Star => Expression::Dereference(parse_factor(tokens).into()),
         TokenType::Increment => Expression::Unary(
             UnaryOperator::Increment(IncrementType::PreIncrement),
             parse_factor(tokens).into(),
-        )
-        .into(),
+        ),
         TokenType::Decrement => Expression::Unary(
             UnaryOperator::Increment(IncrementType::PreDecrement),
             parse_factor(tokens).into(),
-        )
-        .into(),
+        ),
         TokenType::OpenParen => {
             if is_type_specifier(&tokens[0]) {
                 let base_type = parse_type(tokens);
                 let abstract_decl = parse_abstract_declarator(tokens);
                 let ctype = process_abstract_declarator(abstract_decl, base_type);
-                Expression::Cast(ctype, parse_factor(tokens).into()).into()
+                expect(tokens, TokenType::CloseParen);
+                Expression::Cast(ctype, parse_factor(tokens).into())
             } else {
                 let expr = parse_expression(tokens, 0);
                 expect(tokens, TokenType::CloseParen);
-                parse_post_operator(tokens, expr)
+                expr.expr
             }
         }
         TokenType::Identifier(name) => {
             if try_consume(tokens, TokenType::OpenParen) {
                 let args = parse_argument_list(tokens);
                 expect(tokens, TokenType::CloseParen);
-                parse_post_operator(tokens, Expression::FunctionCall(name.to_string(), args).into())
+                Expression::FunctionCall(name.to_string(), args)
             } else {
-                parse_post_operator(tokens, Expression::Variable(name.to_string()).into())
+                Expression::Variable(name.to_string())
             }
         }
         _ => panic!("Expected factor, found {:?}", token),
-    }
+    };
+    parse_post_operator(tokens, expr.into())
 }
 fn parse_expression(tokens: &mut &[TokenType], min_prec: usize) -> TypedExpression {
     // Parses an expression using precedence climbing
