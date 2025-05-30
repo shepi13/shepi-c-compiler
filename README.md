@@ -26,4 +26,5 @@ In progress:
 - Arrays (including cstrings), as well as pointer arithmetic
 - Dynamic memory allocation
 - const / enum
+- char type (single byte, although this should be similar to long/unsigned type implementation)
 - Optimizations
