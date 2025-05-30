@@ -50,6 +50,27 @@ pub enum Declaration {
     Variable(VariableDeclaration),
     Function(FunctionDeclaration),
 }
+#[derive(Debug, Clone)]
+pub enum VariableInitializer {
+    SingleElem(TypedExpression),
+    CompoundInit(Vec<VariableInitializer>)
+}
+
+impl VariableInitializer {
+    pub fn get_single_init(self) -> TypedExpression {
+        match self {
+            Self::SingleElem(val) => val,
+            Self::CompoundInit(_) => panic!("Not implemented")
+        }
+    }
+    pub fn get_single_init_ref(&self) -> &TypedExpression {
+        match self {
+            Self::SingleElem(val) => val,
+            Self::CompoundInit(_) => panic!("Not implemented")
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum CType {
     Int,
@@ -59,6 +80,7 @@ pub enum CType {
     Double,
     Function(Vec<CType>, Box<CType>),
     Pointer(Box<CType>),
+    Array(Box<CType>, usize),
 }
 
 impl CType {
@@ -69,6 +91,7 @@ impl CType {
             CType::Double => 8,
             CType::Function(_, _) => panic!("Not a variable or constant!"),
             CType::Pointer(_) => 8,
+            CType::Array(elem_t, elem_c) => elem_c * elem_t.size()
         }
     }
     pub fn is_signed(&self) -> bool {
@@ -81,7 +104,7 @@ impl CType {
     pub fn is_int(&self) -> bool {
         match self {
             Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong => true,
-            Self::Double | Self::Function(_, _) | Self::Pointer(_) => false,
+            Self::Double | Self::Function(_, _) | Self::Pointer(_) | Self::Array(_, _) => false,
         }
     }
     pub fn is_pointer(&self) -> bool {
@@ -90,7 +113,7 @@ impl CType {
     pub fn is_arithmetic(&self) -> bool {
         match self {
             Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong | Self::Double => true,
-            Self::Function(_, _) | Self::Pointer(_) => false,
+            Self::Function(_, _) | Self::Pointer(_) | Self::Array(_, _) => false,
         }
     }
 }
@@ -98,7 +121,7 @@ impl CType {
 #[derive(Debug, Clone)]
 pub struct VariableDeclaration {
     pub name: String,
-    pub value: Option<TypedExpression>,
+    pub init: Option<VariableInitializer>,
     pub ctype: CType,
     pub storage: Option<StorageClass>,
 }
@@ -157,6 +180,7 @@ pub enum Expression {
     Cast(CType, Box<TypedExpression>),
     Dereference(Box<TypedExpression>),
     AddrOf(Box<TypedExpression>),
+    Subscript(Box<TypedExpression>, Box<TypedExpression>),
 }
 #[derive(Debug, Clone)]
 pub struct BinaryExpression {

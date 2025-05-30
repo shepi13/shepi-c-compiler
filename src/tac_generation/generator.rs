@@ -3,8 +3,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    parse::parse_tree::{self, BinaryOperator, CType, StorageClass},
-    validate::type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
+    parse::parse_tree::{self, BinaryOperator, CType, StorageClass, VariableInitializer},
+    validate::type_check::{get_type, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols},
 };
 
 pub type Program = Vec<TopLevelDecl>;
@@ -182,7 +182,7 @@ fn gen_declaration(
     {
         return;
     }
-    if let Some(value) = declaration.value {
+    if let Some(VariableInitializer::SingleElem(value)) = declaration.init {
         let result = gen_expression_and_convert(value, instructions, symbols);
         instructions.push(Instruction::Copy(InstructionCopy {
             src: result,
@@ -547,6 +547,7 @@ fn gen_expression(
                 ExpResult::DereferencedPointer(ptr) => ExpResult::Operand(ptr),
             }
         }
+        parse_tree::Expression::Subscript(_, _) => panic!("Not implemented!")
     }
 }
 
