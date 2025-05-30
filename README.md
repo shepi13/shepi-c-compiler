@@ -17,12 +17,13 @@ Currently supports:
 - Static and Extern variables
 - Signed/Unsigned integer types with proper C conversions and casting, including long/long long
 - Double Precision floating point operations (Including proper NaN support)
+- Basic pointer operations (referencing and dereferencing)
 ----------------
+
 In progress:
 
 - Structs/Unions
-- Pointers/Arrays (including cstrings)
+- Arrays (including cstrings), as well as pointer arithmetic
 - Dynamic memory allocation
 - const / enum
-
 - Optimizations
