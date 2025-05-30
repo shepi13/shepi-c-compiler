@@ -161,9 +161,9 @@ fn convert_to(expression: TypedExpression, ctype: &CType) -> TypedExpression {
 fn convert_by_assignment(expr: TypedExpression, ctype: &CType) -> TypedExpression {
     if get_type(&expr) == *ctype {
         expr
-    } else if get_type(&expr).is_arithmetic() && ctype.is_arithmetic() {
-        convert_to(expr, ctype)
-    } else if is_null_ptr(&expr) && ctype.is_pointer() {
+    } else if (get_type(&expr).is_arithmetic() && ctype.is_arithmetic())
+        || (is_null_ptr(&expr) && ctype.is_pointer())
+    {
         convert_to(expr, ctype)
     } else {
         panic!("Cannot convert type for assignment!")

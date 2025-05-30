@@ -351,7 +351,7 @@ fn gen_instructions(
                             asm_instructions.push(Binary(BitXor, Reg(XMM0), Reg(XMM0), src_type));
                             asm_instructions.push(Compare(src, Reg(XMM0), src_type));
                             asm_instructions.push(JmpCond(Condition::Parity, nan_label.clone()));
-                            asm_instructions.push(Mov(Imm(0), dst.clone(), dst_type.clone()));
+                            asm_instructions.push(Mov(Imm(0), dst.clone(), dst_type));
                             asm_instructions.push(SetCond(Condition::Equal, dst.clone()));
                             asm_instructions.push(Jmp(end_label.clone()));
                             asm_instructions.push(Label(nan_label));
