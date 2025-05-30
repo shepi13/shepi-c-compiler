@@ -500,8 +500,8 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
             body,
         })
     } else {
-        let value = if try_consume(tokens, TokenType::Equal) {
-            Some(parse_expression(tokens, 0))
+        let init = if try_consume(tokens, TokenType::Equal) {
+            Some(parse_initializer(tokens))
         } else {
             None
         };
@@ -509,9 +509,26 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
         Declaration::Variable(VariableDeclaration {
             name: decl_result.name,
             ctype: decl_result.ctype,
-            init: value.map(VariableInitializer::SingleElem),
+            init,
             storage,
         })
+    }
+}
+
+fn parse_initializer(tokens: &mut &[TokenType]) -> VariableInitializer {
+    if try_consume(tokens, TokenType::OpenBrace) {
+        assert!(tokens[0] != TokenType::CloseBrace, "Empty initializer invalid pre C23");
+        let mut initializers = Vec::new();
+        while !try_consume(tokens, TokenType::CloseBrace) {
+            initializers.push(parse_initializer(tokens));
+            if !try_consume(tokens, TokenType::Comma) {
+                expect(tokens, TokenType::CloseBrace);
+                break;
+            }
+        }
+        VariableInitializer::CompoundInit(initializers)
+    } else {
+        VariableInitializer::SingleElem(parse_expression(tokens, 0))
     }
 }
 
