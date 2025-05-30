@@ -7,6 +7,7 @@ use crate::parse::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, CType,
     ConditionExpression, Constant, Declaration, Expression, ForInit, FunctionDeclaration, Program,
     Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
+    VariableInitializer,
 };
 
 #[derive(Debug, Clone)]
@@ -452,6 +453,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let addr_expr = Expression::AddrOf(typed_inner.into());
             set_type(addr_expr.into(), &CType::Pointer(reference_t))
         }
+        Expression::Subscript(_, _) => panic!("Not implemented!"),
     }
 }
 
@@ -504,7 +506,11 @@ fn type_check_function(
     }
 }
 
-fn parse_static_initializer(init: &Option<TypedExpression>, ctype: &CType) -> StaticInitializer {
+fn parse_static_initializer(
+    init: &Option<VariableInitializer>,
+    ctype: &CType,
+) -> StaticInitializer {
+    let init = init.as_ref().map(VariableInitializer::get_single_init_ref);
     let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
     let init_val = init_val.unwrap_or(Ok(Constant::Int(0))).expect("Must be constexpr!");
     use Constant::*;
@@ -530,7 +536,7 @@ where
         CType::Pointer(_) if num_traits::AsPrimitive::<i64>::as_(val) == 0 => {
             StaticInitializer::Initialized(Initializer::UnsignedLong(0))
         }
-        CType::Function(_, _) | CType::Pointer(_) => panic!("Not a variable!"),
+        CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) => panic!("Not a variable!"),
     }
 }
 
@@ -540,7 +546,7 @@ fn type_check_var_declaration(
 ) -> VariableDeclaration {
     match var.storage {
         Some(StorageClass::Extern) => {
-            assert!(var.value.is_none(), "Local extern variable cannot have initializer!");
+            assert!(var.init.is_none(), "Local extern variable cannot have initializer!");
             if let Some(symbol) = table.symbols.get(&var.name) {
                 assert!(symbol.ctype == var.ctype, "Declaration types don't match!");
             } else {
@@ -558,7 +564,7 @@ fn type_check_var_declaration(
             var
         }
         Some(StorageClass::Static) => {
-            let init_value = parse_static_initializer(&var.value, &var.ctype);
+            let init_value = parse_static_initializer(&var.init, &var.ctype);
             table.symbols.insert(
                 var.name.clone(),
                 Symbol {
@@ -576,16 +582,18 @@ fn type_check_var_declaration(
                     attrs: SymbolAttr::Local,
                 },
             );
-            let new_init = var.value.map(|init| type_check_expression(init, table));
+            let init_expr = var.init.map(VariableInitializer::get_single_init);
+            let new_init = init_expr.map(|init| type_check_expression(init, table));
             let new_init = new_init.map(|init| convert_by_assignment(init, &var.ctype));
-            VariableDeclaration { value: new_init, ..var }
+            let new_init = new_init.map(VariableInitializer::SingleElem);
+            VariableDeclaration { init: new_init, ..var }
         }
     }
 }
 
 fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
-    let mut init_value = match &var.value {
-        Some(_) => parse_static_initializer(&var.value, &var.ctype),
+    let mut init_value = match &var.init {
+        Some(_) => parse_static_initializer(&var.init, &var.ctype),
         None => match var.storage {
             Some(StorageClass::Extern) => StaticInitializer::None,
             _ => StaticInitializer::Tentative,

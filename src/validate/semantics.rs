@@ -1,6 +1,6 @@
 use crate::parse::parse_tree::{
     self, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop, Program, Statement,
-    StorageClass, SwitchStatement, TypedExpression, VariableDeclaration,
+    StorageClass, SwitchStatement, TypedExpression, VariableDeclaration, VariableInitializer,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -135,7 +135,7 @@ impl SymbolTable {
     fn declare_parameter(&mut self, name: String) -> String {
         let decl = self.declare_local_variable(VariableDeclaration {
             name: name.clone(),
-            value: None,
+            init: None,
             ctype: parse_tree::CType::Int,
             storage: None,
         });
@@ -297,7 +297,7 @@ fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Stateme
                         "For loop initializer cannot be static or extern"
                     );
                     let mut decl = symbols.declare_local_variable(decl);
-                    decl.value = decl.value.map(|expr| resolve_expression(expr, symbols));
+                    decl.init = resolve_initializer(decl.init, symbols);
                     ForInit::Decl(decl)
                 }
                 ForInit::Expr(expr) => {
@@ -337,12 +337,25 @@ fn resolve_declaration(decl: Declaration, symbols: &mut SymbolTable, global: boo
             } else {
                 var_decl = symbols.declare_local_variable(var_decl);
             }
-            var_decl.value = var_decl.value.map(|expr| resolve_expression(expr, symbols));
+            var_decl.init = resolve_initializer(var_decl.init, symbols);
             Declaration::Variable(var_decl)
         }
         Declaration::Function(func_decl) => {
             Declaration::Function(resolve_function(func_decl, symbols))
         }
+    }
+}
+
+fn resolve_initializer(
+    init: Option<VariableInitializer>,
+    symbols: &mut SymbolTable,
+) -> Option<VariableInitializer> {
+    match init {
+        Some(VariableInitializer::SingleElem(expr)) => {
+            Some(VariableInitializer::SingleElem(resolve_expression(expr, symbols)))
+        }
+        None => None,
+        _ => panic!("Not implemented!"),
     }
 }
 
@@ -377,6 +390,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
         Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()).into(),
         Dereference(inner) => Dereference(resolve_expression(*inner, symbols).into()).into(),
         AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols).into()).into(),
+        Subscript(_, _) => panic!("Not implemented!"),
     }
 }
 

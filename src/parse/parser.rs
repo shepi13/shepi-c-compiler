@@ -10,7 +10,7 @@ use declarators::{
 };
 use lazy_static::lazy_static;
 
-use super::lexer;
+use super::{lexer, parse_tree::VariableInitializer};
 use lexer::TokenType;
 
 use super::parse_tree::{
@@ -499,7 +499,7 @@ fn parse_declaration(tokens: &mut &[TokenType]) -> Declaration {
         Declaration::Variable(VariableDeclaration {
             name: decl_result.name,
             ctype: decl_result.ctype,
-            value,
+            init: value.map(VariableInitializer::SingleElem),
             storage,
         })
     }
