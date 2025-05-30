@@ -53,20 +53,20 @@ pub enum Declaration {
 #[derive(Debug, Clone)]
 pub enum VariableInitializer {
     SingleElem(TypedExpression),
-    CompoundInit(Vec<VariableInitializer>)
+    CompoundInit(Vec<VariableInitializer>),
 }
 
 impl VariableInitializer {
     pub fn get_single_init(self) -> TypedExpression {
         match self {
             Self::SingleElem(val) => val,
-            Self::CompoundInit(_) => panic!("Not implemented")
+            Self::CompoundInit(_) => panic!("Not implemented"),
         }
     }
     pub fn get_single_init_ref(&self) -> &TypedExpression {
         match self {
             Self::SingleElem(val) => val,
-            Self::CompoundInit(_) => panic!("Not implemented")
+            Self::CompoundInit(_) => panic!("Not implemented"),
         }
     }
 }
@@ -91,7 +91,7 @@ impl CType {
             CType::Double => 8,
             CType::Function(_, _) => panic!("Not a variable or constant!"),
             CType::Pointer(_) => 8,
-            CType::Array(elem_t, elem_c) => elem_c * elem_t.size()
+            CType::Array(elem_t, elem_c) => elem_c * elem_t.size(),
         }
     }
     pub fn is_signed(&self) -> bool {

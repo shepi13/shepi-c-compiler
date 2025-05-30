@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     parse::parse_tree::{self, BinaryOperator, CType, StorageClass, VariableInitializer},
-    validate::type_check::{get_type, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols},
+    validate::type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
 };
 
 pub type Program = Vec<TopLevelDecl>;
@@ -547,7 +547,7 @@ fn gen_expression(
                 ExpResult::DereferencedPointer(ptr) => ExpResult::Operand(ptr),
             }
         }
-        parse_tree::Expression::Subscript(_, _) => panic!("Not implemented!")
+        parse_tree::Expression::Subscript(_, _) => panic!("Not implemented!"),
     }
 }
 

@@ -6,7 +6,8 @@ use std::{
 use crate::parse::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, CType,
     ConditionExpression, Constant, Declaration, Expression, ForInit, FunctionDeclaration, Program,
-    Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration, VariableInitializer,
+    Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
+    VariableInitializer,
 };
 
 #[derive(Debug, Clone)]
@@ -452,7 +453,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let addr_expr = Expression::AddrOf(typed_inner.into());
             set_type(addr_expr.into(), &CType::Pointer(reference_t))
         }
-        Expression::Subscript(_, _) => panic!("Not implemented!")
+        Expression::Subscript(_, _) => panic!("Not implemented!"),
     }
 }
 
@@ -505,7 +506,10 @@ fn type_check_function(
     }
 }
 
-fn parse_static_initializer(init: &Option<VariableInitializer>, ctype: &CType) -> StaticInitializer {
+fn parse_static_initializer(
+    init: &Option<VariableInitializer>,
+    ctype: &CType,
+) -> StaticInitializer {
     let init = init.as_ref().map(VariableInitializer::get_single_init_ref);
     let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
     let init_val = init_val.unwrap_or(Ok(Constant::Int(0))).expect("Must be constexpr!");

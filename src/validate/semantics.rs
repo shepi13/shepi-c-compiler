@@ -346,11 +346,16 @@ fn resolve_declaration(decl: Declaration, symbols: &mut SymbolTable, global: boo
     }
 }
 
-fn resolve_initializer(init: Option<VariableInitializer>, symbols: &mut SymbolTable) -> Option<VariableInitializer> {
+fn resolve_initializer(
+    init: Option<VariableInitializer>,
+    symbols: &mut SymbolTable,
+) -> Option<VariableInitializer> {
     match init {
-        Some(VariableInitializer::SingleElem(expr)) => Some(VariableInitializer::SingleElem(resolve_expression(expr, symbols))),
+        Some(VariableInitializer::SingleElem(expr)) => {
+            Some(VariableInitializer::SingleElem(resolve_expression(expr, symbols)))
+        }
         None => None,
-        _ => panic!("Not implemented!")
+        _ => panic!("Not implemented!"),
     }
 }
 
@@ -385,7 +390,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Typed
         Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()).into(),
         Dereference(inner) => Dereference(resolve_expression(*inner, symbols).into()).into(),
         AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols).into()).into(),
-        Subscript(_, _) => panic!("Not implemented!")
+        Subscript(_, _) => panic!("Not implemented!"),
     }
 }
 
