@@ -353,44 +353,56 @@ fn resolve_initializer(
         Some(VariableInitializer::SingleElem(expr)) => {
             Some(VariableInitializer::SingleElem(resolve_expression(expr, symbols)))
         }
+        Some(VariableInitializer::CompoundInit(initializers)) => {
+            Some(VariableInitializer::CompoundInit(
+                initializers
+                    .into_iter()
+                    .map(|init| resolve_initializer(Some(init), symbols).unwrap())
+                    .collect(),
+            ))
+        }
         None => None,
-        _ => panic!("Not implemented!"),
     }
 }
 
 fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> TypedExpression {
     use parse_tree::Expression::*;
     let expr = expr.expr;
-    match expr {
-        Unary(operator, expr) => Unary(operator, resolve_expression(*expr, symbols).into()).into(),
+    let result = match expr {
+        Unary(operator, expr) => Unary(operator, resolve_expression(*expr, symbols).into()),
         Binary(mut binexpr) => {
             binexpr.left = resolve_expression(binexpr.left, symbols);
             binexpr.right = resolve_expression(binexpr.right, symbols);
-            Binary(binexpr).into()
+            Binary(binexpr)
         }
         Condition(mut cond) => {
             cond.condition = resolve_expression(cond.condition, symbols);
             cond.if_true = resolve_expression(cond.if_true, symbols);
             cond.if_false = resolve_expression(cond.if_false, symbols);
-            Condition(cond).into()
+            Condition(cond)
         }
         Assignment(mut assign) => {
             assign.left = resolve_expression(assign.left, symbols);
             assign.right = resolve_expression(assign.right, symbols);
-            Assignment(assign).into()
+            Assignment(assign)
         }
-        Variable(name) => Variable(symbols.resolve_identifier(&name)).into(),
-        Constant(_) => expr.into(),
+        Variable(name) => Variable(symbols.resolve_identifier(&name)),
+        Constant(_) => expr,
         FunctionCall(name, args) => {
             let name = symbols.resolve_identifier(&name);
             let args = args.into_iter().map(|arg| resolve_expression(arg, symbols)).collect();
-            FunctionCall(name, args).into()
+            FunctionCall(name, args)
         }
-        Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()).into(),
-        Dereference(inner) => Dereference(resolve_expression(*inner, symbols).into()).into(),
-        AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols).into()).into(),
-        Subscript(_, _) => panic!("Not implemented!"),
-    }
+        Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()),
+        Dereference(inner) => Dereference(resolve_expression(*inner, symbols).into()),
+        AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols).into()),
+        Subscript(expr, sub_expr) => Subscript(
+            resolve_expression(*expr, symbols).into(),
+            resolve_expression(*sub_expr, symbols).into(),
+        ),
+    };
+    // Convert to TypedExpression
+    result.into()
 }
 
 fn resolve_loop(mut loop_data: Loop, symbols: &mut SymbolTable, scoped: bool) -> Loop {
