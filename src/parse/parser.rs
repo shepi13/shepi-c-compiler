@@ -231,6 +231,13 @@ fn parse_post_operator(tokens: &mut &[TokenType], expression: TypedExpression) -
             )
             .into(),
         )
+    } else if try_consume(tokens, TokenType::OpenBracket) {
+        let sub_expr = parse_expression(tokens, 0);
+        expect(tokens, TokenType::CloseBracket);
+        parse_post_operator(
+            tokens,
+            Expression::Subscript(expression.into(), sub_expr.into()).into(),
+        )
     } else {
         expression
     }
