@@ -326,8 +326,9 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             {
                 panic!("Cannot convert double to pointer or pointer to double!");
             }
-            let cast_expr = Expression::Cast(new_type.clone(), typed_inner.into()).into();
-            set_type(cast_expr, &new_type)
+            assert!(!matches!(new_type, CType::Array(_, _)), "Cannot cast to array type");
+            let cast_expr = Expression::Cast(new_type.clone(), typed_inner.into());
+            set_type(cast_expr.into(), &new_type)
         }
         Expression::Unary(op, inner) => {
             let typed_inner = type_check_and_convert(*inner, table);
@@ -529,8 +530,8 @@ fn type_check_function(
     function: FunctionDeclaration,
     table: &mut TypeTable,
 ) -> FunctionDeclaration {
-    //let ctype = CType::Function(function.params.len());
     table.current_function = Some(function.name.clone());
+    let function = type_check_array_params(function);
     let ctype = &function.ctype;
     let mut defined = function.body.is_some();
     let mut global = function.storage != Some(StorageClass::Static);
@@ -542,34 +543,33 @@ fn type_check_function(
         global = attrs.global;
         defined = attrs.defined;
     }
-    table.symbols.insert(
-        function.name.clone(),
-        Symbol {
-            ctype: ctype.clone(),
-            attrs: SymbolAttr::Function(FunctionAttributes { defined, global }),
-        },
-    );
+    let attrs = SymbolAttr::Function(FunctionAttributes { defined, global });
+    table.symbols.insert(function.name.clone(), Symbol { ctype: ctype.clone(), attrs });
     if let Some(body) = function.body {
-        let param_types = match ctype {
-            CType::Function(args, _) => args,
-            _ => panic!("Not a function!"),
-        };
+        let CType::Function(param_types, _) = ctype else { panic!("Not a function!") };
         for (param, param_type) in zip(&function.params, param_types) {
-            table.symbols.insert(
-                param.clone(),
-                Symbol {
-                    ctype: param_type.clone(),
-                    attrs: SymbolAttr::Local,
-                },
-            );
+            let attrs = SymbolAttr::Local;
+            table.symbols.insert(param.clone(), Symbol { ctype: param_type.clone(), attrs });
         }
-        FunctionDeclaration {
-            body: Some(type_check_block(body, table)),
-            ..function
-        }
+        let body = Some(type_check_block(body, table));
+        FunctionDeclaration { body, ..function }
     } else {
         function
     }
+}
+
+fn type_check_array_params(mut function: FunctionDeclaration) -> FunctionDeclaration {
+    let CType::Function(param_types, return_t) = function.ctype else { panic!("Not a function!") };
+    assert!(!matches!(*return_t, CType::Array(_, _)), "Function cannot return array");
+    let adjusted_params = param_types
+        .into_iter()
+        .map(|param_t| match param_t {
+            CType::Array(elem_t, _) => CType::Pointer(elem_t),
+            _ => param_t,
+        })
+        .collect();
+    function.ctype = CType::Function(adjusted_params, return_t);
+    function
 }
 
 fn parse_static_initializer(
@@ -616,56 +616,37 @@ fn type_check_var_declaration(
             if let Some(symbol) = table.symbols.get(&var.name) {
                 assert!(symbol.ctype == var.ctype, "Declaration types don't match!");
             } else {
-                table.symbols.insert(
-                    var.name.clone(),
-                    Symbol {
-                        ctype: var.ctype.clone(),
-                        attrs: SymbolAttr::Static(StaticAttributes {
-                            init: StaticInitializer::None,
-                            global: true,
-                        }),
-                    },
-                );
+                let init = StaticInitializer::None;
+                let attrs = SymbolAttr::Static(StaticAttributes { init, global: true });
+                table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
             }
             var
         }
         Some(StorageClass::Static) => {
-            let init_value = parse_static_initializer(&var.init, &var.ctype);
-            table.symbols.insert(
-                var.name.clone(),
-                Symbol {
-                    ctype: var.ctype.clone(),
-                    attrs: SymbolAttr::Static(StaticAttributes { init: init_value, global: false }),
-                },
-            );
+            let init = parse_static_initializer(&var.init, &var.ctype);
+            let attrs = SymbolAttr::Static(StaticAttributes { init, global: false });
+            table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
             var
         }
-        _ => {
-            table.symbols.insert(
-                var.name.clone(),
-                Symbol {
-                    ctype: var.ctype.clone(),
-                    attrs: SymbolAttr::Local,
-                },
-            );
+        None => {
+            let attrs = SymbolAttr::Local;
+            table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
             let init_expr = var.init.map(VariableInitializer::get_single_init);
-            let new_init = init_expr.map(|init| type_check_and_convert(init, table));
-            let new_init = new_init.map(|init| convert_by_assignment(init, &var.ctype));
-            let new_init = new_init.map(VariableInitializer::SingleElem);
-            VariableDeclaration { init: new_init, ..var }
+            let init = init_expr.map(|expr| type_check_and_convert(expr, table));
+            let init = init.map(|expr| convert_by_assignment(expr, &var.ctype));
+            let init = init.map(VariableInitializer::SingleElem);
+            VariableDeclaration { init, ..var }
         }
     }
 }
 
 fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
-    let mut init_value = match &var.init {
-        Some(_) => parse_static_initializer(&var.init, &var.ctype),
-        None => match var.storage {
-            Some(StorageClass::Extern) => StaticInitializer::None,
-            _ => StaticInitializer::Tentative,
-        },
+    use StaticInitializer::{Initialized, None as NoInitializer, Tentative};
+    let mut init_value = match (&var.init, var.storage) {
+        (Some(_), _) => parse_static_initializer(&var.init, &var.ctype),
+        (None, Some(StorageClass::Extern)) => NoInitializer,
+        _ => Tentative,
     };
-
     let mut global = var.storage != Some(StorageClass::Static);
     if let Some(symbol) = table.symbols.get(&var.name) {
         let attrs = symbol.get_static_attrs();
@@ -675,24 +656,13 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
         } else if attrs.global != global {
             panic!("Conflicting linkage!");
         }
-
-        if matches!(attrs.init, StaticInitializer::Initialized(_)) {
-            assert!(
-                !matches!(init_value, StaticInitializer::Initialized(_)),
-                "Conflicting static initializers!"
-            );
+        if matches!(attrs.init, Initialized(_)) {
+            assert!(!matches!(init_value, Initialized(_)), "Conflicting static initializers!");
             init_value = attrs.init;
-        } else if attrs.init == StaticInitializer::Tentative
-            && !matches!(init_value, StaticInitializer::Initialized(_))
-        {
-            init_value = StaticInitializer::Tentative
+        } else if attrs.init == Tentative && !matches!(init_value, Initialized(_)) {
+            init_value = Tentative
         }
     }
-    table.symbols.insert(
-        var.name.clone(),
-        Symbol {
-            ctype: var.ctype.clone(),
-            attrs: SymbolAttr::Static(StaticAttributes { init: init_value, global }),
-        },
-    );
+    let attrs = SymbolAttr::Static(StaticAttributes { init: init_value, global });
+    table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
 }
