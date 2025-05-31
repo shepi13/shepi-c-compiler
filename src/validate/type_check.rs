@@ -139,8 +139,8 @@ pub fn get_common_pointer_type(left: &TypedExpression, right: &TypedExpression) 
     }
 }
 pub fn get_common_type(left: &TypedExpression, right: &TypedExpression) -> CType {
-    let left_type = get_type(&left);
-    let right_type = get_type(&right);
+    let left_type = get_type(left);
+    let right_type = get_type(right);
     if left_type.is_pointer() || right_type.is_pointer() {
         get_common_pointer_type(left, right)
     } else if left_type == CType::Double || right_type == CType::Double {
@@ -414,7 +414,7 @@ fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> Ty
     match binary.operator {
         LogicalAnd | LogicalOr => {
             let binexpr = BinaryExpression { left, right, ..binary };
-            return set_type(Binary(binexpr.into()).into(), &CType::Int);
+            set_type(Binary(binexpr.into()).into(), &CType::Int)
         }
         LessThan | GreaterThan | LessThanEqual | GreaterThanEqual | IsEqual | NotEqual => {
             let common_type = get_common_type(&left, &right);
@@ -427,14 +427,14 @@ fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> Ty
             let left = convert_to(left, &common_type);
             let right = convert_to(right, &common_type);
             let binexpr = BinaryExpression { left, right, ..binary };
-            return set_type(Binary(binexpr.into()).into(), &CType::Int);
+            set_type(Binary(binexpr.into()).into(), &CType::Int)
         }
         LeftShift | RightShift => {
             let common_type = get_common_type(&left, &right);
             let result_t = get_type(&left);
             assert!(common_type.is_int(), "Operands for bitshift must be integer types!");
             let binexpr = BinaryExpression { left, right, ..binary };
-            return set_type(Binary(binexpr.into()).into(), &result_t);
+            set_type(Binary(binexpr.into()).into(), &result_t)
         }
         Multiply | Divide => {
             let common_type = get_common_type(&left, &right);
