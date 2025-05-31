@@ -165,7 +165,10 @@ impl From<Expression> for Box<TypedExpression> {
 }
 impl TypedExpression {
     pub fn is_lvalue(&self) -> bool {
-        matches!(self.expr, Expression::Variable(_) | Expression::Dereference(_))
+        matches!(
+            self.expr,
+            Expression::Variable(_) | Expression::Dereference(_) | Expression::Subscript(_, _)
+        )
     }
 }
 #[derive(Debug, Clone)]
