@@ -348,79 +348,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             }
             set_type(unary_expr, &new_type)
         }
-        Expression::Binary(binary) => {
-            use BinaryOperator::*;
-            use Expression::Binary;
-            let left = type_check_and_convert(binary.left, table);
-            let right = type_check_and_convert(binary.right, table);
-            match binary.operator {
-                LogicalAnd | LogicalOr => {
-                    let binexpr = BinaryExpression { left, right, ..*binary };
-                    return set_type(Binary(binexpr.into()).into(), &CType::Int);
-                }
-                LessThan | GreaterThan | LessThanEqual | GreaterThanEqual | IsEqual | NotEqual => {
-                    let common_type = get_common_type(&left, &right);
-                    if common_type.is_pointer() && !matches!(binary.operator, IsEqual | NotEqual) {
-                        assert!(
-                            !is_null_ptr(&left) && !is_null_ptr(&right),
-                            "Cannot compare null with relational operators in C"
-                        );
-                    }
-                    let left = convert_to(left, &common_type);
-                    let right = convert_to(right, &common_type);
-                    let binexpr = BinaryExpression { left, right, ..*binary };
-                    return set_type(Binary(binexpr.into()).into(), &CType::Int);
-                }
-                LeftShift | RightShift => {
-                    let common_type = get_common_type(&left, &right);
-                    let result_t = get_type(&left);
-                    assert!(common_type.is_int(), "Operands for bitshift must be integer types!");
-                    let binexpr = BinaryExpression { left, right, ..*binary };
-                    return set_type(Binary(binexpr.into()).into(), &result_t);
-                }
-                Multiply | Divide | Remainder | BitAnd | BitOr | BitXor => {
-                    let common_type = get_common_type(&left, &right);
-                    // Assertions for individual operations
-                    match binary.operator {
-                        Multiply | Divide => {
-                            assert!(!common_type.is_pointer(), "Cannot multiply/divide pointers!")
-                        }
-                        BitAnd | BitOr | BitXor => assert!(
-                            common_type.is_int(),
-                            "Operands for bitwise operators must be integer types!"
-                        ),
-                        Remainder => assert!(
-                            common_type.is_int(),
-                            "Operands for remainder must be integer types!"
-                        ),
-                        _ => (),
-                    }
-                    let binexpr = if binary.is_assignment {
-                        assert!(left.is_lvalue(), "Can only assign to lvalue!");
-                        let right = convert_to(right, &common_type);
-                        BinaryExpression { left, right, ..*binary }
-                    } else {
-                        let left = convert_to(left, &common_type);
-                        let right = convert_to(right, &common_type);
-                        BinaryExpression { left, right, ..*binary }
-                    };
-                    return set_type(Binary(binexpr.into()).into(), &common_type);
-                }
-                Add | Subtract => {
-                    let common_type = get_common_type(&left, &right);
-                    let binexpr = if binary.is_assignment {
-                        assert!(left.is_lvalue(), "Can only assign to lvalue!");
-                        let right = convert_to(right, &common_type);
-                        BinaryExpression { left, right, ..*binary }
-                    } else {
-                        let left = convert_to(left, &common_type);
-                        let right = convert_to(right, &common_type);
-                        BinaryExpression { left, right, ..*binary }
-                    };
-                    return set_type(Binary(binexpr.into()).into(), &common_type);
-                }
-            }
-        }
+        Expression::Binary(binary) => type_check_binary_expr(*binary, table),
         Expression::Assignment(assign) => {
             let left = type_check_and_convert(assign.left, table);
             let right = type_check_and_convert(assign.right, table);
@@ -478,7 +406,107 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
     }
 }
 
-// Type Checking
+fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> TypedExpression {
+    use BinaryOperator::*;
+    use Expression::Binary;
+    let left = type_check_and_convert(binary.left, table);
+    let right = type_check_and_convert(binary.right, table);
+    match binary.operator {
+        LogicalAnd | LogicalOr => {
+            let binexpr = BinaryExpression { left, right, ..binary };
+            return set_type(Binary(binexpr.into()).into(), &CType::Int);
+        }
+        LessThan | GreaterThan | LessThanEqual | GreaterThanEqual | IsEqual | NotEqual => {
+            let common_type = get_common_type(&left, &right);
+            if common_type.is_pointer() && !matches!(binary.operator, IsEqual | NotEqual) {
+                assert!(
+                    !is_null_ptr(&left) && !is_null_ptr(&right),
+                    "Cannot compare null with relational operators in C"
+                );
+            }
+            let left = convert_to(left, &common_type);
+            let right = convert_to(right, &common_type);
+            let binexpr = BinaryExpression { left, right, ..binary };
+            return set_type(Binary(binexpr.into()).into(), &CType::Int);
+        }
+        LeftShift | RightShift => {
+            let common_type = get_common_type(&left, &right);
+            let result_t = get_type(&left);
+            assert!(common_type.is_int(), "Operands for bitshift must be integer types!");
+            let binexpr = BinaryExpression { left, right, ..binary };
+            return set_type(Binary(binexpr.into()).into(), &result_t);
+        }
+        Multiply | Divide => {
+            let common_type = get_common_type(&left, &right);
+            assert!(!common_type.is_pointer(), "Cannot multiply/divide pointers!");
+            type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
+        }
+        Remainder => {
+            let common_type = get_common_type(&left, &right);
+            assert!(common_type.is_int(), "Operands for remainder must be integer types!");
+            type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
+        }
+        BitAnd | BitOr | BitXor => {
+            let common_type = get_common_type(&left, &right);
+            assert!(common_type.is_int(), "Operands for bit operators must be integer types!");
+            type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
+        }
+        Add => {
+            let left_t = get_type(&left);
+            let right_t = get_type(&right);
+            if left_t.is_arithmetic() && right_t.is_arithmetic() {
+                type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
+            } else if left_t.is_pointer() && right_t.is_int() {
+                assert!(!binary.is_assignment || left.is_lvalue(), "Can only assign to lvalue!");
+                let right = convert_to(right, &CType::Long);
+                let binexpr = BinaryExpression { left, right, ..binary };
+                set_type(Binary(binexpr.into()).into(), &left_t)
+            } else if right_t.is_pointer() && left_t.is_int() {
+                assert!(!binary.is_assignment, "Adding int to pointer gives pointer, not int");
+                let left = convert_to(left, &CType::Long);
+                let binexpr = BinaryExpression { left, right, ..binary };
+                set_type(Binary(binexpr.into()).into(), &right_t)
+            } else {
+                panic!("Invalid operands for addition")
+            }
+        }
+        Subtract => {
+            let left_t = get_type(&left);
+            let right_t = get_type(&right);
+            if left_t.is_arithmetic() && right_t.is_arithmetic() {
+                type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
+            } else if left_t.is_pointer() && right_t.is_int() {
+                let right = convert_to(right, &CType::Long);
+                let binexpr = BinaryExpression { left, right, ..binary };
+                set_type(Binary(binexpr.into()).into(), &left_t)
+            } else if left_t.is_pointer() && right_t.is_pointer() {
+                let binexpr = BinaryExpression { left, right, ..binary };
+                set_type(Binary(binexpr.into()).into(), &CType::Long)
+            } else {
+                panic!("Invalid operands for subtraction")
+            }
+        }
+    }
+}
+
+fn type_check_arithmetic_binexpr(
+    left: TypedExpression,
+    right: TypedExpression,
+    operator: BinaryOperator,
+    is_assignment: bool,
+) -> TypedExpression {
+    let common_type = get_common_type(&left, &right);
+    let binexpr = if is_assignment {
+        assert!(left.is_lvalue(), "Can only assign to lvalue!");
+        let right = convert_to(right, &common_type);
+        BinaryExpression { left, right, operator, is_assignment }
+    } else {
+        let left = convert_to(left, &common_type);
+        let right = convert_to(right, &common_type);
+        BinaryExpression { left, right, operator, is_assignment }
+    };
+    set_type(Expression::Binary(binexpr.into()).into(), &common_type)
+}
 
 fn type_check_function(
     function: FunctionDeclaration,
