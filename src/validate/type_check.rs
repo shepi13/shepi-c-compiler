@@ -252,6 +252,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
         Compound(block) => Compound(type_check_block(block, table)),
         Switch(mut switch) => {
             switch.condition = type_check_and_convert(switch.condition, table);
+            assert!(get_type(&switch.condition).is_int(), "Can only switch on integer types!");
             let cond_type = get_type(&switch.condition);
             let mut new_cases = Vec::new();
             let mut case_vals = HashSet::new();
@@ -494,10 +495,12 @@ fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> Ty
             if left_t.is_arithmetic() && right_t.is_arithmetic() {
                 type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
             } else if left_t.is_pointer() && right_t.is_int() {
+                assert!(!binary.is_assignment || left.is_lvalue(), "Can only assign to lvalue");
                 let right = convert_to(right, &CType::Long);
                 let binexpr = BinaryExpression { left, right, ..binary };
                 set_type(Binary(binexpr.into()).into(), &left_t)
             } else if left_t.is_pointer() && left_t == right_t {
+                assert!(!binary.is_assignment, "Subtracting pointers gives int, not pointer!");
                 let binexpr = BinaryExpression { left, right, ..binary };
                 set_type(Binary(binexpr.into()).into(), &CType::Long)
             } else {
@@ -606,6 +609,47 @@ where
     }
 }
 
+fn zero_initializer(target_t: &CType) -> VariableInitializer {
+    use VariableInitializer::*;
+    match target_t {
+        CType::Int => SingleElem(Expression::Constant(Constant::Int(0)).into()),
+        CType::Long | CType::Pointer(_) => {
+            SingleElem(Expression::Constant(Constant::Long(0)).into())
+        }
+        CType::UnsignedInt => SingleElem(Expression::Constant(Constant::UnsignedInt(0)).into()),
+        CType::UnsignedLong => SingleElem(Expression::Constant(Constant::UnsignedLong(0)).into()),
+        CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
+        CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
+        CType::Function(_, _) => panic!("Cannot zero initialize a function"),
+    }
+}
+
+fn type_check_initializer(
+    init: VariableInitializer,
+    target_t: &CType,
+    table: &mut TypeTable,
+) -> VariableInitializer {
+    match (target_t, init) {
+        (target_t, VariableInitializer::SingleElem(expr)) => {
+            let expr = type_check_and_convert(expr, table);
+            let expr = convert_by_assignment(expr, &target_t);
+            VariableInitializer::SingleElem(expr)
+        }
+        (CType::Array(elem_t, size), VariableInitializer::CompoundInit(init_list)) => {
+            assert!(init_list.len() as u64 <= *size, "Too many items in initializer!");
+            let mut typechecked_list: Vec<VariableInitializer> = init_list
+                .into_iter()
+                .map(|init| type_check_initializer(init, elem_t, table))
+                .collect();
+            while (typechecked_list.len() as u64) < *size {
+                typechecked_list.push(zero_initializer(elem_t));
+            }
+            VariableInitializer::CompoundInit(typechecked_list)
+        }
+        _ => panic!("Cannot initializer a scalar with a compound initializer!"),
+    }
+}
+
 fn type_check_var_declaration(
     var: VariableDeclaration,
     table: &mut TypeTable,
@@ -631,10 +675,7 @@ fn type_check_var_declaration(
         None => {
             let attrs = SymbolAttr::Local;
             table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
-            let init_expr = var.init.map(VariableInitializer::get_single_init);
-            let init = init_expr.map(|expr| type_check_and_convert(expr, table));
-            let init = init.map(|expr| convert_by_assignment(expr, &var.ctype));
-            let init = init.map(VariableInitializer::SingleElem);
+            let init = var.init.map(|init| type_check_initializer(init, &var.ctype, table));
             VariableDeclaration { init, ..var }
         }
     }
