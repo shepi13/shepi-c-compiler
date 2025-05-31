@@ -402,7 +402,23 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             let addr_expr = Expression::AddrOf(typed_inner.into());
             set_type(addr_expr.into(), &CType::Pointer(reference_t))
         }
-        Expression::Subscript(_, _) => panic!("Not implemented!"),
+        Expression::Subscript(left, right) => {
+            let mut left = type_check_and_convert(*left, table);
+            let mut right = type_check_and_convert(*right, table);
+            let left_t = get_type(&left);
+            let right_t = get_type(&right);
+            if let CType::Pointer(ptr_t) = &left_t {
+                assert!(right_t.is_int(), "Subscript must have integer and pointer operands");
+                right = convert_to(right, &CType::Long);
+                set_type(Expression::Subscript(left.into(), right.into()).into(), ptr_t)
+            } else if let CType::Pointer(ptr_t) = &right_t {
+                assert!(left_t.is_int(), "Subscript must have integer and pointer operands");
+                left = convert_to(left, &CType::Long);
+                set_type(Expression::Subscript(left.into(), right.into()).into(), ptr_t)
+            } else {
+                panic!("Subscript must have integer and pointer operands!")
+            }
+        }
     }
 }
 
@@ -423,6 +439,7 @@ fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> Ty
                     !is_null_ptr(&left) && !is_null_ptr(&right),
                     "Cannot compare null with relational operators in C"
                 );
+                assert!(get_type(&left) == get_type(&right), "Pointer comparison type mismatch");
             }
             let left = convert_to(left, &common_type);
             let right = convert_to(right, &common_type);
