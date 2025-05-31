@@ -24,13 +24,12 @@ fn emit_static_var(file: &mut File, var: StaticVar) {
         writeln!(file, "    .globl {}", var.name).unwrap();
     }
     let init = match var.init {
-        Int(0) | UnsignedInt(0) => String::from(".zero 4"),
-        Long(0) | UnsignedLong(0) => String::from(".zero 8"),
         Int(_) | UnsignedInt(_) => format!(".long {}", var.init.int_value()),
         Long(_) | UnsignedLong(_) => format!(".quad {}", var.init.int_value()),
         Double(val) => format!(".double {}", val),
+        ZeroInit(size) => format!(".zero {size}"),
     };
-    if !matches!(var.init, Initializer::Double(_)) && var.init.int_value() == 0 {
+    if matches!(var.init, ZeroInit(_)) {
         writeln!(file, "    .bss").unwrap();
     } else {
         writeln!(file, "    .data").unwrap();

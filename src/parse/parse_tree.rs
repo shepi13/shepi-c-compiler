@@ -56,15 +56,6 @@ pub enum VariableInitializer {
     CompoundInit(Vec<VariableInitializer>),
 }
 
-impl VariableInitializer {
-    pub fn get_single_init_ref(&self) -> &TypedExpression {
-        match self {
-            Self::SingleElem(val) => val,
-            Self::CompoundInit(_) => panic!("Not implemented"),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum CType {
     Int,

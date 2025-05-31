@@ -113,22 +113,22 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
     for (name, entry) in symbols {
         if let SymbolAttr::Static(var_attrs) = &entry.attrs {
             match &var_attrs.init {
-                &StaticInitializer::Initialized(initializer) => {
+                StaticInitializer::Initialized(initializer) => {
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
-                        initializer,
+                        initializer: initializer[0],
                         ctype: entry.ctype.clone(),
                     }));
                 }
                 StaticInitializer::Tentative => {
                     let initializer = match &entry.ctype {
-                        CType::Int => Initializer::Int(0),
-                        CType::Long => Initializer::Long(0),
-                        CType::UnsignedInt => Initializer::UnsignedInt(0),
-                        CType::UnsignedLong => Initializer::UnsignedLong(0),
                         CType::Double => Initializer::Double(0.0),
-                        CType::Pointer(_) => Initializer::UnsignedLong(0),
+                        CType::Int
+                        | CType::Long
+                        | CType::UnsignedInt
+                        | CType::UnsignedLong
+                        | CType::Pointer(_) => Initializer::ZeroInit(entry.ctype.size()),
                         _ => panic!("Not a variable"),
                     };
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
