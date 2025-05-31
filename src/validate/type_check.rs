@@ -479,7 +479,7 @@ fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> Ty
                 let right = convert_to(right, &CType::Long);
                 let binexpr = BinaryExpression { left, right, ..binary };
                 set_type(Binary(binexpr.into()).into(), &left_t)
-            } else if left_t.is_pointer() && right_t.is_pointer() {
+            } else if left_t.is_pointer() && left_t == right_t {
                 let binexpr = BinaryExpression { left, right, ..binary };
                 set_type(Binary(binexpr.into()).into(), &CType::Long)
             } else {
