@@ -57,12 +57,6 @@ pub enum VariableInitializer {
 }
 
 impl VariableInitializer {
-    pub fn get_single_init(self) -> TypedExpression {
-        match self {
-            Self::SingleElem(val) => val,
-            Self::CompoundInit(_) => panic!("Not implemented"),
-        }
-    }
     pub fn get_single_init_ref(&self) -> &TypedExpression {
         match self {
             Self::SingleElem(val) => val,
@@ -165,10 +159,11 @@ impl From<Expression> for Box<TypedExpression> {
 }
 impl TypedExpression {
     pub fn is_lvalue(&self) -> bool {
-        matches!(
-            self.expr,
-            Expression::Variable(_) | Expression::Dereference(_) | Expression::Subscript(_, _)
-        )
+        match self.expr {
+            Expression::Dereference(_) | Expression::Subscript(_, _) => true,
+            Expression::Variable(_) => !matches!(self.ctype, Some(CType::Array(_, _))),
+            _ => false,
+        }
     }
 }
 #[derive(Debug, Clone)]
