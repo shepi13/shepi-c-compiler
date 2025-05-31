@@ -55,10 +55,10 @@ pub struct StaticAttributes {
     pub init: StaticInitializer,
     pub global: bool,
 }
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum StaticInitializer {
     Tentative,
-    Initialized(Initializer),
+    Initialized(Vec<Initializer>),
     None,
 }
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -68,6 +68,7 @@ pub enum Initializer {
     UnsignedInt(u64),
     UnsignedLong(u64),
     Double(f64),
+    ZeroInit(u64),
 }
 impl Initializer {
     pub fn int_value(&self) -> i128 {
@@ -75,6 +76,7 @@ impl Initializer {
             Self::Int(val) | Self::Long(val) => *val as i128,
             Self::UnsignedInt(val) | Self::UnsignedLong(val) => *val as i128,
             Self::Double(val) => *val as i128,
+            Self::ZeroInit(_) => 0,
         }
     }
 }
@@ -103,7 +105,7 @@ fn eval_constant(constant: &Constant, ctype: &CType) -> Result<Constant, ()> {
             Constant::Double(val) => Ok(Constant::Double(*val)),
             _ => Ok(Constant::Double(constant.int_value() as f64)),
         },
-        CType::Pointer(ctype) => match eval_constant(constant, ctype) {
+        CType::Pointer(ctype) | CType::Array(ctype, _) => match eval_constant(constant, ctype) {
             Ok(constant) if constant.int_value() == 0 => Ok(constant),
             _ => Err(()),
         },
@@ -533,7 +535,6 @@ fn type_check_function(
     function: FunctionDeclaration,
     table: &mut TypeTable,
 ) -> FunctionDeclaration {
-    table.current_function = Some(function.name.clone());
     let function = type_check_array_params(function);
     let ctype = &function.ctype;
     let mut defined = function.body.is_some();
@@ -554,7 +555,9 @@ fn type_check_function(
             let attrs = SymbolAttr::Local;
             table.symbols.insert(param.clone(), Symbol { ctype: param_type.clone(), attrs });
         }
+        table.current_function = Some(function.name.clone());
         let body = Some(type_check_block(body, table));
+        table.current_function = None;
         FunctionDeclaration { body, ..function }
     } else {
         function
@@ -576,34 +579,61 @@ fn type_check_array_params(mut function: FunctionDeclaration) -> FunctionDeclara
 }
 
 fn parse_static_initializer(
-    init: &Option<VariableInitializer>,
+    init: Option<&VariableInitializer>,
     ctype: &CType,
 ) -> StaticInitializer {
-    let init = init.as_ref().map(VariableInitializer::get_single_init_ref);
-    let init_val = init.as_ref().map(|expr| eval_constant_expr(expr, ctype));
-    let init_val = init_val.unwrap_or(Ok(Constant::Int(0))).expect("Must be constexpr!");
-    use Constant::*;
-    match init_val {
-        Int(val) | Long(val) => gen_initializer(val as i128, ctype),
-        UnsignedInt(val) | UnsignedLong(val) => gen_initializer(val as i128, ctype),
-        Double(val) => gen_initializer(val, ctype),
+    match (ctype, init) {
+        (_, None) => StaticInitializer::Initialized(vec![Initializer::ZeroInit(ctype.size())]),
+        (_, Some(VariableInitializer::SingleElem(expr))) => {
+            assert!(!matches!(ctype, CType::Array(_, _)), "Cannot initialize array with a scalar!");
+            let expr_constant = eval_constant_expr(expr, ctype);
+            let init_val = match expr_constant {
+                Ok(Constant::Int(val) | Constant::Long(val)) => parse_initializer_value(val, ctype),
+                Ok(Constant::UnsignedInt(val) | Constant::UnsignedLong(val)) => {
+                    parse_initializer_value(val, ctype)
+                }
+                Ok(Constant::Double(val)) => parse_initializer_value(val, ctype),
+                Err(_) => panic!("Failed to parse static initializer"),
+            };
+            StaticInitializer::Initialized(vec![init_val])
+        }
+        (CType::Array(elem_t, size), Some(VariableInitializer::CompoundInit(init_list))) => {
+            assert!(init_list.len() as u64 <= *size, "Initializer longer than array!");
+            let mut initializers = Vec::new();
+            for initializer in init_list {
+                let sub_init = parse_static_initializer(Some(initializer), elem_t);
+                let StaticInitializer::Initialized(mut sub_inits) = sub_init else {
+                    panic!("Should be initialized")
+                };
+                initializers.append(&mut sub_inits);
+            }
+            if (init_list.len() as u64) < *size {
+                let zero_bytes = (size - init_list.len() as u64) * elem_t.size();
+                initializers.push(Initializer::ZeroInit(zero_bytes));
+            }
+            StaticInitializer::Initialized(initializers)
+        }
+        _ => panic!("Cannot initiate static scalar with compound initializer"),
     }
 }
 
-fn gen_initializer<T>(val: T, ctype: &CType) -> StaticInitializer
+fn parse_initializer_value<T>(val: T, ctype: &CType) -> Initializer
 where
     T: num_traits::AsPrimitive<i64>,
     T: num_traits::AsPrimitive<u64>,
     T: num_traits::AsPrimitive<f64>,
 {
+    if num_traits::AsPrimitive::<i64>::as_(val) == 0 && *ctype != CType::Double {
+        return Initializer::ZeroInit(ctype.size());
+    }
     match ctype {
-        CType::Int => StaticInitializer::Initialized(Initializer::Int(val.as_())),
-        CType::Long => StaticInitializer::Initialized(Initializer::Long(val.as_())),
-        CType::UnsignedInt => StaticInitializer::Initialized(Initializer::UnsignedInt(val.as_())),
-        CType::UnsignedLong => StaticInitializer::Initialized(Initializer::UnsignedLong(val.as_())),
-        CType::Double => StaticInitializer::Initialized(Initializer::Double(val.as_())),
+        CType::Int => Initializer::Int(val.as_()),
+        CType::Long => Initializer::Long(val.as_()),
+        CType::UnsignedInt => Initializer::UnsignedInt(val.as_()),
+        CType::UnsignedLong => Initializer::UnsignedLong(val.as_()),
+        CType::Double => Initializer::Double(val.as_()),
         CType::Pointer(_) if num_traits::AsPrimitive::<i64>::as_(val) == 0 => {
-            StaticInitializer::Initialized(Initializer::UnsignedLong(0))
+            Initializer::UnsignedLong(0)
         }
         CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) => panic!("Not a variable!"),
     }
@@ -631,8 +661,12 @@ fn type_check_initializer(
 ) -> VariableInitializer {
     match (target_t, init) {
         (target_t, VariableInitializer::SingleElem(expr)) => {
+            assert!(
+                !matches!(target_t, CType::Array(_, _)),
+                "Cannot initialize array with scalar!"
+            );
             let expr = type_check_and_convert(expr, table);
-            let expr = convert_by_assignment(expr, &target_t);
+            let expr = convert_by_assignment(expr, target_t);
             VariableInitializer::SingleElem(expr)
         }
         (CType::Array(elem_t, size), VariableInitializer::CompoundInit(init_list)) => {
@@ -667,7 +701,7 @@ fn type_check_var_declaration(
             var
         }
         Some(StorageClass::Static) => {
-            let init = parse_static_initializer(&var.init, &var.ctype);
+            let init = parse_static_initializer(var.init.as_ref(), &var.ctype);
             let attrs = SymbolAttr::Static(StaticAttributes { init, global: false });
             table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
             var
@@ -684,7 +718,7 @@ fn type_check_var_declaration(
 fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
     use StaticInitializer::{Initialized, None as NoInitializer, Tentative};
     let mut init_value = match (&var.init, var.storage) {
-        (Some(_), _) => parse_static_initializer(&var.init, &var.ctype),
+        (Some(_), _) => parse_static_initializer(var.init.as_ref(), &var.ctype),
         (None, Some(StorageClass::Extern)) => NoInitializer,
         _ => Tentative,
     };
@@ -699,7 +733,7 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) {
         }
         if matches!(attrs.init, Initialized(_)) {
             assert!(!matches!(init_value, Initialized(_)), "Conflicting static initializers!");
-            init_value = attrs.init;
+            init_value = attrs.init.clone();
         } else if attrs.init == Tentative && !matches!(init_value, Initialized(_)) {
             init_value = Tentative
         }
