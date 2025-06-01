@@ -418,7 +418,8 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> TypedE
             } else if let CType::Pointer(ptr_t) = &right_t {
                 assert!(left_t.is_int(), "Subscript must have integer and pointer operands");
                 left = convert_to(left, &CType::Long);
-                set_type(Expression::Subscript(left.into(), right.into()).into(), ptr_t)
+                // Swap left and right so left is always the pointer
+                set_type(Expression::Subscript(right.into(), left.into()).into(), ptr_t)
             } else {
                 panic!("Subscript must have integer and pointer operands!")
             }

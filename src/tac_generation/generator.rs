@@ -518,7 +518,21 @@ fn gen_expression(
                 ExpResult::DereferencedPointer(ptr) => ExpResult::Operand(ptr),
             }
         }
-        parse_tree::Expression::Subscript(_, _) => panic!("Not implemented!"),
+        parse_tree::Expression::Subscript(ptr, offset) => {
+            let expr_t = expression.ctype.expect("Undefined type");
+            let binary = BinaryExpression {
+                operator: BinaryOperator::Add,
+                left: *ptr,
+                right: *offset,
+                is_assignment: false,
+            };
+            let ExpResult::Operand(result) =
+                gen_pointer_addition(instructions, binary, expr_t, symbols)
+            else {
+                panic!("Expected operand")
+            };
+            ExpResult::DereferencedPointer(result)
+        }
     }
 }
 
