@@ -3,7 +3,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    parse::parse_tree::{self, BinaryOperator, CType, StorageClass, VariableInitializer},
+    parse::parse_tree::{
+        self, BinaryExpression, BinaryOperator, CType, StorageClass, VariableInitializer,
+    },
     validate::type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
 };
 
@@ -24,7 +26,7 @@ pub struct Function {
 pub struct StaticVariable {
     pub identifier: String,
     pub global: bool,
-    pub initializer: Initializer,
+    pub initializer: Vec<Initializer>,
     pub ctype: CType,
 }
 
@@ -48,6 +50,8 @@ pub enum Instruction {
     Jump(String),
     JumpCond(InstructionJump),
     Function(String, Vec<Value>, Value),
+    AddPtr(Value, Value, u64, Value),
+    CopyToOffset(Value, String, u64),
 }
 #[derive(Debug, Clone)]
 pub struct InstructionUnary {
@@ -117,7 +121,7 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
-                        initializer: initializer[0],
+                        initializer: initializer.clone(),
                         ctype: entry.ctype.clone(),
                     }));
                 }
@@ -128,13 +132,14 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
                         | CType::Long
                         | CType::UnsignedInt
                         | CType::UnsignedLong
-                        | CType::Pointer(_) => Initializer::ZeroInit(entry.ctype.size()),
+                        | CType::Pointer(_)
+                        | CType::Array(_, _) => Initializer::ZeroInit(entry.ctype.size()),
                         _ => panic!("Not a variable"),
                     };
                     program.push(TopLevelDecl::StaticDecl(StaticVariable {
                         identifier: name.clone(),
                         global: var_attrs.global,
-                        initializer,
+                        initializer: vec![initializer],
                         ctype: entry.ctype.clone(),
                     }));
                 }
@@ -357,7 +362,6 @@ fn gen_expression(
     instructions: &mut Vec<Instruction>,
     symbols: &mut Symbols,
 ) -> ExpResult {
-    let expr_type = || expression.ctype.expect("Undefined type!");
     match expression.expr {
         parse_tree::Expression::Constant(constexpr) => {
             ExpResult::Operand(Value::ConstValue(constexpr))
@@ -409,8 +413,9 @@ fn gen_expression(
             }
         }
         parse_tree::Expression::Unary(operator, expr) => {
+            let expr_type = expression.ctype.expect("Undefined type!");
             let src = gen_expression_and_convert(*expr, instructions, symbols);
-            let dst = gen_temp_var(expr_type(), symbols);
+            let dst = gen_temp_var(expr_type, symbols);
             instructions.push(Instruction::UnaryOp(InstructionUnary::from(
                 operator,
                 src,
@@ -418,61 +423,24 @@ fn gen_expression(
             )));
             ExpResult::Operand(dst)
         }
-        parse_tree::Expression::Binary(operator) => {
+        parse_tree::Expression::Binary(binary) => {
+            use BinaryOperator::{Add, LogicalAnd, LogicalOr, Subtract};
+            let expr_t = expression.ctype.expect("Undefined type!");
             // Short circuiting needs special handling
-            if let parse_tree::BinaryOperator::LogicalAnd | parse_tree::BinaryOperator::LogicalOr =
-                operator.operator
-            {
-                return ExpResult::Operand(gen_short_circuit(
-                    instructions,
-                    operator.operator,
-                    operator.left,
-                    operator.right,
-                    symbols,
-                ));
-            };
-            // Handle compound assignment, we have to do some type checking here as we cannot
-            // calculate lvalues twice (if they call functions), so need to generate our casts
-            // with tmp variables
-            if operator.is_assignment {
-                let expr_t = expr_type();
-                let left_t = get_type(&operator.left);
-                // Generate and cast lvalue to common type
-                let lval = gen_expression(operator.left, instructions, symbols);
-                let src1 =
-                    lvalue_convert(instructions, lval.clone(), Some(expr_t.clone()), symbols);
-                let src1 = gen_cast(instructions, expr_t.clone(), left_t.clone(), src1, symbols);
-                // Generate rvalue/temp var for dst, push binary op
-                let src2 = gen_expression_and_convert(operator.right, instructions, symbols);
-                let dst = gen_temp_var(expr_t.clone(), symbols);
-                instructions.push(Instruction::BinaryOp(InstructionBinary {
-                    operator: operator.operator,
-                    src1,
-                    src2,
-                    dst: dst.clone(),
-                }));
-                // Cast result to assignment type
-                let result = gen_cast(instructions, left_t, expr_t.clone(), dst, symbols);
-                // Handle assigning to pointer.
-                match &lval {
-                    ExpResult::Operand(val) => {
-                        instructions.push(Instruction::Copy(InstructionCopy {
-                            src: result,
-                            dst: val.clone(),
-                        }));
-                        lval
-                    }
-                    ExpResult::DereferencedPointer(ptr) => {
-                        instructions.push(Instruction::Store(result.clone(), ptr.clone()));
-                        ExpResult::Operand(result)
-                    }
-                }
+            if let LogicalAnd | LogicalOr = binary.operator {
+                gen_short_circuit(instructions, *binary, symbols)
+            } else if binary.operator == Add && expr_t.is_pointer() {
+                gen_pointer_addition(instructions, *binary, expr_t, symbols)
+            } else if binary.operator == Subtract && expr_t.is_pointer() {
+                gen_pointer_subtraction(instructions, *binary, expr_t, symbols)
+            } else if binary.is_assignment {
+                gen_compound_assignment(instructions, *binary, expr_t, symbols)
             } else {
-                let src1 = gen_expression_and_convert(operator.left, instructions, symbols);
-                let src2 = gen_expression_and_convert(operator.right, instructions, symbols);
-                let dst = gen_temp_var(expr_type(), symbols);
+                let src1 = gen_expression_and_convert(binary.left, instructions, symbols);
+                let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
+                let dst = gen_temp_var(expr_t, symbols);
                 instructions.push(Instruction::BinaryOp(InstructionBinary {
-                    operator: operator.operator,
+                    operator: binary.operator,
                     src1,
                     src2,
                     dst: dst.clone(),
@@ -499,7 +467,8 @@ fn gen_expression(
             }
         }
         parse_tree::Expression::Condition(condition) => {
-            let dst = gen_temp_var(expr_type(), symbols);
+            let expr_type = expression.ctype.expect("Undefined type!");
+            let dst = gen_temp_var(expr_type, symbols);
             let end_label = gen_label("cond_end");
             let e2_label = gen_label("cond_e2");
             let cond = gen_expression_and_convert(condition.condition, instructions, symbols);
@@ -518,11 +487,12 @@ fn gen_expression(
             ExpResult::Operand(dst)
         }
         parse_tree::Expression::FunctionCall(name, args) => {
+            let expr_type = expression.ctype.expect("Undefined type!");
             let results = args
                 .into_iter()
                 .map(|arg| gen_expression_and_convert(arg, instructions, symbols))
                 .collect();
-            let dst = gen_temp_var(expr_type(), symbols);
+            let dst = gen_temp_var(expr_type, symbols);
             instructions.push(Instruction::Function(name.to_string(), results, dst.clone()));
             ExpResult::Operand(dst)
         }
@@ -537,10 +507,11 @@ fn gen_expression(
             ExpResult::DereferencedPointer(result)
         }
         parse_tree::Expression::AddrOf(inner) => {
+            let expr_type = expression.ctype.expect("Undefined type!");
             let result = gen_expression(*inner, instructions, symbols);
             match result {
                 ExpResult::Operand(val) => {
-                    let dst = gen_temp_var(expr_type(), symbols);
+                    let dst = gen_temp_var(expr_type, symbols);
                     instructions.push(Instruction::GetAddress(val, dst.clone()));
                     ExpResult::Operand(dst)
                 }
@@ -548,6 +519,101 @@ fn gen_expression(
             }
         }
         parse_tree::Expression::Subscript(_, _) => panic!("Not implemented!"),
+    }
+}
+
+fn gen_pointer_addition(
+    instructions: &mut Vec<Instruction>,
+    binary: BinaryExpression,
+    expr_t: CType,
+    symbols: &mut Symbols,
+) -> ExpResult {
+    use Instruction::*;
+    let CType::Pointer(ptr_t) = get_type(&binary.left) else { panic!("Left expr not pointer!") };
+    let ptr_size = ptr_t.size();
+    let lval = gen_expression(binary.left, instructions, symbols);
+    let src = lvalue_convert(instructions, lval.clone(), Some(expr_t.clone()), symbols);
+    let int_val = gen_expression_and_convert(binary.right, instructions, symbols);
+    let dst = gen_temp_var(expr_t, symbols);
+    instructions.push(AddPtr(src, int_val, ptr_size, dst.clone()));
+    if binary.is_assignment {
+        match lval {
+            ExpResult::Operand(ref val) => {
+                instructions.push(Copy(InstructionCopy { src: dst, dst: val.clone() }));
+                lval
+            }
+            ExpResult::DereferencedPointer(ptr) => {
+                instructions.push(Store(dst.clone(), ptr));
+                ExpResult::Operand(dst)
+            }
+        }
+    } else {
+        ExpResult::Operand(dst)
+    }
+}
+
+fn gen_pointer_subtraction(
+    instructions: &mut Vec<Instruction>,
+    binary: BinaryExpression,
+    expr_t: CType,
+    symbols: &mut Symbols,
+) -> ExpResult {
+    use BinaryOperator::{Divide, Subtract};
+    use Instruction::*;
+    let CType::Pointer(ptr_t) = get_type(&binary.left) else { panic!("Expr not pointer!") };
+    let ptr_size = ptr_t.size();
+    let src1 = gen_expression_and_convert(binary.left, instructions, symbols);
+    let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
+    // Subtract into temp var
+    let tmp = gen_temp_var(expr_t.clone(), symbols);
+    let subtract_expr = InstructionBinary {
+        src1,
+        src2,
+        dst: tmp.clone(),
+        operator: Subtract,
+    };
+    instructions.push(BinaryOp(subtract_expr));
+    // Divide into final result
+    let result = gen_temp_var(expr_t, symbols);
+    let src2 = Value::ConstValue(parse_tree::Constant::Long(ptr_size as i64));
+    let divide_expr = InstructionBinary {
+        src1: tmp,
+        src2,
+        dst: result.clone(),
+        operator: Divide,
+    };
+    instructions.push(BinaryOp(divide_expr));
+    ExpResult::Operand(result)
+}
+
+fn gen_compound_assignment(
+    instructions: &mut Vec<Instruction>,
+    binary: BinaryExpression,
+    expr_t: CType,
+    symbols: &mut Symbols,
+) -> ExpResult {
+    use Instruction::*;
+    let left_t = get_type(&binary.left);
+    // Generate and cast lvalue to common type
+    let lval = gen_expression(binary.left, instructions, symbols);
+    let src1 = lvalue_convert(instructions, lval.clone(), Some(expr_t.clone()), symbols);
+    let src1 = gen_cast(instructions, expr_t.clone(), left_t.clone(), src1, symbols);
+    // Generate rvalue/temp var for dst, push binary op and cast result
+    let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
+    let dst = gen_temp_var(expr_t.clone(), symbols);
+    let operator = binary.operator;
+    instructions.push(BinaryOp(InstructionBinary { operator, src1, src2, dst: dst.clone() }));
+    let result = gen_cast(instructions, left_t, expr_t.clone(), dst, symbols);
+    // Handle assigning to pointer.
+    match lval {
+        ExpResult::Operand(ref val) => {
+            instructions.push(Copy(InstructionCopy { src: result, dst: val.clone() }));
+            lval
+        }
+        ExpResult::DereferencedPointer(ptr) => {
+            instructions.push(Store(result.clone(), ptr));
+            ExpResult::Operand(result)
+        }
     }
 }
 
@@ -585,11 +651,12 @@ fn gen_cast(
 
 fn gen_short_circuit(
     instructions: &mut Vec<Instruction>,
-    operator: parse_tree::BinaryOperator,
-    left: parse_tree::TypedExpression,
-    right: parse_tree::TypedExpression,
+    binary: parse_tree::BinaryExpression,
     symbols: &mut Symbols,
-) -> Value {
+) -> ExpResult {
+    let operator = binary.operator;
+    let left = binary.left;
+    let right = binary.right;
     let (jump_type, label_type) = match operator {
         parse_tree::BinaryOperator::LogicalAnd => (JumpType::JumpIfZero, false),
         parse_tree::BinaryOperator::LogicalOr => (JumpType::JumpIfNotZero, true),
@@ -621,7 +688,7 @@ fn gen_short_circuit(
         dst: dst.clone(),
     }));
     instructions.push(Instruction::Label(end));
-    dst
+    ExpResult::Operand(dst)
 }
 
 fn gen_temp_var(ctype: CType, symbols: &mut Symbols) -> Value {

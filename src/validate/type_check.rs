@@ -483,9 +483,10 @@ fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> Ty
                 let binexpr = BinaryExpression { left, right, ..binary };
                 set_type(Binary(binexpr.into()).into(), &left_t)
             } else if right_t.is_pointer() && left_t.is_int() {
+                // If right is pointer, we swap left/right, as tac expects the ptr to be on the left
                 assert!(!binary.is_assignment, "Adding int to pointer gives pointer, not int");
                 let left = convert_to(left, &CType::Long);
-                let binexpr = BinaryExpression { left, right, ..binary };
+                let binexpr = BinaryExpression { left: right, right: left, ..binary };
                 set_type(Binary(binexpr.into()).into(), &right_t)
             } else {
                 panic!("Invalid operands for addition")
@@ -498,8 +499,11 @@ fn type_check_binary_expr(binary: BinaryExpression, table: &mut TypeTable) -> Ty
                 type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
             } else if left_t.is_pointer() && right_t.is_int() {
                 assert!(!binary.is_assignment || left.is_lvalue(), "Can only assign to lvalue");
+                // Subtraction with pointer/int is addition with negated value
                 let right = convert_to(right, &CType::Long);
-                let binexpr = BinaryExpression { left, right, ..binary };
+                let rightexpr = Expression::Unary(UnaryOperator::Negate, right.into());
+                let right = set_type(rightexpr.into(), &CType::Long);
+                let binexpr = BinaryExpression { left, right, operator: Add, ..binary };
                 set_type(Binary(binexpr.into()).into(), &left_t)
             } else if left_t.is_pointer() && left_t == right_t {
                 assert!(!binary.is_assignment, "Subtracting pointers gives int, not pointer!");

@@ -253,7 +253,7 @@ pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
                     name: static_data.identifier,
                     global: static_data.global,
                     alignment,
-                    init: static_data.initializer,
+                    init: static_data.initializer[0],
                 }));
             }
         }
@@ -487,6 +487,8 @@ fn gen_instructions(
                 asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
                 asm_instructions.push(Mov(src, Memory(AX, 0), src_type));
             }
+            generator::Instruction::AddPtr(_, _, _, _) => panic!("Notimplemented"),
+            generator::Instruction::CopyToOffset(_, _, _) => panic!("Not implemented!"),
         }
     }
     asm_instructions
