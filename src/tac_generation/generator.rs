@@ -187,14 +187,44 @@ fn gen_declaration(
     {
         return;
     }
-    if let Some(VariableInitializer::SingleElem(value)) = declaration.init {
-        let result = gen_expression_and_convert(value, instructions, symbols);
-        instructions.push(Instruction::Copy(InstructionCopy {
-            src: result,
-            dst: Value::Variable(declaration.name.to_string()),
-        }));
+    match declaration.init {
+        Some(VariableInitializer::SingleElem(value)) => {
+            let result = gen_expression_and_convert(value, instructions, symbols);
+            instructions.push(Instruction::Copy(InstructionCopy {
+                src: result,
+                dst: Value::Variable(declaration.name.to_string()),
+            }));
+        }
+        Some(VariableInitializer::CompoundInit(v_init)) => {
+            gen_init_list(instructions, v_init, declaration.name, &declaration.ctype, 0, symbols);
+        }
+        None => (),
     }
 }
+
+fn gen_init_list(
+    instructions: &mut Vec<Instruction>,
+    initializers: Vec<VariableInitializer>,
+    name: String,
+    ctype: &CType,
+    initial_offset: u64,
+    symbols: &mut Symbols,
+) {
+    let CType::Array(elem_t, _) = ctype else { panic!("Expected array") };
+    for (i, initializer) in initializers.into_iter().enumerate() {
+        let offset = initial_offset + (i as u64) * elem_t.size();
+        match initializer {
+            VariableInitializer::SingleElem(expr) => {
+                let result = gen_expression_and_convert(expr, instructions, symbols);
+                instructions.push(Instruction::CopyToOffset(result, name.clone(), offset));
+            }
+            VariableInitializer::CompoundInit(init_list) => {
+                gen_init_list(instructions, init_list, name.clone(), elem_t, offset, symbols);
+            }
+        }
+    }
+}
+
 fn gen_instructions(
     statement: parse_tree::Statement,
     instructions: &mut Vec<Instruction>,
