@@ -1,4 +1,4 @@
-use std::cmp::{self, Ordering};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter::zip;
 use std::sync::atomic::AtomicUsize;
@@ -123,7 +123,7 @@ impl AssemblyType {
             CType::Array(elem_t, _) => {
                 let size = ctype.size();
                 let alignment = if size < 16 { elem_t.size() } else { 16 };
-                if ![1,2,4,8,16].contains(&alignment) {
+                if ![1, 2, 4, 8, 16].contains(&alignment) {
                     panic!("Alignment error: {:#?}", alignment)
                 }
                 AssemblyType::ByteArray(size, alignment as usize)

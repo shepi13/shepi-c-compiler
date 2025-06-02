@@ -3,9 +3,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    codegen::assembly_gen::AssemblyType, parse::parse_tree::{
+    parse::parse_tree::{
         self, BinaryExpression, BinaryOperator, CType, StorageClass, VariableInitializer,
-    }, validate::type_check::{get_type, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols}
+    },
+    validate::type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
 };
 
 pub type Program = Vec<TopLevelDecl>;
@@ -26,7 +27,6 @@ pub struct StaticVariable {
     pub identifier: String,
     pub global: bool,
     pub initializer: Vec<Initializer>,
-    pub ctype: CType,
 }
 
 #[derive(Debug, Clone)]
@@ -121,7 +121,6 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
                         identifier: name.clone(),
                         global: var_attrs.global,
                         initializer: initializer.clone(),
-                        ctype: entry.ctype.clone(),
                     }));
                 }
                 StaticInitializer::Tentative => {
@@ -139,7 +138,6 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
                         identifier: name.clone(),
                         global: var_attrs.global,
                         initializer: vec![initializer],
-                        ctype: entry.ctype.clone(),
                     }));
                 }
                 StaticInitializer::None => (),
@@ -459,7 +457,7 @@ fn gen_expression(
             if let LogicalAnd | LogicalOr = binary.operator {
                 gen_short_circuit(instructions, *binary, symbols)
             } else if binary.operator == Add && expr_t.is_pointer() {
-                gen_pointer_addition(instructions, *binary, expr_t, symbols)
+                gen_pointer_addition(instructions, *binary, symbols)
             } else if binary.operator == Subtract && expr_t.is_pointer() {
                 gen_pointer_subtraction(instructions, *binary, expr_t, symbols)
             } else if binary.is_assignment {
@@ -549,15 +547,13 @@ fn gen_expression(
             }
         }
         parse_tree::Expression::Subscript(ptr, offset) => {
-            let expr_t = expression.ctype.expect("Undefined type");
             let binary = BinaryExpression {
                 operator: BinaryOperator::Add,
                 left: *ptr,
                 right: *offset,
                 is_assignment: false,
             };
-            let ExpResult::Operand(result) =
-                gen_pointer_addition(instructions, binary, expr_t, symbols)
+            let ExpResult::Operand(result) = gen_pointer_addition(instructions, binary, symbols)
             else {
                 panic!("Expected operand")
             };
@@ -569,7 +565,6 @@ fn gen_expression(
 fn gen_pointer_addition(
     instructions: &mut Vec<Instruction>,
     binary: BinaryExpression,
-    expr_t: CType,
     symbols: &mut Symbols,
 ) -> ExpResult {
     use Instruction::*;
@@ -577,9 +572,9 @@ fn gen_pointer_addition(
     let CType::Pointer(ref ptr_t) = left_t else { panic!("Left expr not pointer!") };
     let ptr_size = ptr_t.size();
     let lval = gen_expression(binary.left, instructions, symbols);
-    let src = lvalue_convert(instructions, lval.clone(), Some(left_t), symbols);
+    let src = lvalue_convert(instructions, lval.clone(), Some(left_t.clone()), symbols);
     let int_val = gen_expression_and_convert(binary.right, instructions, symbols);
-    let dst = gen_temp_var(expr_t, symbols);
+    let dst = gen_temp_var(left_t, symbols);
     instructions.push(AddPtr(src, int_val, ptr_size, dst.clone()));
     if binary.is_assignment {
         match lval {
