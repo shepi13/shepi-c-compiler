@@ -36,13 +36,13 @@ pub enum AsmSymbol {
 pub struct StaticVar {
     pub name: String,
     pub global: bool,
-    pub alignment: i32,
-    pub init: Initializer,
+    pub alignment: u64,
+    pub init: Vec<Initializer>,
 }
 #[derive(Debug, Clone)]
 pub struct StaticConstant {
     pub name: String,
-    pub alignment: i32,
+    pub alignment: u64,
     pub init: Initializer,
     pub neg_zero: bool,
 }
@@ -110,6 +110,7 @@ pub enum AssemblyType {
     Longword,
     Quadword,
     Double,
+    ByteArray(u64, usize),
 }
 impl AssemblyType {
     pub fn from(ctype: &CType) -> Self {
@@ -248,12 +249,12 @@ pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
                 }));
             }
             generator::TopLevelDecl::StaticDecl(static_data) => {
-                let alignment = static_data.ctype.size() as i32;
+                let alignment = static_data.ctype.size();
                 program.push(TopLevelDecl::Var(StaticVar {
                     name: static_data.identifier,
                     global: static_data.global,
                     alignment,
-                    init: static_data.initializer[0],
+                    init: static_data.initializer,
                 }));
             }
         }
@@ -796,6 +797,15 @@ fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
     }
 }
 
+fn gen_mem_offset(value: Value, offset: isize, stack: &mut StackGen, symbols: &Symbols) -> Operand {
+    let operand = gen_operand(value, stack, symbols);
+    match operand {
+        Operand::Data(_) => operand,
+        Operand::Memory(BP, location) => Operand::Memory(BP, location + offset),
+        _ => panic!("Expected operand in memory"),
+    }
+}
+
 fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols) -> Operand {
     match value {
         generator::Value::ConstValue(constexpr) => match constexpr {
@@ -822,6 +832,10 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
                     AssemblyType::Longword => stack.stack_offset += 4,
                     AssemblyType::Quadword | AssemblyType::Double => {
                         stack.stack_offset += 8 + (8 - stack.stack_offset % 8);
+                    }
+                    AssemblyType::ByteArray(size, alignment) => {
+                        let padding = alignment - stack.stack_offset % alignment;
+                        stack.stack_offset += size as usize + padding;
                     }
                 }
                 stack.stack_variables.insert(name.to_string(), stack.stack_offset);
