@@ -197,6 +197,11 @@ fn get_operand_quadword(operand: &assembly_gen::Operand) -> String {
         Register(SP) => String::from("%rsp"),
         Register(BP) => String::from("%rbp"),
         Register(CL) => String::from("%cl"),
+        Indexed(reg1, reg2, loc) => {
+            let reg1 = get_operand_quadword(&Register(*reg1));
+            let reg2 = get_operand_quadword(&Register(*reg2));
+            format!("({reg1}, {reg2}, {loc})")
+        }
         _ => get_operand_longword(operand),
     }
 }
@@ -235,6 +240,11 @@ fn get_operand_longword(operand: &assembly_gen::Operand) -> String {
             format!("{val}({reg})")
         }
         Data(name) => format!("{name}(%rip)"),
+        Indexed(reg1, reg2, loc) => {
+            let reg1 = get_operand_longword(&Register(*reg1));
+            let reg2 = get_operand_longword(&Register(*reg2));
+            format!("({reg1}, {reg2}, {loc})")
+        }
     }
 }
 
@@ -242,7 +252,7 @@ fn get_operand(operand: &assembly_gen::Operand, asm_type: &AssemblyType) -> Stri
     match asm_type {
         AssemblyType::Longword => get_operand_longword(operand),
         AssemblyType::Quadword | AssemblyType::Double => get_operand_quadword(operand),
-        AssemblyType::ByteArray(_, _) => panic!("Expected var type, found array!"),
+        AssemblyType::ByteArray(_, _) => get_operand_longword(operand),
     }
 }
 

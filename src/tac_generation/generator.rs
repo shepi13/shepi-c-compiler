@@ -3,10 +3,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    parse::parse_tree::{
+    codegen::assembly_gen::AssemblyType, parse::parse_tree::{
         self, BinaryExpression, BinaryOperator, CType, StorageClass, VariableInitializer,
-    },
-    validate::type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
+    }, validate::type_check::{get_type, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols}
 };
 
 pub type Program = Vec<TopLevelDecl>;
@@ -538,6 +537,7 @@ fn gen_expression(
         }
         parse_tree::Expression::AddrOf(inner) => {
             let expr_type = expression.ctype.expect("Undefined type!");
+            assert!(!matches!(expr_type, CType::Array(_, _)), "Addr of Type error");
             let result = gen_expression(*inner, instructions, symbols);
             match result {
                 ExpResult::Operand(val) => {
@@ -573,10 +573,11 @@ fn gen_pointer_addition(
     symbols: &mut Symbols,
 ) -> ExpResult {
     use Instruction::*;
-    let CType::Pointer(ptr_t) = get_type(&binary.left) else { panic!("Left expr not pointer!") };
+    let left_t = get_type(&binary.left);
+    let CType::Pointer(ref ptr_t) = left_t else { panic!("Left expr not pointer!") };
     let ptr_size = ptr_t.size();
     let lval = gen_expression(binary.left, instructions, symbols);
-    let src = lvalue_convert(instructions, lval.clone(), Some(expr_t.clone()), symbols);
+    let src = lvalue_convert(instructions, lval.clone(), Some(left_t), symbols);
     let int_val = gen_expression_and_convert(binary.right, instructions, symbols);
     let dst = gen_temp_var(expr_t, symbols);
     instructions.push(AddPtr(src, int_val, ptr_size, dst.clone()));
@@ -640,7 +641,7 @@ fn gen_compound_assignment(
     let left_t = get_type(&binary.left);
     // Generate and cast lvalue to common type
     let lval = gen_expression(binary.left, instructions, symbols);
-    let src1 = lvalue_convert(instructions, lval.clone(), Some(expr_t.clone()), symbols);
+    let src1 = lvalue_convert(instructions, lval.clone(), Some(left_t.clone()), symbols);
     let src1 = gen_cast(instructions, expr_t.clone(), left_t.clone(), src1, symbols);
     // Generate rvalue/temp var for dst, push binary op and cast result
     let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
