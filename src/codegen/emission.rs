@@ -23,20 +23,22 @@ fn emit_static_var(file: &mut File, var: StaticVar) {
     if var.global {
         writeln!(file, "    .globl {}", var.name).unwrap();
     }
-    let init = match var.init {
-        Int(_) | UnsignedInt(_) => format!(".long {}", var.init.int_value()),
-        Long(_) | UnsignedLong(_) => format!(".quad {}", var.init.int_value()),
-        Double(val) => format!(".double {}", val),
-        ZeroInit(size) => format!(".zero {size}"),
-    };
-    if matches!(var.init, ZeroInit(_)) {
+    if var.init.len() == 1 && matches!(var.init[0], ZeroInit(_)) {
         writeln!(file, "    .bss").unwrap();
     } else {
         writeln!(file, "    .data").unwrap();
     }
     writeln!(file, "    .align {}", var.alignment).unwrap();
     writeln!(file, "{}:", var.name).unwrap();
-    writeln!(file, "    {}", init).unwrap();
+    for init in var.init {
+        let init_str = match init {
+            Int(_) | UnsignedInt(_) => format!(".long {}", init.int_value()),
+            Long(_) | UnsignedLong(_) => format!(".quad {}", init.int_value()),
+            Double(val) => format!(".double {}", val),
+            ZeroInit(size) => format!(".zero {size}"),
+        };
+        writeln!(file, "    {}", init_str).unwrap();
+    }
 }
 
 fn emit_static_const(file: &mut File, var: StaticConstant) {
@@ -94,6 +96,7 @@ fn emit_instructions(
                 AssemblyType::Longword => writeln!(file, "    cdq").unwrap(),
                 AssemblyType::Quadword => writeln!(file, "    cqo").unwrap(),
                 AssemblyType::Double => panic!("Cdq not supported for double!"),
+                AssemblyType::ByteArray(_, _) => panic!("Cdq not supported for array!"),
             },
             assembly_gen::Instruction::IDiv(operand, asm_type) => {
                 let t = get_size_suffix(asm_type);
@@ -239,6 +242,7 @@ fn get_operand(operand: &assembly_gen::Operand, asm_type: &AssemblyType) -> Stri
     match asm_type {
         AssemblyType::Longword => get_operand_longword(operand),
         AssemblyType::Quadword | AssemblyType::Double => get_operand_quadword(operand),
+        AssemblyType::ByteArray(_, _) => panic!("Expected var type, found array!"),
     }
 }
 
@@ -304,5 +308,6 @@ fn get_size_suffix(asm_type: &AssemblyType) -> &str {
         AssemblyType::Longword => "l",
         AssemblyType::Quadword => "q",
         AssemblyType::Double => "sd",
+        AssemblyType::ByteArray(_, _) => panic!("Expected var, found array!"),
     }
 }
