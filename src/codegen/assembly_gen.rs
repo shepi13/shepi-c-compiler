@@ -104,6 +104,7 @@ pub enum Operand {
     Memory(Register, isize),
     Register(Register),
     Data(String),
+    Indexed(Register, Register, u64),
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssemblyType {
@@ -119,7 +120,20 @@ impl AssemblyType {
             CType::Long | CType::UnsignedLong => AssemblyType::Quadword,
             CType::Double => AssemblyType::Double,
             CType::Pointer(_) => AssemblyType::Quadword,
-            _ => panic!("Expected a variable!"),
+            CType::Array(elem_t, _) => {
+                let size = ctype.size();
+                let alignment = if size < 16 { elem_t.size() } else { 16 };
+                assert!([1, 2, 4, 8, 16].contains(&alignment), "Alignment error: {:#?}", alignment);
+                AssemblyType::ByteArray(size, alignment as usize)
+            }
+            CType::Function(_, _) => panic!("Not a variable!"),
+        }
+    }
+    pub fn get_alignment(&self) -> usize {
+        match self {
+            Self::Double | Self::Quadword => 8,
+            Self::Longword => 4,
+            Self::ByteArray(_, alignment) => *alignment,
         }
     }
 }
@@ -249,7 +263,8 @@ pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
                 }));
             }
             generator::TopLevelDecl::StaticDecl(static_data) => {
-                let alignment = static_data.ctype.size();
+                // Calculate smaller valid alignment if possible TODO:
+                let alignment = AssemblyType::from(&static_data.ctype).get_alignment() as u64;
                 program.push(TopLevelDecl::Var(StaticVar {
                     name: static_data.identifier,
                     global: static_data.global,
@@ -402,10 +417,10 @@ fn gen_instructions(
                     asm_instructions.push(JmpCond(condition, jump.target));
                 }
             }
-            generator::Instruction::Copy(copy) => {
-                let src_type = AssemblyType::from(&get_type(&copy.src, symbols));
-                let src = gen_operand(copy.src, stack, symbols);
-                let dst = gen_operand(copy.dst, stack, symbols);
+            generator::Instruction::Copy(src, dst) => {
+                let src_type = AssemblyType::from(&get_type(&src, symbols));
+                let src = gen_operand(src, stack, symbols);
+                let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Mov(src, dst, src_type));
             }
             generator::Instruction::Label(target) => {
@@ -476,6 +491,7 @@ fn gen_instructions(
             }
             generator::Instruction::Load(ptr, dst) => {
                 let dst_type = AssemblyType::from(&get_type(&dst, symbols));
+                assert!(!matches!(dst_type, AssemblyType::ByteArray(_, _)), "LOAD BYTEARRAY!");
                 let ptr = gen_operand(ptr, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
@@ -483,13 +499,40 @@ fn gen_instructions(
             }
             generator::Instruction::Store(src, ptr) => {
                 let src_type = AssemblyType::from(&get_type(&src, symbols));
+                assert!(!matches!(src_type, AssemblyType::ByteArray(_, _)), "STORE BYTEARRAY!");
                 let src = gen_operand(src, stack, symbols);
                 let ptr = gen_operand(ptr, stack, symbols);
                 asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
                 asm_instructions.push(Mov(src, Memory(AX, 0), src_type));
             }
-            generator::Instruction::AddPtr(_, _, _, _) => panic!("Notimplemented"),
-            generator::Instruction::CopyToOffset(_, _, _) => panic!("Not implemented!"),
+            generator::Instruction::AddPtr(ptr, index, scale, dst) => {
+                let ptr = gen_operand(ptr, stack, symbols);
+                let index = gen_operand(index, stack, symbols);
+                let dst = gen_operand(dst, stack, symbols);
+                asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
+                if let Imm(index_val) = index {
+                    let offset = index_val as isize * scale as isize;
+                    asm_instructions.push(Lea(Memory(AX, offset), dst));
+                } else if [1, 2, 4, 8].contains(&scale) {
+                    asm_instructions.push(Mov(index, Reg(DX), AssemblyType::Quadword));
+                    asm_instructions.push(Lea(Operand::Indexed(AX, DX, scale), dst));
+                } else {
+                    asm_instructions.push(Mov(index, Reg(DX), AssemblyType::Quadword));
+                    asm_instructions.push(Binary(
+                        BinaryOperator::Mult,
+                        Imm(scale.into()),
+                        Reg(DX),
+                        AssemblyType::Quadword,
+                    ));
+                    asm_instructions.push(Lea(Operand::Indexed(AX, DX, 1), dst));
+                }
+            }
+            generator::Instruction::CopyToOffset(src, dst, offset) => {
+                let src_type = AssemblyType::from(&get_type(&src, symbols));
+                let src = gen_operand(src, stack, symbols);
+                let dst = gen_mem_offset(dst, offset as isize, stack, symbols);
+                asm_instructions.push(Mov(src, dst, src_type));
+            }
         }
     }
     asm_instructions
@@ -797,8 +840,8 @@ fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
     }
 }
 
-fn gen_mem_offset(value: Value, offset: isize, stack: &mut StackGen, symbols: &Symbols) -> Operand {
-    let operand = gen_operand(value, stack, symbols);
+fn gen_mem_offset(name: String, offset: isize, stack: &mut StackGen, symbols: &Symbols) -> Operand {
+    let operand = gen_operand(Value::Variable(name), stack, symbols);
     match operand {
         Operand::Data(_) => operand,
         Operand::Memory(BP, location) => Operand::Memory(BP, location + offset),
@@ -834,8 +877,8 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
                         stack.stack_offset += 8 + (8 - stack.stack_offset % 8);
                     }
                     AssemblyType::ByteArray(size, alignment) => {
-                        let padding = alignment - stack.stack_offset % alignment;
-                        stack.stack_offset += size as usize + padding;
+                        stack.stack_offset += size as usize;
+                        stack.stack_offset += alignment - stack.stack_offset % alignment;
                     }
                 }
                 stack.stack_variables.insert(name.to_string(), stack.stack_offset);
