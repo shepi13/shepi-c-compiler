@@ -186,7 +186,7 @@ fn gen_declaration(
     match declaration.init {
         Some(VariableInitializer::SingleElem(value)) => {
             let result = gen_expression_and_convert(value, instructions, symbols);
-            instructions.push(Instruction::Copy(result, Value::Variable(declaration.name.into())));
+            instructions.push(Instruction::Copy(result, Value::Variable(declaration.name)));
         }
         Some(VariableInitializer::CompoundInit(v_init)) => {
             gen_init_list(instructions, v_init, declaration.name, &declaration.ctype, 0, symbols);
@@ -409,8 +409,8 @@ fn gen_expression(
                 gen_short_circuit(instructions, *binary, symbols)
             } else if binary.operator == Add && expr_t.is_pointer() {
                 gen_pointer_addition(instructions, *binary, symbols)
-            } else if binary.operator == Subtract && expr_t.is_pointer() {
-                gen_pointer_subtraction(instructions, *binary, expr_t, symbols)
+            } else if binary.operator == Subtract && get_type(&binary.left).is_pointer() {
+                gen_pointer_subtraction(instructions, *binary, symbols)
             } else if binary.is_assignment {
                 gen_compound_assignment(instructions, *binary, expr_t, symbols)
             } else {
@@ -598,7 +598,6 @@ fn gen_pointer_addition(
 fn gen_pointer_subtraction(
     instructions: &mut Vec<Instruction>,
     binary: BinaryExpression,
-    expr_t: CType,
     symbols: &mut Symbols,
 ) -> ExpResult {
     use BinaryOperator::{Divide, Subtract};
@@ -608,7 +607,7 @@ fn gen_pointer_subtraction(
     let src1 = gen_expression_and_convert(binary.left, instructions, symbols);
     let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
     // Subtract into temp var
-    let tmp = gen_temp_var(expr_t.clone(), symbols);
+    let tmp = gen_temp_var(CType::Long, symbols);
     let subtract_expr = InstructionBinary {
         src1,
         src2,
@@ -617,7 +616,7 @@ fn gen_pointer_subtraction(
     };
     instructions.push(BinaryOp(subtract_expr));
     // Divide into final result
-    let result = gen_temp_var(expr_t, symbols);
+    let result = gen_temp_var(CType::Long, symbols);
     let src2 = Value::ConstValue(Constant::Long(ptr_size as i64));
     let divide_expr = InstructionBinary {
         src1: tmp,
