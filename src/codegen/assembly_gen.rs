@@ -123,12 +123,17 @@ impl AssemblyType {
             CType::Array(elem_t, _) => {
                 let size = ctype.size();
                 let alignment = if size < 16 { elem_t.size() } else { 16 };
-                if ![1, 2, 4, 8, 16].contains(&alignment) {
-                    panic!("Alignment error: {:#?}", alignment)
-                }
+                assert!([1, 2, 4, 8, 16].contains(&alignment), "Alignment error: {:#?}", alignment);
                 AssemblyType::ByteArray(size, alignment as usize)
             }
             CType::Function(_, _) => panic!("Not a variable!"),
+        }
+    }
+    pub fn get_alignment(&self) -> usize {
+        match self {
+            Self::Double | Self::Quadword => 8,
+            Self::Longword => 4,
+            Self::ByteArray(_, alignment) => *alignment,
         }
     }
 }
@@ -259,7 +264,7 @@ pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
             }
             generator::TopLevelDecl::StaticDecl(static_data) => {
                 // Calculate smaller valid alignment if possible TODO:
-                let alignment = 16;
+                let alignment = AssemblyType::from(&static_data.ctype).get_alignment() as u64;
                 program.push(TopLevelDecl::Var(StaticVar {
                     name: static_data.identifier,
                     global: static_data.global,
@@ -412,10 +417,10 @@ fn gen_instructions(
                     asm_instructions.push(JmpCond(condition, jump.target));
                 }
             }
-            generator::Instruction::Copy(copy) => {
-                let src_type = AssemblyType::from(&get_type(&copy.src, symbols));
-                let src = gen_operand(copy.src, stack, symbols);
-                let dst = gen_operand(copy.dst, stack, symbols);
+            generator::Instruction::Copy(src, dst) => {
+                let src_type = AssemblyType::from(&get_type(&src, symbols));
+                let src = gen_operand(src, stack, symbols);
+                let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Mov(src, dst, src_type));
             }
             generator::Instruction::Label(target) => {
@@ -872,8 +877,8 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
                         stack.stack_offset += 8 + (8 - stack.stack_offset % 8);
                     }
                     AssemblyType::ByteArray(size, alignment) => {
-                        let padding = alignment - stack.stack_offset % alignment;
-                        stack.stack_offset += size as usize + padding;
+                        stack.stack_offset += size as usize;
+                        stack.stack_offset += alignment - stack.stack_offset % alignment;
                     }
                 }
                 stack.stack_variables.insert(name.to_string(), stack.stack_offset);
