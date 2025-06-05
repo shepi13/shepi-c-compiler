@@ -65,15 +65,12 @@ pub enum Token<'a> {
 
 impl<'a> Token<'a> {
     pub fn is_type_specifier(&self) -> bool {
-        use Token::Specifier;
-        matches!(
-            self,
-            Specifier("int")
-                | Specifier("long")
-                | Specifier("signed")
-                | Specifier("unsigned")
-                | Specifier("double")
-        )
+        match self {
+            Token::Specifier(specifier) => {
+                ["int", "long", "signed", "unsigned", "double"].contains(specifier)
+            }
+            _ => false,
+        }
     }
     fn from(data: &'a str, token_type: Token<'a>) -> Self {
         use Token::*;
@@ -90,6 +87,7 @@ impl<'a> Token<'a> {
 }
 
 lazy_static! {
+    static ref preprocessor_regex: Regex = Regex::new("^#[^\n]*").unwrap();
     static ref token_regexes: Vec<(Token<'static>, Regex)> = vec![
         // Type specifiers
         (Token::Specifier(""), Regex::new(&[
@@ -178,22 +176,49 @@ lazy_static! {
 }
 
 #[derive(Debug)]
+pub struct LexError {
+    pub message: String,
+    pub line: String,
+    pub line_number: usize,
+}
+pub type LexResult<'a> = Result<Tokens<'a>, LexError>;
+
+#[derive(Debug)]
 pub struct Tokens<'a> {
     tokens: Vec<Token<'a>>,
     locations: Vec<(usize, usize)>,
     source: Vec<&'a str>,
     current_token: usize,
 }
+// Private lexing functions
 impl<'a> Tokens<'a> {
-    fn from(tokens: Vec<Token<'a>>, source: &'a str, token_locations: Vec<(usize, usize)>) -> Self {
-        let source = source.lines().collect();
+    fn from(data: &'a str) -> Self {
+        // Ignore preprocessor comments for now
+        let source = data.lines().filter(|line| !preprocessor_regex.is_match(line)).collect();
         Self {
-            tokens,
+            tokens: Vec::new(),
             source,
             locations: Vec::new(),
             current_token: 0,
         }
     }
+    fn push_token(&mut self, token: Token<'a>, location: (usize, usize)) {
+        self.tokens.push(token);
+        self.locations.push(location);
+    }
+    fn lex_error(&self, message: String) -> LexResult {
+        let line_number = self.locations.get(self.locations.len() - 1).map_or(0, |loc| loc.0);
+        let line = self.source[line_number].to_string();
+        Err(LexError {
+            message,
+            line,
+            line_number: line_number + 1,
+        })
+    }
+}
+
+// Public Parsing/Token iteration functions
+impl Tokens<'_> {
     pub fn current_line(&self) -> &str {
         let line_number = self.locations[self.current_token].0;
         &self.source[line_number]
@@ -234,13 +259,14 @@ impl<'a> std::ops::Index<usize> for Tokens<'a> {
     }
 }
 
-pub fn parse(mut data: &str) -> Tokens {
-    let mut tokens: Vec<Token<'_>> = Vec::new();
-    let mut locations: Vec<(usize, usize)> = Vec::new();
-    let source = data;
+pub fn parse(mut data: &str) -> LexResult {
+    let mut tokens = Tokens::from(data);
     let mut source_location = (0, 0); // (line_number, col)
     while let Some(first_char) = data.chars().next() {
-        if first_char.is_whitespace() {
+        // Skip preprocessor notes for now
+        if let Some(match_obj) = preprocessor_regex.find(data) {
+            data = &data[match_obj.len() + 1..];
+        } else if first_char.is_whitespace() {
             data = &data[1..];
             if first_char == '\n' {
                 source_location = (source_location.0 + 1, 0);
@@ -249,19 +275,15 @@ pub fn parse(mut data: &str) -> Tokens {
             .iter()
             .find_map(|token_re| token_re.1.captures(data).map(|m| (m, &token_re.0)))
         {
-            // Use the first capture group instead of 0 so we can exclude characters (fake lookahead). Defaults to 0 if no match
-            let fullmatch =
-                captures.get(1).map(|m| m.as_str()).unwrap_or(captures.get(0).unwrap().as_str());
-            // Use val capture group to capture data, defaults to full match if it doesn't exist
-            let datamatch = captures.name("val").map(|m| m.as_str()).unwrap_or(fullmatch);
-            // Consume data and push token
-            locations.push(source_location);
-            tokens.push(Token::from(datamatch, *token));
+            // Use the first capture group instead of 0 so we can exclude characters (fake lookahead)
+            let fullmatch = captures.get(1).unwrap_or(captures.get(0).unwrap());
+            let datamatch = captures.name("val").unwrap_or(fullmatch).as_str();
+            tokens.push_token(Token::from(datamatch, *token), source_location);
             data = &data[fullmatch.len()..];
             source_location = (source_location.0, source_location.1 + fullmatch.len());
         } else {
-            panic!("Failed to match token '{}'", first_char);
+            tokens.lex_error(format!("Failed to match token '{}'", first_char))?;
         }
     }
-    Tokens::from(tokens, source, locations)
+    Ok(tokens)
 }

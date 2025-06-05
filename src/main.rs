@@ -5,7 +5,7 @@ mod validate;
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, exit};
 
 use clap::Parser;
 
@@ -82,7 +82,7 @@ fn main() {
 
     // Run preprocessor
     let mut preprocessor = Command::new("gcc");
-    preprocessor.args(["-E", "-P", &args.filename, "-o", &preprocess_file]);
+    preprocessor.args(["-E", &args.filename, "-o", &preprocess_file]);
     if args.print_commands {
         println!("Running preprocessor: {:?}", preprocessor);
     }
@@ -93,7 +93,15 @@ fn main() {
 
     // Run Lexer
     let program = fs::read_to_string(&preprocess_file).expect("Failed to read preprocessed code!");
-    let mut tokens = parse::lexer::parse(&program);
+    let mut tokens = match parse::lexer::parse(&program) {
+        Ok(tokens) => tokens,
+        Err(lex_error) => {
+            println!("Lexing failed: ");
+            println!("Error: {}", lex_error.message);
+            println!("At line {}: {}", lex_error.line_number, lex_error.line.trim());
+            exit(1);
+        }
+    };
     if args.lex {
         println!("Tokens:\n\n {:#?}", tokens);
         return;
