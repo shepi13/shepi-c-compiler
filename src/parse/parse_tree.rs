@@ -1,4 +1,4 @@
-use super::lexer::TokenType;
+use super::lexer::Token;
 
 pub type Program = Vec<Declaration>;
 pub type Block = Vec<BlockItem>;
@@ -124,10 +124,10 @@ pub enum StorageClass {
     Extern,
 }
 impl StorageClass {
-    pub fn from(token: &TokenType) -> Self {
+    pub fn from(token: &Token) -> Self {
         match token {
-            TokenType::Specifier("static") => Self::Static,
-            TokenType::Specifier("extern") => Self::Extern,
+            Token::Specifier("static") => Self::Static,
+            Token::Specifier("extern") => Self::Extern,
             _ => panic!("Invalid storage class!"),
         }
     }

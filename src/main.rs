@@ -93,13 +93,13 @@ fn main() {
 
     // Run Lexer
     let program = fs::read_to_string(&preprocess_file).expect("Failed to read preprocessed code!");
-    let tokens = parse::lexer::parse(&program);
+    let mut tokens = parse::lexer::parse(&program);
     if args.lex {
         println!("Tokens:\n\n {:#?}", tokens);
         return;
     }
     // Run Parser
-    let parser_ast = parse::parser::parse(&mut &tokens[..]);
+    let parser_ast = parse::parser::parse(&mut tokens);
     if args.parse {
         println!("Parser AST: {:#?}", parser_ast);
         return;
