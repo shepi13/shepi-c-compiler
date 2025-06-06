@@ -483,7 +483,6 @@ fn gen_expression(
         }
         Expression::AddrOf(inner) => {
             let expr_type = expression.ctype.expect("Undefined type!");
-            assert!(!matches!(expr_type, CType::Array(_, _)), "Addr of Type error");
             let result = gen_expression(*inner, instructions, symbols);
             match result {
                 ExpResult::Operand(val) => {

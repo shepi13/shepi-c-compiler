@@ -491,7 +491,6 @@ fn gen_instructions(
             }
             generator::Instruction::Load(ptr, dst) => {
                 let dst_type = AssemblyType::from(&get_type(&dst, symbols));
-                assert!(!matches!(dst_type, AssemblyType::ByteArray(_, _)), "LOAD BYTEARRAY!");
                 let ptr = gen_operand(ptr, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
@@ -499,7 +498,6 @@ fn gen_instructions(
             }
             generator::Instruction::Store(src, ptr) => {
                 let src_type = AssemblyType::from(&get_type(&src, symbols));
-                assert!(!matches!(src_type, AssemblyType::ByteArray(_, _)), "STORE BYTEARRAY!");
                 let src = gen_operand(src, stack, symbols);
                 let ptr = gen_operand(ptr, stack, symbols);
                 asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));

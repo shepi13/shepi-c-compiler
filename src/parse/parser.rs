@@ -1,12 +1,10 @@
-mod declarators;
-
 use std::{
     collections::HashMap,
     error::Error,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use declarators::{
+use super::declarators::{
     parse_abstract_declarator, parse_declarator, process_abstract_declarator, process_declarator,
 };
 use lazy_static::lazy_static;
@@ -70,24 +68,7 @@ fn switch_name() -> String {
     format!("switch.{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-fn is_assignment_token(token: &Token) -> bool {
-    use lexer::Token::*;
-    matches!(
-        token,
-        PlusEqual
-            | HyphenEqual
-            | StarEqual
-            | ForwardSlashEqual
-            | PercentEqual
-            | AmpersandEqual
-            | PipeEqual
-            | CaretEqual
-            | LeftShiftEqual
-            | RightShiftEqual
-    )
-}
-
-fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
+pub fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
     use Token::Specifier;
     let assert = |cond, msg: &'static str| if cond { Ok(()) } else { Err(msg) };
     // Count specifier tokens
@@ -140,7 +121,7 @@ fn parse_specifiers(tokens: &mut Tokens) -> ParseResult<(CType, Option<StorageCl
     Ok((ctype, storage_classes.pop()))
 }
 
-fn parse_identifier(tokens: &mut Tokens) -> ParseResult<String> {
+pub fn parse_identifier(tokens: &mut Tokens) -> ParseResult<String> {
     // Parses an identifier and advances the cursor
     let next_token = tokens.consume();
     match next_token {
@@ -224,7 +205,7 @@ fn parse_post_operator(
     }
 }
 
-fn parse_constant(tokens: &mut Tokens) -> ParseResult<Constant> {
+pub fn parse_constant(tokens: &mut Tokens) -> ParseResult<Constant> {
     let result = try_parse_constant(tokens.consume());
     match result {
         Ok(constant) => Ok(constant),
@@ -320,7 +301,7 @@ fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> ParseResult<TypedEx
             )
             .into();
         } else {
-            let is_assignment = is_assignment_token(&tokens[0]);
+            let is_assignment = tokens[0].is_assignment_token();
             let operator = parse_binop(tokens)?;
             let right = if is_assignment {
                 parse_expression(tokens, token_prec)?

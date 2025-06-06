@@ -66,6 +66,22 @@ pub enum Token<'a> {
 }
 
 impl<'a> Token<'a> {
+    pub fn is_assignment_token(&self) -> bool {
+        use Token::*;
+        matches!(
+            self,
+            PlusEqual
+                | HyphenEqual
+                | StarEqual
+                | ForwardSlashEqual
+                | PercentEqual
+                | AmpersandEqual
+                | PipeEqual
+                | CaretEqual
+                | LeftShiftEqual
+                | RightShiftEqual
+        )
+    }
     pub fn is_type_specifier(&self) -> bool {
         match self {
             Token::Specifier(specifier) => {
