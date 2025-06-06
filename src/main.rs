@@ -96,9 +96,7 @@ fn main() {
     let mut tokens = match parse::lexer::parse(&program) {
         Ok(tokens) => tokens,
         Err(lex_error) => {
-            println!("Lexing failed: ");
-            println!("Error: {}", lex_error.message);
-            println!("At line {}: {}", lex_error.line_number, lex_error.line.trim());
+            println!("Lexing failed:\n{}", lex_error);
             exit(1);
         }
     };
@@ -107,7 +105,13 @@ fn main() {
         return;
     }
     // Run Parser
-    let parser_ast = parse::parser::parse(&mut tokens);
+    let parser_ast = match parse::parser::parse(&mut tokens) {
+        Ok(program) => program,
+        Err(parse_error) => {
+            println!("Parsing failed:\n{}", parse_error);
+            exit(2);
+        }
+    };
     if args.parse {
         println!("Parser AST: {:#?}", parser_ast);
         return;
