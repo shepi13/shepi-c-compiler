@@ -1,35 +1,43 @@
 use super::assembly_gen::{
-    self, AsmSymbol, AssemblyType, BackendSymbols, Condition, StaticConstant, StaticVar,
+    self, AsmSymbol, AssemblyType, BackendSymbols, Condition, Function, StaticConstant, StaticVar,
 };
 use crate::{codegen::assembly_gen::BinaryOperator, validate::type_check::Initializer};
-use std::{fs::File, io::Write};
+use std::error::Error;
 
-pub fn emit_program(output_filename: &str, program: assembly_gen::Program) {
-    let mut file = File::create(output_filename).expect("Failed to create file!");
+type EmptyResult = Result<(), Box<dyn Error>>;
+
+pub fn emit_program<T>(output: &mut T, program: assembly_gen::Program) -> EmptyResult
+where
+    T: std::fmt::Write,
+{
     for top_level in program.program {
         match top_level {
             assembly_gen::TopLevelDecl::FunctionDecl(function) => {
-                emit_function(&mut file, function, &program.backend_symbols);
+                emit_function(output, function, &program.backend_symbols)?;
             }
-            assembly_gen::TopLevelDecl::Var(var) => emit_static_var(&mut file, var),
-            assembly_gen::TopLevelDecl::Constant(var) => emit_static_const(&mut file, var),
+            assembly_gen::TopLevelDecl::Var(var) => emit_static_var(output, var)?,
+            assembly_gen::TopLevelDecl::Constant(var) => emit_static_const(output, var)?,
         }
     }
-    writeln!(file, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
+    writeln!(output, "    .section .note.GNU-stack,\"\",@progbits")?;
+    Ok(())
 }
 
-fn emit_static_var(file: &mut File, var: StaticVar) {
+fn emit_static_var<T>(output: &mut T, var: StaticVar) -> EmptyResult
+where
+    T: std::fmt::Write,
+{
     use Initializer::*;
     if var.global {
-        writeln!(file, "    .globl {}", var.name).unwrap();
+        writeln!(output, "    .globl {}", var.name)?;
     }
     if var.init.len() == 1 && matches!(var.init[0], ZeroInit(_)) {
-        writeln!(file, "    .bss").unwrap();
+        writeln!(output, "    .bss")?;
     } else {
-        writeln!(file, "    .data").unwrap();
+        writeln!(output, "    .data")?;
     }
-    writeln!(file, "    .align {}", var.alignment).unwrap();
-    writeln!(file, "{}:", var.name).unwrap();
+    writeln!(output, "    .align {}", var.alignment)?;
+    writeln!(output, "{}:", var.name)?;
     for init in var.init {
         let init_str = match init {
             Int(_) | UnsignedInt(_) => format!(".long {}", init.int_value()),
@@ -37,123 +45,132 @@ fn emit_static_var(file: &mut File, var: StaticVar) {
             Double(val) => format!(".double {}", val),
             ZeroInit(size) => format!(".zero {size}"),
         };
-        writeln!(file, "    {}", init_str).unwrap();
+        writeln!(output, "    {}", init_str)?;
     }
+    Ok(())
 }
 
-fn emit_static_const(file: &mut File, var: StaticConstant) {
-    writeln!(file, "    .section .rodata").unwrap();
-    writeln!(file, "    .align {}", var.alignment).unwrap();
-    writeln!(file, "{}:", var.name).unwrap();
+fn emit_static_const<T>(output: &mut T, var: StaticConstant) -> EmptyResult
+where
+    T: std::fmt::Write,
+{
+    writeln!(output, "    .section .rodata")?;
+    writeln!(output, "    .align {}", var.alignment)?;
+    writeln!(output, "{}:", var.name)?;
     match var.init {
         Initializer::Double(val) => {
-            writeln!(file, "    .double {val}").unwrap();
+            writeln!(output, "    .double {val}")?;
         }
         _ => panic!("Not a double"),
     }
+    Ok(())
 }
 
-fn emit_function(file: &mut File, function: assembly_gen::Function, symbols: &BackendSymbols) {
+fn emit_function<T>(output: &mut T, function: Function, symbols: &BackendSymbols) -> EmptyResult
+where
+    T: std::fmt::Write,
+{
     if function.global {
-        writeln!(file, "    .globl {}", function.name).unwrap()
+        writeln!(output, "    .globl {}", function.name)?
     }
-    writeln!(file, "    .text").unwrap();
-    writeln!(file, "{}:", function.name).unwrap();
-    writeln!(file, "    pushq %rbp").unwrap();
-    writeln!(file, "    movq %rsp, %rbp").unwrap();
-    emit_instructions(file, &function.instructions, symbols);
+    writeln!(output, "    .text")?;
+    writeln!(output, "{}:", function.name)?;
+    writeln!(output, "    pushq %rbp")?;
+    writeln!(output, "    movq %rsp, %rbp")?;
+    emit_instructions(output, &function.instructions, symbols)?;
+    Ok(())
 }
-fn emit_instructions(
-    file: &mut File,
+fn emit_instructions<T: std::fmt::Write>(
+    output: &mut T,
     instructions: &Vec<assembly_gen::Instruction>,
     symbols: &BackendSymbols,
-) {
+) -> EmptyResult {
     for instruction in instructions {
         match instruction {
             assembly_gen::Instruction::Mov(src, dst, move_type) => {
                 let src = get_operand(src, move_type);
                 let dst = get_operand(dst, move_type);
                 let t = get_size_suffix(move_type);
-                writeln!(file, "    mov{t} {src}, {dst}").unwrap();
+                writeln!(output, "    mov{t} {src}, {dst}")?;
             }
             assembly_gen::Instruction::MovSignExtend(src, dst) => {
                 let src = get_operand(src, &AssemblyType::Longword);
                 let dst = get_operand(dst, &AssemblyType::Quadword);
-                writeln!(file, "    movslq {src}, {dst}").unwrap();
+                writeln!(output, "    movslq {src}, {dst}")?;
             }
             assembly_gen::Instruction::Ret => {
-                writeln!(file, "    movq %rbp, %rsp").unwrap();
-                writeln!(file, "    popq %rbp").unwrap();
-                writeln!(file, "    ret").unwrap();
+                writeln!(output, "    movq %rbp, %rsp")?;
+                writeln!(output, "    popq %rbp")?;
+                writeln!(output, "    ret")?;
             }
             assembly_gen::Instruction::Unary(operator, operand, asm_type) => {
                 let operator = get_unary_operator(operator);
                 let operand = get_operand(operand, asm_type);
                 let t = get_size_suffix(asm_type);
-                writeln!(file, "    {operator}{t} {operand}").unwrap();
+                writeln!(output, "    {operator}{t} {operand}")?;
             }
             assembly_gen::Instruction::Cdq(asm_type) => match asm_type {
-                AssemblyType::Longword => writeln!(file, "    cdq").unwrap(),
-                AssemblyType::Quadword => writeln!(file, "    cqo").unwrap(),
+                AssemblyType::Longword => writeln!(output, "    cdq")?,
+                AssemblyType::Quadword => writeln!(output, "    cqo")?,
                 AssemblyType::Double => panic!("Cdq not supported for double!"),
                 AssemblyType::ByteArray(_, _) => panic!("Cdq not supported for array!"),
             },
             assembly_gen::Instruction::IDiv(operand, asm_type) => {
                 let t = get_size_suffix(asm_type);
                 let operand = get_operand(operand, asm_type);
-                writeln!(file, "    idiv{t} {operand}").unwrap();
+                writeln!(output, "    idiv{t} {operand}")?;
             }
             assembly_gen::Instruction::Div(operand, asm_type) => {
                 let t = get_size_suffix(asm_type);
                 let operand = get_operand(operand, asm_type);
-                writeln!(file, "    div{t} {operand}").unwrap();
+                writeln!(output, "    div{t} {operand}")?;
             }
             assembly_gen::Instruction::Binary(operator, left, right, asm_type) => {
                 let src = get_operand(left, asm_type);
                 let dst = get_operand(right, asm_type);
                 // Xor and Mult have special impls for double
                 if *asm_type == AssemblyType::Double && *operator == BinaryOperator::BitXor {
-                    writeln!(file, "    xorpd {src}, {dst}").unwrap();
+                    writeln!(output, "    xorpd {src}, {dst}")?;
                 } else if *asm_type == AssemblyType::Double && *operator == BinaryOperator::Mult {
-                    writeln!(file, "    mulsd {src}, {dst}").unwrap();
+                    writeln!(output, "    mulsd {src}, {dst}")?;
                 } else {
                     let operator = get_binary_operator(operator);
                     let t = get_size_suffix(asm_type);
-                    writeln!(file, "    {operator}{t} {src}, {dst}").unwrap();
+                    writeln!(output, "    {operator}{t} {src}, {dst}")?;
                 }
             }
             assembly_gen::Instruction::SetCond(cond, val) => {
                 let code = get_cond_code(cond);
                 let reg = get_short_reg(val);
-                writeln!(file, "    set{} {}", code, reg).unwrap();
+                writeln!(output, "    set{} {}", code, reg)?;
             }
             assembly_gen::Instruction::Compare(left, right, cmp_type) => {
                 let left = get_operand(left, cmp_type);
                 let right = get_operand(right, cmp_type);
                 let t = get_size_suffix(cmp_type);
                 if *cmp_type == AssemblyType::Double {
-                    writeln!(file, "    comisd {left}, {right}").unwrap();
+                    writeln!(output, "    comisd {left}, {right}")?;
                 } else {
-                    writeln!(file, "    cmp{t} {left}, {right}").unwrap();
+                    writeln!(output, "    cmp{t} {left}, {right}")?;
                 }
             }
             assembly_gen::Instruction::JmpCond(cond, target) => {
-                writeln!(file, "    j{} .L_{}", get_cond_code(cond), target).unwrap();
+                writeln!(output, "    j{} .L_{}", get_cond_code(cond), target)?;
             }
             assembly_gen::Instruction::Jmp(target) => {
-                writeln!(file, "    jmp .L_{}", target).unwrap();
+                writeln!(output, "    jmp .L_{}", target)?;
             }
             assembly_gen::Instruction::Label(target) => {
-                writeln!(file, ".L_{}:", target).unwrap();
+                writeln!(output, ".L_{}:", target)?;
             }
             assembly_gen::Instruction::Push(operand) => {
-                writeln!(file, "    pushq {}", get_operand_quadword(operand)).unwrap();
+                writeln!(output, "    pushq {}", get_operand_quadword(operand))?;
             }
             assembly_gen::Instruction::Call(label) => {
                 if let AsmSymbol::FunctionEntry(true) = &symbols[label] {
-                    writeln!(file, "    call {}", label).unwrap();
+                    writeln!(output, "    call {}", label)?;
                 } else {
-                    writeln!(file, "    call {}@PLT", label).unwrap();
+                    writeln!(output, "    call {}@PLT", label)?;
                 }
             }
             assembly_gen::Instruction::MovZeroExtend(_, _) => {
@@ -163,22 +180,23 @@ fn emit_instructions(
                 let src = get_operand(src, asm_type);
                 let dst = get_operand(dst, asm_type);
                 let t = get_size_suffix(asm_type);
-                writeln!(file, "    cvttsd2si{t} {src}, {dst}").unwrap();
+                writeln!(output, "    cvttsd2si{t} {src}, {dst}")?;
             }
             assembly_gen::Instruction::Cvtsi2sd(src, dst, asm_type) => {
                 let src = get_operand(src, asm_type);
                 let dst = get_operand(dst, asm_type);
                 let t = get_size_suffix(asm_type);
-                writeln!(file, "    cvtsi2sd{t} {src}, {dst}").unwrap();
+                writeln!(output, "    cvtsi2sd{t} {src}, {dst}")?;
             }
             assembly_gen::Instruction::Lea(src, dst) => {
                 let src = get_operand_quadword(src);
                 let dst = get_operand_quadword(dst);
-                writeln!(file, "    leaq {src}, {dst}").unwrap();
+                writeln!(output, "    leaq {src}, {dst}")?;
             }
             assembly_gen::Instruction::Nop => panic!("Noop should just be a placeholder"),
         }
     }
+    Ok(())
 }
 
 fn get_operand_quadword(operand: &assembly_gen::Operand) -> String {
