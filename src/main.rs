@@ -3,7 +3,8 @@ mod parse;
 mod tac_generation;
 mod validate;
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, exit};
 
@@ -90,7 +91,6 @@ fn main() {
     if !status.success() {
         panic!("Preprocessor exited with failure");
     }
-
     // Run Lexer
     let program = fs::read_to_string(&preprocess_file).expect("Failed to read preprocessed code!");
     let mut tokens = match parse::lexer::parse(&program) {
@@ -101,7 +101,7 @@ fn main() {
         }
     };
     if args.lex {
-        println!("Tokens:\n\n {}", tokens);
+        println!("Tokens:\n\n{}", tokens);
         return;
     }
     // Run Parser
@@ -116,7 +116,6 @@ fn main() {
         println!("Parser AST: {:#?}", parser_ast);
         return;
     }
-
     // Run Semantics Analysis Pass
     let resolved_ast = validate::semantics::resolve_program(parser_ast);
     if args.semantics {
@@ -139,7 +138,6 @@ fn main() {
         println!("Tacky symbols: {:#?}", typed_program.symbols);
         return;
     }
-
     // Run Full codegen
     let assembly_ast = codegen::assembly_gen::gen_assembly_tree(tac_ast, typed_program.symbols);
     if args.no_rewrite {
@@ -153,15 +151,22 @@ fn main() {
         println!("Assembly AST: {:#?}", assembly_ast);
         return;
     }
-
     // Code emission
-    codegen::emission::emit_program(&assembly_file, assembly_ast);
-
+    let mut asm_code = String::new();
+    match codegen::emission::emit_program(&mut asm_code, assembly_ast) {
+        Ok(_) => (),
+        Err(error) => {
+            println!("Emission failed: {}", error);
+            exit(8);
+        }
+    }
+    let mut file = File::create(&assembly_file).expect("Failed to create file!");
+    write!(file, "{}", asm_code).expect("Failed to write to file!");
     if args.assembler_only {
-        // Print assembly?
+        print!("{}", asm_code);
         return;
     }
-
+    // Compile and Link
     if args.compile_only {
         let mut assembler = Command::new("gcc");
         assembler.args([&assembly_file, "-c", "-o", &object_file]);
