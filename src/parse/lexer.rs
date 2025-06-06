@@ -1,3 +1,5 @@
+use std::cmp::max;
+
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -179,16 +181,26 @@ lazy_static! {
 pub struct LexError {
     pub message: String,
     pub line: String,
+    pub prev_line: Option<String>,
     pub line_number: usize,
+    pub column: usize,
 }
 pub type LexResult<T> = Result<T, LexError>;
 pub type ParseError = LexError;
 pub type ParseResult<T> = LexResult<T>;
 impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error {}", self.message)?;
+        writeln!(f, "Error: {}", self.message)?;
         writeln!(f, "At line {}:", self.line_number)?;
-        writeln!(f, "\t{}", self.line.trim())
+        if let Some(prev_line) = &self.prev_line {
+            writeln!(f, "{}", prev_line)?;
+        }
+        writeln!(f, "{}", self.line)?;
+        for _ in 1..self.column {
+            write!(f, " ")?;
+        }
+        write!(f, "^")?;
+        Ok(())
     }
 }
 
@@ -216,27 +228,25 @@ impl<'a> Tokens<'a> {
         self.locations.push(location);
     }
     fn lex_error(&self, message: String) -> LexError {
-        let line_number = self.locations.get(self.locations.len() - 1).map_or(0, |loc| loc.0);
-        let line = self.source[line_number].to_string();
+        let location = self.locations.last().unwrap_or(&(0, 0));
+        let line = self.source[location.0].to_string();
         LexError {
             message,
             line,
-            line_number: line_number + 1,
+            prev_line: None,
+            line_number: location.0 + 1,
+            column: location.1 + 1,
         }
-    }
-    fn lex_throw(&self, message: String) -> LexResult<()> {
-        Err(self.lex_error(message))
     }
 }
 
 // Public Parsing/Token iteration functions
 impl Tokens<'_> {
-    pub fn current_line(&self) -> &str {
-        let line_number = self.locations[self.current_token].0;
-        &self.source[line_number]
-    }
     pub fn peek(&self) -> Token {
         self.tokens[self.current_token]
+    }
+    pub fn rewind(&mut self) {
+        self.current_token -= 1;
     }
     pub fn consume(&mut self) -> Token {
         let result = self.tokens[self.current_token];
@@ -252,9 +262,9 @@ impl Tokens<'_> {
     pub fn expect(&mut self, token: Token) -> ParseResult<()> {
         let next_token = self.tokens[self.current_token];
         let result = self.try_consume(token);
-        self.parse_assert(
+        self.assert(
             result,
-            format!("Syntax Error: Expected `{:?}`, found `{:?}`", token, next_token),
+            format!("Syntax Error: Expected `{:?}`, found `{:?}`", token, next_token).as_str(),
         )
     }
     pub fn is_empty(&self) -> bool {
@@ -267,25 +277,31 @@ impl Tokens<'_> {
         self.current_token += position;
         &tokens[..position]
     }
-    pub fn parse_error(&self, message: String) -> ParseError {
-        let line_number = self.locations[self.current_token].0 + 1;
+    pub fn parse_error(&self, message: &str) -> ParseError {
+        let location = self.locations[max(self.current_token, 1) - 1];
+        let line = self.source[location.0];
+        let prev_line = self.source[max(location.0, 1) - 1];
         ParseError {
-            message,
-            line: self.current_line().to_string(),
-            line_number,
+            message: message.to_string(),
+            line: line.to_string(),
+            prev_line: Some(prev_line.to_string()),
+            line_number: location.0 + 1,
+            column: location.1 + 1,
         }
     }
-    pub fn parse_assert(&self, assertion: bool, message: String) -> ParseResult<()> {
+    pub fn assert(&self, assertion: bool, message: &str) -> ParseResult<()> {
         if assertion { Ok(()) } else { Err(self.parse_error(message)) }
-    }
-    pub fn parse_throw(&self, message: String) -> ParseResult<()> {
-        Err(self.parse_error(message))
     }
 }
 impl<'a> std::ops::Index<usize> for Tokens<'a> {
     type Output = Token<'a>;
     fn index(&self, index: usize) -> &Self::Output {
         &self.tokens[self.current_token + index]
+    }
+}
+impl std::fmt::Display for Tokens<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self.tokens)
     }
 }
 
@@ -300,6 +316,8 @@ pub fn parse(mut data: &str) -> LexResult<Tokens> {
             data = &data[1..];
             if first_char == '\n' {
                 source_location = (source_location.0 + 1, 0);
+            } else {
+                source_location = (source_location.0, source_location.1 + 1);
             }
         } else if let Some((captures, token)) = token_regexes
             .iter()
@@ -312,7 +330,7 @@ pub fn parse(mut data: &str) -> LexResult<Tokens> {
             data = &data[fullmatch.len()..];
             source_location = (source_location.0, source_location.1 + fullmatch.len());
         } else {
-            tokens.lex_throw(format!("Failed to match token '{}'", first_char))?;
+            return Err(tokens.lex_error(format!("Failed to match token '{}'", first_char)));
         }
     }
     Ok(tokens)

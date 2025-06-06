@@ -2,6 +2,7 @@ mod declarators;
 
 use std::{
     collections::HashMap,
+    error::Error,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -86,8 +87,9 @@ fn is_assignment_token(token: &Token) -> bool {
     )
 }
 
-fn parse_type(tokens: &[Token]) -> ParseResult<CType> {
+fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
     use Token::Specifier;
+    let assert = |cond, msg: &'static str| if cond { Ok(()) } else { Err(msg) };
     // Count specifier tokens
     let count_token = |token| tokens.iter().filter(|elem| **elem == token).count();
     let signed_count = count_token(Specifier("signed"));
@@ -99,26 +101,26 @@ fn parse_type(tokens: &[Token]) -> ParseResult<CType> {
     let is_signed = match (signed_count, unsigned_count) {
         (0, 0) | (1, 0) => true,
         (0, 1) => false,
-        _ => panic!("Cannot specify signed or unsigned more than once!"),
+        _ => return Err("Cannot specify signed or unsigned more than once!"),
     };
-    assert!(!tokens.is_empty(), "Must specify type!");
-    assert!(int_count <= 1, "Repeated int keyword!");
+    assert(!tokens.is_empty(), "Must specify type!")?;
+    assert(int_count <= 1, "Repeated int keyword!")?;
 
     // Doubles must be either double or long double
     if double_count == 1 && [0, 1].contains(&long_count) {
-        assert!(unsigned_count == 0, "Double cannot be unsigned!");
-        assert!(signed_count == 0, "Double cannot be signed!");
-        assert!(int_count == 0, "Mixed int/double declaration!");
+        assert(unsigned_count == 0, "Double cannot be unsigned!")?;
+        assert(signed_count == 0, "Double cannot be signed!")?;
+        assert(int_count == 0, "Mixed int/double declaration!")?;
         return Ok(CType::Double);
     }
-    assert!(double_count == 0, "Invalid double declaration");
+    assert(double_count == 0, "Invalid double declaration")?;
 
     match (long_count, is_signed) {
         (0, false) => Ok(CType::UnsignedInt),
         (0, true) => Ok(CType::Int),
         (1 | 2, false) => Ok(CType::UnsignedLong),
         (1 | 2, true) => Ok(CType::Long),
-        _ => panic!("Too many long specifiers"),
+        _ => Err("Too many long specifiers"),
     }
 }
 
@@ -133,8 +135,9 @@ fn parse_specifiers(tokens: &mut Tokens) -> ParseResult<(CType, Option<StorageCl
         }
         tokens.consume();
     }
-    assert!(storage_classes.len() <= 1, "Can only have one storage class!");
-    Ok((parse_type(&mut &types[..])?, storage_classes.pop()))
+    tokens.assert(storage_classes.len() <= 1, "Can only have one storage class!")?;
+    let ctype = parse_type(&types[..]).map_err(|err| tokens.parse_error(err))?;
+    Ok((ctype, storage_classes.pop()))
 }
 
 fn parse_identifier(tokens: &mut Tokens) -> ParseResult<String> {
@@ -142,7 +145,10 @@ fn parse_identifier(tokens: &mut Tokens) -> ParseResult<String> {
     let next_token = tokens.consume();
     match next_token {
         Token::Identifier(name) => Ok(name.to_string()),
-        _ => panic!("Expected identifier"),
+        _ => {
+            tokens.rewind();
+            Err(tokens.parse_error("Expected identifier"))
+        }
     }
 }
 fn parse_binop(tokens: &mut Tokens) -> ParseResult<BinaryOperator> {
@@ -170,9 +176,10 @@ fn parse_binop(tokens: &mut Tokens) -> ParseResult<BinaryOperator> {
         ExclamEqual => Ok(BinaryOperator::NotEqual),
         DoubleAmpersand => Ok(BinaryOperator::LogicalAnd),
         DoublePipe => Ok(BinaryOperator::LogicalOr),
-        _ => panic!("Expected binary operator"),
+        _ => Err(tokens.parse_error("Expected binary operator!")),
     }
 }
+
 fn parse_argument_list(tokens: &mut Tokens) -> ParseResult<Vec<TypedExpression>> {
     let mut args: Vec<TypedExpression> = Vec::new();
     let mut comma = false;
@@ -180,7 +187,7 @@ fn parse_argument_list(tokens: &mut Tokens) -> ParseResult<Vec<TypedExpression>>
         args.push(parse_expression(tokens, 0)?);
         comma = tokens.try_consume(Token::Comma);
     }
-    assert!(!comma, "Trailing comma not allowed in C arg list");
+    tokens.assert(!comma, "Trailing comma not allowed in C arg list")?;
     Ok(args)
 }
 fn parse_post_operator(
@@ -217,28 +224,27 @@ fn parse_post_operator(
     }
 }
 
-fn parse_constant(token: &Token) -> ParseResult<Constant> {
+fn parse_constant(tokens: &mut Tokens) -> ParseResult<Constant> {
+    let result = try_parse_constant(tokens.consume());
+    match result {
+        Ok(constant) => Ok(constant),
+        Err(_) => Err(tokens.parse_error("Failed to parse constant!")),
+    }
+}
+fn try_parse_constant(token: Token) -> Result<Constant, Box<dyn Error>> {
     match token {
         Token::Constant(val) => match val.parse::<i32>() {
             Ok(val) => Ok(Constant::Int(val.into())),
-            Err(_) => Ok(Constant::Long(val.parse().expect("Failed to convert constant to int"))),
+            Err(_) => Ok(Constant::Long(val.parse()?)),
         },
-        Token::ConstantLong(val) => {
-            Ok(Constant::Long(val.parse().expect("Failed to convert constant to long")))
-        }
+        Token::ConstantLong(val) => Ok(Constant::Long(val.parse()?)),
         Token::Unsigned(val) => match val.parse::<u32>() {
             Ok(val) => Ok(Constant::UnsignedInt(val.into())),
-            Err(_) => Ok(Constant::UnsignedLong(
-                val.parse().expect("Failed to convert unsigned constant to int"),
-            )),
+            Err(_) => Ok(Constant::UnsignedLong(val.parse()?)),
         },
-        Token::UnsignedLong(val) => Ok(Constant::UnsignedLong(
-            val.parse().expect("Failed to convert unsigned constant to long"),
-        )),
-        Token::Double(val) => {
-            Ok(Constant::Double(val.parse().expect("Failed to convert to double!")))
-        }
-        _ => panic!("Expected constant!"),
+        Token::UnsignedLong(val) => Ok(Constant::UnsignedLong(val.parse()?)),
+        Token::Double(val) => Ok(Constant::Double(val.parse()?)),
+        _ => Err("Unexpected token!".into()),
     }
 }
 
@@ -250,7 +256,10 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
         | Token::ConstantLong(_)
         | Token::Unsigned(_)
         | Token::UnsignedLong(_)
-        | Token::Double(_) => Expression::Constant(parse_constant(&token)?),
+        | Token::Double(_) => {
+            tokens.rewind();
+            Expression::Constant(parse_constant(tokens)?)
+        }
         Token::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens)?.into()),
         Token::Tilde => Expression::Unary(UnaryOperator::Complement, parse_factor(tokens)?.into()),
         Token::Exclam => Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens)?.into()),
@@ -267,7 +276,7 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
         Token::OpenParen => {
             if tokens.peek().is_type_specifier() {
                 let type_tokens = tokens.consume_type_specifiers();
-                let base_type = parse_type(type_tokens)?;
+                let base_type = parse_type(type_tokens).map_err(|err| tokens.parse_error(err))?;
                 let abstract_decl = parse_abstract_declarator(tokens)?;
                 let ctype = process_abstract_declarator(abstract_decl, base_type)?;
                 tokens.expect(Token::CloseParen)?;
@@ -288,9 +297,11 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
                 Expression::Variable(name)
             }
         }
-        _ => panic!("Expected factor, found {:?}", token),
+        _ => {
+            return Err(tokens.parse_error("Expected factor!"));
+        }
     };
-    Ok(parse_post_operator(tokens, expr.into())?)
+    parse_post_operator(tokens, expr.into())
 }
 fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> ParseResult<TypedExpression> {
     // Parses an expression using precedence climbing
@@ -447,7 +458,7 @@ fn parse_variable_declaration(tokens: &mut Tokens) -> ParseResult<VariableDeclar
     let decl = parse_declaration(tokens)?;
     match decl {
         Declaration::Variable(var_decl) => Ok(var_decl),
-        _ => Err(tokens.parse_error("Expected variable declaration".to_string())),
+        _ => Err(tokens.parse_error("Expected variable declaration")),
     }
 }
 
@@ -484,7 +495,7 @@ fn parse_declaration(tokens: &mut Tokens) -> ParseResult<Declaration> {
 
 fn parse_initializer(tokens: &mut Tokens) -> ParseResult<VariableInitializer> {
     if tokens.try_consume(Token::OpenBrace) {
-        assert!(tokens.peek() != Token::CloseBrace, "Empty initializer invalid pre C23");
+        tokens.assert(tokens.peek() != Token::CloseBrace, "Empty initializer!")?;
         let mut initializers = Vec::new();
         while !tokens.try_consume(Token::CloseBrace) {
             initializers.push(parse_initializer(tokens)?);

@@ -49,7 +49,7 @@ fn parse_array_declarator(
     mut declarator: Declarator,
 ) -> ParseResult<Declarator> {
     while tokens.try_consume(Token::OpenBracket) {
-        let subscript = parse_constant(&tokens.consume())?;
+        let subscript = parse_constant(tokens)?;
         assert!(subscript.is_integer(), "Array indices must be integers");
         let subscript = subscript.int_value() as u64;
         assert!(subscript > 0, "Array must have size > 0");
@@ -74,7 +74,8 @@ fn parse_param_list(tokens: &mut Tokens) -> ParseResult<Vec<(CType, Declarator)>
 }
 fn parse_param(tokens: &mut Tokens) -> ParseResult<(CType, Declarator)> {
     let type_tokens = tokens.consume_type_specifiers();
-    Ok((parse_type(type_tokens)?, parse_declarator(tokens)?))
+    let ctype = parse_type(type_tokens).map_err(|err| tokens.parse_error(err))?;
+    Ok((ctype, parse_declarator(tokens)?))
 }
 
 pub fn parse_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
@@ -166,7 +167,7 @@ fn parse_abstract_array_declarator(
     mut decl: AbstractDeclarator,
 ) -> ParseResult<AbstractDeclarator> {
     while tokens.try_consume(Token::OpenBracket) {
-        let subscript = parse_constant(&tokens.consume())?;
+        let subscript = parse_constant(tokens)?;
         assert!(subscript.is_integer(), "Array indices must be integers");
         let subscript = subscript.int_value() as u64;
         assert!(subscript > 0, "Array must have size > 0");

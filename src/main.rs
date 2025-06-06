@@ -101,7 +101,7 @@ fn main() {
         }
     };
     if args.lex {
-        println!("Tokens:\n\n {:#?}", tokens);
+        println!("Tokens:\n\n {}", tokens);
         return;
     }
     // Run Parser
