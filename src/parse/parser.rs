@@ -12,7 +12,10 @@ use lazy_static::lazy_static;
 
 use crate::parse::lexer::Tokens;
 
-use super::{lexer, parse_tree::VariableInitializer};
+use super::{
+    lexer::{self, ParseResult},
+    parse_tree::VariableInitializer,
+};
 use lexer::Token;
 
 use super::parse_tree::{
@@ -83,7 +86,7 @@ fn is_assignment_token(token: &Token) -> bool {
     )
 }
 
-fn parse_type(tokens: &[Token]) -> CType {
+fn parse_type(tokens: &[Token]) -> ParseResult<CType> {
     use Token::Specifier;
     // Count specifier tokens
     let count_token = |token| tokens.iter().filter(|elem| **elem == token).count();
@@ -106,20 +109,20 @@ fn parse_type(tokens: &[Token]) -> CType {
         assert!(unsigned_count == 0, "Double cannot be unsigned!");
         assert!(signed_count == 0, "Double cannot be signed!");
         assert!(int_count == 0, "Mixed int/double declaration!");
-        return CType::Double;
+        return Ok(CType::Double);
     }
     assert!(double_count == 0, "Invalid double declaration");
 
     match (long_count, is_signed) {
-        (0, false) => CType::UnsignedInt,
-        (0, true) => CType::Int,
-        (1 | 2, false) => CType::UnsignedLong,
-        (1 | 2, true) => CType::Long,
+        (0, false) => Ok(CType::UnsignedInt),
+        (0, true) => Ok(CType::Int),
+        (1 | 2, false) => Ok(CType::UnsignedLong),
+        (1 | 2, true) => Ok(CType::Long),
         _ => panic!("Too many long specifiers"),
     }
 }
 
-fn parse_specifiers(tokens: &mut Tokens) -> (CType, Option<StorageClass>) {
+fn parse_specifiers(tokens: &mut Tokens) -> ParseResult<(CType, Option<StorageClass>)> {
     let mut types = Vec::new();
     let mut storage_classes = Vec::new();
     while matches!(tokens.peek(), Token::Specifier(_)) {
@@ -131,56 +134,59 @@ fn parse_specifiers(tokens: &mut Tokens) -> (CType, Option<StorageClass>) {
         tokens.consume();
     }
     assert!(storage_classes.len() <= 1, "Can only have one storage class!");
-    (parse_type(&mut &types[..]), storage_classes.pop())
+    Ok((parse_type(&mut &types[..])?, storage_classes.pop()))
 }
 
-fn parse_identifier(tokens: &mut Tokens) -> String {
+fn parse_identifier(tokens: &mut Tokens) -> ParseResult<String> {
     // Parses an identifier and advances the cursor
     let next_token = tokens.consume();
     match next_token {
-        Token::Identifier(name) => name.to_string(),
+        Token::Identifier(name) => Ok(name.to_string()),
         _ => panic!("Expected identifier"),
     }
 }
-fn parse_binop(tokens: &mut Tokens) -> BinaryOperator {
+fn parse_binop(tokens: &mut Tokens) -> ParseResult<BinaryOperator> {
     // Advance cursor, and map tokens representing binary operations to binary op type
     use Token::*;
     let next_token = tokens.consume();
     match next_token {
         // Math or Assignment
-        Plus | PlusEqual => BinaryOperator::Add,
-        Hyphen | HyphenEqual => BinaryOperator::Subtract,
-        Star | StarEqual => BinaryOperator::Multiply,
-        ForwardSlash | ForwardSlashEqual => BinaryOperator::Divide,
-        Percent | PercentEqual => BinaryOperator::Remainder,
-        LeftShift | LeftShiftEqual => BinaryOperator::LeftShift,
-        RightShift | RightShiftEqual => BinaryOperator::RightShift,
-        Pipe | PipeEqual => BinaryOperator::BitOr,
-        Caret | CaretEqual => BinaryOperator::BitXor,
-        Ampersand | AmpersandEqual => BinaryOperator::BitAnd,
+        Plus | PlusEqual => Ok(BinaryOperator::Add),
+        Hyphen | HyphenEqual => Ok(BinaryOperator::Subtract),
+        Star | StarEqual => Ok(BinaryOperator::Multiply),
+        ForwardSlash | ForwardSlashEqual => Ok(BinaryOperator::Divide),
+        Percent | PercentEqual => Ok(BinaryOperator::Remainder),
+        LeftShift | LeftShiftEqual => Ok(BinaryOperator::LeftShift),
+        RightShift | RightShiftEqual => Ok(BinaryOperator::RightShift),
+        Pipe | PipeEqual => Ok(BinaryOperator::BitOr),
+        Caret | CaretEqual => Ok(BinaryOperator::BitXor),
+        Ampersand | AmpersandEqual => Ok(BinaryOperator::BitAnd),
         // Relational
-        LessThan => BinaryOperator::LessThan,
-        LessThanEqual => BinaryOperator::LessThanEqual,
-        GreaterThan => BinaryOperator::GreaterThan,
-        GreaterThanEqual => BinaryOperator::GreaterThanEqual,
-        DoubleEqual => BinaryOperator::IsEqual,
-        ExclamEqual => BinaryOperator::NotEqual,
-        DoubleAmpersand => BinaryOperator::LogicalAnd,
-        DoublePipe => BinaryOperator::LogicalOr,
+        LessThan => Ok(BinaryOperator::LessThan),
+        LessThanEqual => Ok(BinaryOperator::LessThanEqual),
+        GreaterThan => Ok(BinaryOperator::GreaterThan),
+        GreaterThanEqual => Ok(BinaryOperator::GreaterThanEqual),
+        DoubleEqual => Ok(BinaryOperator::IsEqual),
+        ExclamEqual => Ok(BinaryOperator::NotEqual),
+        DoubleAmpersand => Ok(BinaryOperator::LogicalAnd),
+        DoublePipe => Ok(BinaryOperator::LogicalOr),
         _ => panic!("Expected binary operator"),
     }
 }
-fn parse_argument_list(tokens: &mut Tokens) -> Vec<TypedExpression> {
+fn parse_argument_list(tokens: &mut Tokens) -> ParseResult<Vec<TypedExpression>> {
     let mut args: Vec<TypedExpression> = Vec::new();
     let mut comma = false;
     while tokens[0] != Token::CloseParen {
-        args.push(parse_expression(tokens, 0));
+        args.push(parse_expression(tokens, 0)?);
         comma = tokens.try_consume(Token::Comma);
     }
     assert!(!comma, "Trailing comma not allowed in C arg list");
-    args
+    Ok(args)
 }
-fn parse_post_operator(tokens: &mut Tokens, expression: TypedExpression) -> TypedExpression {
+fn parse_post_operator(
+    tokens: &mut Tokens,
+    expression: TypedExpression,
+) -> ParseResult<TypedExpression> {
     if tokens.try_consume(Token::Increment) {
         parse_post_operator(
             tokens,
@@ -200,41 +206,43 @@ fn parse_post_operator(tokens: &mut Tokens, expression: TypedExpression) -> Type
             .into(),
         )
     } else if tokens.try_consume(Token::OpenBracket) {
-        let sub_expr = parse_expression(tokens, 0);
-        tokens.expect(Token::CloseBracket);
+        let sub_expr = parse_expression(tokens, 0)?;
+        tokens.expect(Token::CloseBracket)?;
         parse_post_operator(
             tokens,
             Expression::Subscript(expression.into(), sub_expr.into()).into(),
         )
     } else {
-        expression
+        Ok(expression)
     }
 }
 
-fn parse_constant(token: &Token) -> Constant {
+fn parse_constant(token: &Token) -> ParseResult<Constant> {
     match token {
         Token::Constant(val) => match val.parse::<i32>() {
-            Ok(val) => Constant::Int(val.into()),
-            Err(_) => Constant::Long(val.parse().expect("Failed to convert constant to int")),
+            Ok(val) => Ok(Constant::Int(val.into())),
+            Err(_) => Ok(Constant::Long(val.parse().expect("Failed to convert constant to int"))),
         },
         Token::ConstantLong(val) => {
-            Constant::Long(val.parse().expect("Failed to convert constant to long"))
+            Ok(Constant::Long(val.parse().expect("Failed to convert constant to long")))
         }
         Token::Unsigned(val) => match val.parse::<u32>() {
-            Ok(val) => Constant::UnsignedInt(val.into()),
-            Err(_) => Constant::UnsignedLong(
+            Ok(val) => Ok(Constant::UnsignedInt(val.into())),
+            Err(_) => Ok(Constant::UnsignedLong(
                 val.parse().expect("Failed to convert unsigned constant to int"),
-            ),
+            )),
         },
-        Token::UnsignedLong(val) => Constant::UnsignedLong(
+        Token::UnsignedLong(val) => Ok(Constant::UnsignedLong(
             val.parse().expect("Failed to convert unsigned constant to long"),
-        ),
-        Token::Double(val) => Constant::Double(val.parse().expect("Failed to convert to double!")),
+        )),
+        Token::Double(val) => {
+            Ok(Constant::Double(val.parse().expect("Failed to convert to double!")))
+        }
         _ => panic!("Expected constant!"),
     }
 }
 
-fn parse_factor(tokens: &mut Tokens) -> TypedExpression {
+fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
     // Parses a factor (unary value/operator) of a larger expression
     let token = tokens.consume();
     let expr = match token {
@@ -242,39 +250,39 @@ fn parse_factor(tokens: &mut Tokens) -> TypedExpression {
         | Token::ConstantLong(_)
         | Token::Unsigned(_)
         | Token::UnsignedLong(_)
-        | Token::Double(_) => Expression::Constant(parse_constant(&token)),
-        Token::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens).into()),
-        Token::Tilde => Expression::Unary(UnaryOperator::Complement, parse_factor(tokens).into()),
-        Token::Exclam => Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens).into()),
-        Token::Ampersand => Expression::AddrOf(parse_factor(tokens).into()),
-        Token::Star => Expression::Dereference(parse_factor(tokens).into()),
+        | Token::Double(_) => Expression::Constant(parse_constant(&token)?),
+        Token::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens)?.into()),
+        Token::Tilde => Expression::Unary(UnaryOperator::Complement, parse_factor(tokens)?.into()),
+        Token::Exclam => Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens)?.into()),
+        Token::Ampersand => Expression::AddrOf(parse_factor(tokens)?.into()),
+        Token::Star => Expression::Dereference(parse_factor(tokens)?.into()),
         Token::Increment => Expression::Unary(
             UnaryOperator::Increment(IncrementType::PreIncrement),
-            parse_factor(tokens).into(),
+            parse_factor(tokens)?.into(),
         ),
         Token::Decrement => Expression::Unary(
             UnaryOperator::Increment(IncrementType::PreDecrement),
-            parse_factor(tokens).into(),
+            parse_factor(tokens)?.into(),
         ),
         Token::OpenParen => {
             if tokens.peek().is_type_specifier() {
                 let type_tokens = tokens.consume_type_specifiers();
-                let base_type = parse_type(type_tokens);
-                let abstract_decl = parse_abstract_declarator(tokens);
-                let ctype = process_abstract_declarator(abstract_decl, base_type);
-                tokens.expect(Token::CloseParen);
-                Expression::Cast(ctype, parse_factor(tokens).into())
+                let base_type = parse_type(type_tokens)?;
+                let abstract_decl = parse_abstract_declarator(tokens)?;
+                let ctype = process_abstract_declarator(abstract_decl, base_type)?;
+                tokens.expect(Token::CloseParen)?;
+                Expression::Cast(ctype, parse_factor(tokens)?.into())
             } else {
-                let expr = parse_expression(tokens, 0);
-                tokens.expect(Token::CloseParen);
+                let expr = parse_expression(tokens, 0)?;
+                tokens.expect(Token::CloseParen)?;
                 expr.expr
             }
         }
         Token::Identifier(name) => {
             let name = name.to_string();
             if tokens.try_consume(Token::OpenParen) {
-                let args = parse_argument_list(tokens);
-                tokens.expect(Token::CloseParen);
+                let args = parse_argument_list(tokens)?;
+                tokens.expect(Token::CloseParen)?;
                 Expression::FunctionCall(name, args)
             } else {
                 Expression::Variable(name)
@@ -282,31 +290,31 @@ fn parse_factor(tokens: &mut Tokens) -> TypedExpression {
         }
         _ => panic!("Expected factor, found {:?}", token),
     };
-    parse_post_operator(tokens, expr.into())
+    Ok(parse_post_operator(tokens, expr.into())?)
 }
-fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> TypedExpression {
+fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> ParseResult<TypedExpression> {
     // Parses an expression using precedence climbing
-    let mut left = parse_factor(tokens);
+    let mut left = parse_factor(tokens)?;
     while precedence_table.contains_key(&tokens[0]) && precedence_table[&tokens[0]] >= min_prec {
         let token_prec = precedence_table[&tokens[0]];
         if tokens.try_consume(Token::Equal) {
-            let right = parse_expression(tokens, token_prec);
+            let right = parse_expression(tokens, token_prec)?;
             left = Expression::Assignment(AssignmentExpression { left, right }.into()).into();
         } else if tokens.try_consume(Token::QuestionMark) {
-            let if_true = parse_expression(tokens, 0);
-            tokens.expect(Token::Colon);
-            let if_false = parse_expression(tokens, token_prec);
+            let if_true = parse_expression(tokens, 0)?;
+            tokens.expect(Token::Colon)?;
+            let if_false = parse_expression(tokens, token_prec)?;
             left = Expression::Condition(
                 ConditionExpression { condition: left, if_true, if_false }.into(),
             )
             .into();
         } else {
             let is_assignment = is_assignment_token(&tokens[0]);
-            let operator = parse_binop(tokens);
+            let operator = parse_binop(tokens)?;
             let right = if is_assignment {
-                parse_expression(tokens, token_prec)
+                parse_expression(tokens, token_prec)?
             } else {
-                parse_expression(tokens, token_prec + 1)
+                parse_expression(tokens, token_prec + 1)?
             };
             left = Expression::Binary(
                 BinaryExpression { operator, left, right, is_assignment }.into(),
@@ -314,203 +322,203 @@ fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> TypedExpression {
             .into();
         }
     }
-    left
+    Ok(left)
 }
-fn parse_optional_expression(tokens: &mut Tokens) -> Option<TypedExpression> {
+fn parse_optional_expression(tokens: &mut Tokens) -> ParseResult<Option<TypedExpression>> {
     use Token::*;
     match tokens[0] {
         Constant(_) | Hyphen | Tilde | Exclam | OpenParen | Identifier(_) => {
-            Some(parse_expression(tokens, 0))
+            Ok(Some(parse_expression(tokens, 0)?))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
-fn parse_statement(tokens: &mut Tokens) -> Statement {
+fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
     // Parses a statement
     if tokens.try_consume(Token::Keyword("return")) {
-        let return_value = parse_expression(tokens, 0);
-        tokens.expect(Token::SemiColon);
-        Statement::Return(return_value)
+        let return_value = parse_expression(tokens, 0)?;
+        tokens.expect(Token::SemiColon)?;
+        Ok(Statement::Return(return_value))
     } else if tokens.try_consume(Token::SemiColon) {
-        Statement::Null
+        Ok(Statement::Null)
     } else if tokens.try_consume(Token::Keyword("if")) {
-        tokens.expect(Token::OpenParen);
-        let cond = parse_expression(tokens, 0);
-        tokens.expect(Token::CloseParen);
-        let then = parse_statement(tokens);
+        tokens.expect(Token::OpenParen)?;
+        let cond = parse_expression(tokens, 0)?;
+        tokens.expect(Token::CloseParen)?;
+        let then = parse_statement(tokens)?;
         let otherwise = if tokens.try_consume(Token::Keyword("else")) {
-            Some(parse_statement(tokens))
+            Some(parse_statement(tokens)?)
         } else {
             None
         };
-        Statement::If(cond, then.into(), otherwise.into())
+        Ok(Statement::If(cond, then.into(), otherwise.into()))
     } else if tokens.try_consume(Token::Keyword("goto")) {
-        let target = parse_identifier(tokens).to_string();
-        tokens.expect(Token::SemiColon);
-        Statement::Goto(target)
+        let target = parse_identifier(tokens)?.to_string();
+        tokens.expect(Token::SemiColon)?;
+        Ok(Statement::Goto(target))
     } else if tokens.try_consume(Token::OpenBrace) {
-        Statement::Compound(parse_block(tokens))
+        Ok(Statement::Compound(parse_block(tokens)?))
     } else if tokens.try_consume(Token::Keyword("break")) {
-        tokens.expect(Token::SemiColon);
-        Statement::Break(String::new())
+        tokens.expect(Token::SemiColon)?;
+        Ok(Statement::Break(String::new()))
     } else if tokens.try_consume(Token::Keyword("continue")) {
-        tokens.expect(Token::SemiColon);
-        Statement::Continue(String::new())
+        tokens.expect(Token::SemiColon)?;
+        Ok(Statement::Continue(String::new()))
     } else if tokens.try_consume(Token::Keyword("while")) {
-        tokens.expect(Token::OpenParen);
-        let condition = parse_expression(tokens, 0);
-        tokens.expect(Token::CloseParen);
-        Statement::While(Loop {
+        tokens.expect(Token::OpenParen)?;
+        let condition = parse_expression(tokens, 0)?;
+        tokens.expect(Token::CloseParen)?;
+        Ok(Statement::While(Loop {
             label: loop_name(),
             condition,
-            body: parse_statement(tokens).into(),
-        })
+            body: parse_statement(tokens)?.into(),
+        }))
     } else if tokens.try_consume(Token::Keyword("do")) {
-        let body = parse_statement(tokens);
-        tokens.expect(Token::Keyword("while"));
-        tokens.expect(Token::OpenParen);
-        let condition = parse_expression(tokens, 0);
-        tokens.expect(Token::CloseParen);
-        tokens.expect(Token::SemiColon);
-        Statement::DoWhile(Loop {
+        let body = parse_statement(tokens)?;
+        tokens.expect(Token::Keyword("while"))?;
+        tokens.expect(Token::OpenParen)?;
+        let condition = parse_expression(tokens, 0)?;
+        tokens.expect(Token::CloseParen)?;
+        tokens.expect(Token::SemiColon)?;
+        Ok(Statement::DoWhile(Loop {
             label: loop_name(),
             condition,
             body: body.into(),
-        })
+        }))
     } else if tokens.try_consume(Token::Keyword("for")) {
-        tokens.expect(Token::OpenParen);
+        tokens.expect(Token::OpenParen)?;
         let init = if matches!(tokens[0], Token::Specifier(_)) {
-            ForInit::Decl(parse_variable_declaration(tokens))
+            ForInit::Decl(parse_variable_declaration(tokens)?)
         } else {
-            let init = ForInit::Expr(parse_optional_expression(tokens));
-            tokens.expect(Token::SemiColon);
+            let init = ForInit::Expr(parse_optional_expression(tokens)?);
+            tokens.expect(Token::SemiColon)?;
             init
         };
-        let condition = match parse_optional_expression(tokens) {
+        let condition = match parse_optional_expression(tokens)? {
             Some(expr) => expr,
             None => Expression::Constant(Constant::Int(1)).into(),
         };
-        tokens.expect(Token::SemiColon);
-        let post_loop = parse_optional_expression(tokens);
-        tokens.expect(Token::CloseParen);
-        Statement::For(
+        tokens.expect(Token::SemiColon)?;
+        let post_loop = parse_optional_expression(tokens)?;
+        tokens.expect(Token::CloseParen)?;
+        Ok(Statement::For(
             init,
             Loop {
                 label: loop_name(),
                 condition,
-                body: parse_statement(tokens).into(),
+                body: parse_statement(tokens)?.into(),
             },
             post_loop,
-        )
+        ))
     } else if tokens.try_consume(Token::Keyword("switch")) {
         let label = switch_name();
-        tokens.expect(Token::OpenParen);
-        let condition = parse_expression(tokens, 0);
-        tokens.expect(Token::CloseParen);
+        tokens.expect(Token::OpenParen)?;
+        let condition = parse_expression(tokens, 0)?;
+        tokens.expect(Token::CloseParen)?;
         let cases = Vec::new();
-        let statement = parse_statement(tokens).into();
-        Statement::Switch(SwitchStatement {
+        let statement = parse_statement(tokens)?.into();
+        Ok(Statement::Switch(SwitchStatement {
             label,
             condition,
             cases,
             statement,
             default: None,
-        })
+        }))
     } else if tokens.try_consume(Token::Keyword("default")) {
-        tokens.expect(Token::Colon);
-        Statement::Default(parse_statement(tokens).into())
+        tokens.expect(Token::Colon)?;
+        Ok(Statement::Default(parse_statement(tokens)?.into()))
     } else if tokens.try_consume(Token::Keyword("case")) {
-        let matcher = parse_expression(tokens, 0);
-        tokens.expect(Token::Colon);
-        let statement = parse_statement(tokens).into();
-        Statement::Case(matcher, statement)
+        let matcher = parse_expression(tokens, 0)?;
+        tokens.expect(Token::Colon)?;
+        let statement = parse_statement(tokens)?.into();
+        Ok(Statement::Case(matcher, statement))
     } else if matches!(tokens[0], Token::Identifier(_)) && tokens[1] == Token::Colon {
         let Token::Identifier(name) = tokens.consume() else { panic!("Unreachable!") };
         let label_name = name.to_string();
-        tokens.expect(Token::Colon);
-        Statement::Label(label_name, parse_statement(tokens).into())
+        tokens.expect(Token::Colon)?;
+        Ok(Statement::Label(label_name, parse_statement(tokens)?.into()))
     } else {
-        let expr = parse_expression(tokens, 0);
-        tokens.expect(Token::SemiColon);
-        Statement::ExprStmt(expr)
+        let expr = parse_expression(tokens, 0)?;
+        tokens.expect(Token::SemiColon)?;
+        Ok(Statement::ExprStmt(expr))
     }
 }
-fn parse_variable_declaration(tokens: &mut Tokens) -> VariableDeclaration {
-    let decl = parse_declaration(tokens);
+fn parse_variable_declaration(tokens: &mut Tokens) -> ParseResult<VariableDeclaration> {
+    let decl = parse_declaration(tokens)?;
     match decl {
-        Declaration::Variable(var_decl) => var_decl,
-        _ => panic!("Expected variable declaration"),
+        Declaration::Variable(var_decl) => Ok(var_decl),
+        _ => Err(tokens.parse_error("Expected variable declaration".to_string())),
     }
 }
 
-fn parse_declaration(tokens: &mut Tokens) -> Declaration {
-    let (ctype, storage) = parse_specifiers(tokens);
-    let declarator = parse_declarator(tokens);
-    let decl_result = process_declarator(declarator, ctype);
+fn parse_declaration(tokens: &mut Tokens) -> ParseResult<Declaration> {
+    let (ctype, storage) = parse_specifiers(tokens)?;
+    let declarator = parse_declarator(tokens)?;
+    let decl_result = process_declarator(declarator, ctype)?;
     if matches!(decl_result.ctype, CType::Function(_, _)) {
         let body = if tokens.try_consume(Token::OpenBrace) {
-            Some(parse_block(tokens))
+            Some(parse_block(tokens)?)
         } else {
-            tokens.expect(Token::SemiColon);
+            tokens.expect(Token::SemiColon)?;
             None
         };
-        Declaration::Function(FunctionDeclaration {
+        Ok(Declaration::Function(FunctionDeclaration {
             name: decl_result.name,
             ctype: decl_result.ctype,
             params: decl_result.params,
             storage,
             body,
-        })
+        }))
     } else {
         let init =
-            if tokens.try_consume(Token::Equal) { Some(parse_initializer(tokens)) } else { None };
-        tokens.expect(Token::SemiColon);
-        Declaration::Variable(VariableDeclaration {
+            if tokens.try_consume(Token::Equal) { Some(parse_initializer(tokens)?) } else { None };
+        tokens.expect(Token::SemiColon)?;
+        Ok(Declaration::Variable(VariableDeclaration {
             name: decl_result.name,
             ctype: decl_result.ctype,
             init,
             storage,
-        })
+        }))
     }
 }
 
-fn parse_initializer(tokens: &mut Tokens) -> VariableInitializer {
+fn parse_initializer(tokens: &mut Tokens) -> ParseResult<VariableInitializer> {
     if tokens.try_consume(Token::OpenBrace) {
         assert!(tokens.peek() != Token::CloseBrace, "Empty initializer invalid pre C23");
         let mut initializers = Vec::new();
         while !tokens.try_consume(Token::CloseBrace) {
-            initializers.push(parse_initializer(tokens));
+            initializers.push(parse_initializer(tokens)?);
             if !tokens.try_consume(Token::Comma) {
-                tokens.expect(Token::CloseBrace);
+                tokens.expect(Token::CloseBrace)?;
                 break;
             }
         }
-        VariableInitializer::CompoundInit(initializers)
+        Ok(VariableInitializer::CompoundInit(initializers))
     } else {
-        VariableInitializer::SingleElem(parse_expression(tokens, 0))
+        Ok(VariableInitializer::SingleElem(parse_expression(tokens, 0)?))
     }
 }
 
-fn parse_block_item(tokens: &mut Tokens) -> BlockItem {
+fn parse_block_item(tokens: &mut Tokens) -> ParseResult<BlockItem> {
     if matches!(tokens.peek(), Token::Specifier(_)) {
-        BlockItem::DeclareItem(parse_declaration(tokens))
+        Ok(BlockItem::DeclareItem(parse_declaration(tokens)?))
     } else {
-        BlockItem::StatementItem(parse_statement(tokens))
+        Ok(BlockItem::StatementItem(parse_statement(tokens)?))
     }
 }
-fn parse_block(tokens: &mut Tokens) -> Block {
+fn parse_block(tokens: &mut Tokens) -> ParseResult<Block> {
     let mut body: Block = Vec::new();
     while tokens.peek() != Token::CloseBrace {
-        body.push(parse_block_item(tokens));
+        body.push(parse_block_item(tokens)?);
     }
-    tokens.expect(Token::CloseBrace);
-    body
+    tokens.expect(Token::CloseBrace)?;
+    Ok(body)
 }
-pub fn parse(tokens: &mut Tokens) -> Program {
+pub fn parse(tokens: &mut Tokens) -> ParseResult<Program> {
     // Parses entire program
     let mut program: Program = Vec::new();
     while !tokens.is_empty() {
-        program.push(parse_declaration(tokens));
+        program.push(parse_declaration(tokens)?);
     }
-    program
+    Ok(program)
 }

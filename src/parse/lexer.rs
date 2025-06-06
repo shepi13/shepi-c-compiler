@@ -181,7 +181,16 @@ pub struct LexError {
     pub line: String,
     pub line_number: usize,
 }
-pub type LexResult<'a> = Result<Tokens<'a>, LexError>;
+pub type LexResult<T> = Result<T, LexError>;
+pub type ParseError = LexError;
+pub type ParseResult<T> = LexResult<T>;
+impl std::fmt::Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error {}", self.message)?;
+        writeln!(f, "At line {}:", self.line_number)?;
+        writeln!(f, "\t{}", self.line.trim())
+    }
+}
 
 #[derive(Debug)]
 pub struct Tokens<'a> {
@@ -206,14 +215,17 @@ impl<'a> Tokens<'a> {
         self.tokens.push(token);
         self.locations.push(location);
     }
-    fn lex_error(&self, message: String) -> LexResult {
+    fn lex_error(&self, message: String) -> LexError {
         let line_number = self.locations.get(self.locations.len() - 1).map_or(0, |loc| loc.0);
         let line = self.source[line_number].to_string();
-        Err(LexError {
+        LexError {
             message,
             line,
             line_number: line_number + 1,
-        })
+        }
+    }
+    fn lex_throw(&self, message: String) -> LexResult<()> {
+        Err(self.lex_error(message))
     }
 }
 
@@ -237,9 +249,13 @@ impl Tokens<'_> {
             true
         }
     }
-    pub fn expect(&mut self, token: Token) {
-        let success = self.try_consume(token);
-        assert!(success, "Syntax Error: Expected `{:?}`, found `{:?}`", token, self.peek())
+    pub fn expect(&mut self, token: Token) -> ParseResult<()> {
+        let next_token = self.tokens[self.current_token];
+        let result = self.try_consume(token);
+        self.parse_assert(
+            result,
+            format!("Syntax Error: Expected `{:?}`, found `{:?}`", token, next_token),
+        )
     }
     pub fn is_empty(&self) -> bool {
         self.current_token >= self.tokens.len()
@@ -251,6 +267,20 @@ impl Tokens<'_> {
         self.current_token += position;
         &tokens[..position]
     }
+    pub fn parse_error(&self, message: String) -> ParseError {
+        let line_number = self.locations[self.current_token].0 + 1;
+        ParseError {
+            message,
+            line: self.current_line().to_string(),
+            line_number,
+        }
+    }
+    pub fn parse_assert(&self, assertion: bool, message: String) -> ParseResult<()> {
+        if assertion { Ok(()) } else { Err(self.parse_error(message)) }
+    }
+    pub fn parse_throw(&self, message: String) -> ParseResult<()> {
+        Err(self.parse_error(message))
+    }
 }
 impl<'a> std::ops::Index<usize> for Tokens<'a> {
     type Output = Token<'a>;
@@ -259,7 +289,7 @@ impl<'a> std::ops::Index<usize> for Tokens<'a> {
     }
 }
 
-pub fn parse(mut data: &str) -> LexResult {
+pub fn parse(mut data: &str) -> LexResult<Tokens> {
     let mut tokens = Tokens::from(data);
     let mut source_location = (0, 0); // (line_number, col)
     while let Some(first_char) = data.chars().next() {
@@ -282,7 +312,7 @@ pub fn parse(mut data: &str) -> LexResult {
             data = &data[fullmatch.len()..];
             source_location = (source_location.0, source_location.1 + fullmatch.len());
         } else {
-            tokens.lex_error(format!("Failed to match token '{}'", first_char))?;
+            tokens.lex_throw(format!("Failed to match token '{}'", first_char))?;
         }
     }
     Ok(tokens)
