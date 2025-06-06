@@ -3,7 +3,7 @@ use crate::parse::{
     parse_tree::CType,
 };
 
-use super::{parse_constant, parse_identifier, parse_type};
+use super::parser::{parse_constant, parse_identifier, parse_type};
 
 #[derive(Debug)]
 pub enum Declarator {
