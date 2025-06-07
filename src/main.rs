@@ -92,8 +92,9 @@ fn main() {
         panic!("Preprocessor exited with failure");
     }
     // Run Lexer
-    let program = fs::read_to_string(&preprocess_file).expect("Failed to read preprocessed code!");
-    let mut tokens = match parse::lexer::parse(&program) {
+    let program_source =
+        fs::read_to_string(&preprocess_file).expect("Failed to read preprocessed code!");
+    let mut tokens = match parse::lexer::parse(&program_source) {
         Ok(tokens) => tokens,
         Err(lex_error) => {
             println!("Lexing failed:\n{}", lex_error);
@@ -117,7 +118,13 @@ fn main() {
         return;
     }
     // Run Semantics Analysis Pass
-    let resolved_ast = validate::semantics::resolve_program(parser_ast);
+    let resolved_ast = match validate::semantics::resolve_program(parser_ast) {
+        Ok(program) => program,
+        Err(semantic_error) => {
+            semantic_error.print_error_message(&program_source);
+            exit(3);
+        }
+    };
     if args.semantics {
         println!("Resolved AST: {:#?}", resolved_ast);
         return;

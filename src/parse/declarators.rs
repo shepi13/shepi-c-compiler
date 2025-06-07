@@ -21,7 +21,7 @@ pub struct ParamInfo {
 fn parse_simple_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
     if tokens.try_consume(Token::OpenParen) {
         let declarator = parse_declarator(tokens)?;
-        tokens.expect(Token::CloseParen)?;
+        tokens.expect_token(Token::CloseParen)?;
         Ok(declarator)
     } else {
         Ok(Declarator::Identifier(parse_identifier(tokens)?.to_string()))
@@ -37,7 +37,7 @@ fn parse_direct_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
             .into_iter()
             .map(|(ctype, declarator)| ParamInfo { ctype, declarator: declarator.into() })
             .collect();
-        tokens.expect(Token::CloseParen)?;
+        tokens.expect_token(Token::CloseParen)?;
         Ok(Declarator::Function(param_info, declarator.into()))
     } else {
         Ok(declarator)
@@ -54,7 +54,7 @@ fn parse_array_declarator(
         let subscript = subscript.int_value() as u64;
         assert!(subscript > 0, "Array must have size > 0");
         declarator = Declarator::Array(declarator.into(), subscript);
-        tokens.expect(Token::CloseBracket)?;
+        tokens.expect_token(Token::CloseBracket)?;
     }
     Ok(declarator)
 }
@@ -138,7 +138,7 @@ pub enum AbstractDeclarator {
 pub fn parse_simple_abstract_declarator(tokens: &mut Tokens) -> ParseResult<AbstractDeclarator> {
     if tokens.try_consume(Token::OpenParen) {
         let declarator = parse_abstract_declarator(tokens);
-        tokens.expect(Token::CloseParen)?;
+        tokens.expect_token(Token::CloseParen)?;
         declarator
     } else {
         Ok(AbstractDeclarator::Base)
@@ -172,7 +172,7 @@ fn parse_abstract_array_declarator(
         let subscript = subscript.int_value() as u64;
         assert!(subscript > 0, "Array must have size > 0");
         decl = AbstractDeclarator::Array(decl.into(), subscript);
-        tokens.expect(Token::CloseBracket)?;
+        tokens.expect_token(Token::CloseBracket)?;
     }
     Ok(decl)
 }

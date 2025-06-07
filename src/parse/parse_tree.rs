@@ -2,10 +2,16 @@ use super::lexer::Token;
 
 pub type Program = Vec<Declaration>;
 pub type Block = Vec<BlockItem>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct Location {
+    pub start_loc: (usize, usize),
+    pub end_loc: (usize, usize),
+}
 // Statements and Declarations
 #[derive(Debug, Clone)]
 pub enum BlockItem {
-    StatementItem(Statement),
+    StatementItem(Statement, Location),
     DeclareItem(Declaration),
 }
 #[derive(Debug, Clone)]
@@ -15,8 +21,8 @@ pub enum Statement {
     If(TypedExpression, Box<Statement>, Box<Option<Statement>>),
     While(Loop),
     DoWhile(Loop),
-    For(ForInit, Loop, Option<TypedExpression>),
-    Switch(SwitchStatement),
+    For(Box<ForInit>, Loop, Option<TypedExpression>),
+    Switch(Box<SwitchStatement>),
     Case(TypedExpression, Box<Statement>),
     Default(Box<Statement>),
     Break(String),
@@ -109,6 +115,7 @@ pub struct VariableDeclaration {
     pub init: Option<VariableInitializer>,
     pub ctype: CType,
     pub storage: Option<StorageClass>,
+    pub location: Location,
 }
 #[derive(Debug, Clone)]
 pub struct FunctionDeclaration {
@@ -117,6 +124,7 @@ pub struct FunctionDeclaration {
     pub params: Vec<String>,
     pub body: Option<Block>,
     pub storage: Option<StorageClass>,
+    pub location: Location,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageClass {

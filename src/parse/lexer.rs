@@ -264,6 +264,12 @@ impl Tokens<'_> {
     pub fn rewind(&mut self) {
         self.current_token -= 1;
     }
+    pub fn location(&self) -> (usize, usize) {
+        *self
+            .locations
+            .get(self.current_token)
+            .unwrap_or(self.locations.last().expect("Empty token list!"))
+    }
     pub fn consume(&mut self) -> Token {
         let result = self.tokens[self.current_token];
         self.current_token += 1;
@@ -275,7 +281,7 @@ impl Tokens<'_> {
             true
         }
     }
-    pub fn expect(&mut self, token: Token) -> ParseResult<()> {
+    pub fn expect_token(&mut self, token: Token) -> ParseResult<()> {
         let next_token = self.tokens[self.current_token];
         let result = self.try_consume(token);
         self.assert(

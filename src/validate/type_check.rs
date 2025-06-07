@@ -210,8 +210,8 @@ fn type_check_block(block: Block, table: &mut TypeTable) -> Block {
 }
 fn type_check_block_item(block_item: BlockItem, table: &mut TypeTable) -> BlockItem {
     match block_item {
-        BlockItem::StatementItem(statement) => {
-            BlockItem::StatementItem(type_check_statement(statement, table))
+        BlockItem::StatementItem(statement, location) => {
+            BlockItem::StatementItem(type_check_statement(statement, table), location)
         }
         BlockItem::DeclareItem(decl) => {
             BlockItem::DeclareItem(type_check_declaration(decl, table, false))
@@ -273,7 +273,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
             Switch(switch)
         }
         For(init, mut loop_data, post) => {
-            let init = match init {
+            let init = match *init {
                 ForInit::Decl(decl) => ForInit::Decl(type_check_var_declaration(decl, table)),
                 ForInit::Expr(Some(expr)) => {
                     ForInit::Expr(Some(type_check_and_convert(expr, table)))
@@ -283,7 +283,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Statemen
             loop_data.condition = type_check_and_convert(loop_data.condition, table);
             let post = post.map(|post_expr| type_check_and_convert(post_expr, table));
             loop_data.body = type_check_statement(*loop_data.body, table).into();
-            For(init, loop_data, post)
+            For(init.into(), loop_data, post)
         }
         Case(_, _) | Default(_) => {
             panic!("Should be re-written into label in switch resolve pass!")
