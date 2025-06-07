@@ -163,7 +163,7 @@ fn gen_function(function: parse_tree::FunctionDeclaration, symbols: &mut Symbols
 fn gen_block(block: parse_tree::Block, instructions: &mut Vec<Instruction>, symbols: &mut Symbols) {
     for block_item in block {
         match block_item {
-            parse_tree::BlockItem::StatementItem(statement) => {
+            parse_tree::BlockItem::StatementItem(statement, _) => {
                 gen_instructions(statement, instructions, symbols)
             }
             parse_tree::BlockItem::DeclareItem(parse_tree::Declaration::Variable(decl)) => {
@@ -293,7 +293,7 @@ fn gen_instructions(
             instructions.push(Instruction::Label(break_label));
         }
         Statement::For(init, loop_data, post_loop) => {
-            match init {
+            match *init {
                 ForInit::Decl(decl) => {
                     gen_declaration(decl, instructions, symbols);
                 }

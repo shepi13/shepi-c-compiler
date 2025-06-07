@@ -1,11 +1,57 @@
 use crate::parse::parse_tree::{
-    self, BlockItem, Declaration, ForInit, FunctionDeclaration, Loop, Program, Statement,
+    self, BlockItem, Declaration, ForInit, FunctionDeclaration, Location, Loop, Program, Statement,
     StorageClass, SwitchStatement, TypedExpression, VariableDeclaration, VariableInitializer,
 };
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+#[derive(Debug)]
+pub struct SemanticError {
+    location: Option<Location>,
+    message: String,
+}
+type SemanticResult<T> = Result<T, SemanticError>;
+fn assert_or_err(assertion: bool, message: &str) -> SemanticResult<()> {
+    if assertion { Ok(()) } else { Err(SemanticError::new(message)) }
+}
+fn assert_or_err_fmt(assertion: bool, message: &str, value: &str) -> SemanticResult<()> {
+    if assertion { Ok(()) } else { Err(SemanticError::fmt(message, value)) }
+}
+impl SemanticError {
+    fn new(msg: &str) -> Self {
+        Self { location: None, message: msg.to_string() }
+    }
+    fn fmt(msg: &str, value: &str) -> Self {
+        Self {
+            location: None,
+            message: format!("{}: {}", msg, value),
+        }
+    }
+    fn add_location<T>(value: Result<T, Self>, location: Location) -> Result<T, Self> {
+        match value {
+            Ok(val) => Ok(val),
+            Err(mut error) => {
+                error.location = Some(error.location.unwrap_or(location));
+                Err(error)
+            }
+        }
+    }
+    pub fn print_error_message(&self, source: &str) {
+        println!("Semantic Error: {}", self.message);
+        let lines: Vec<&str> = source.lines().filter(|line| !line.starts_with("#")).collect();
+        if let Some(loc) = self.location {
+            println!("At line: {}", loc.start_loc.0 + 1);
+            if let Some(prev_line) = lines.get(loc.start_loc.0 - 1) {
+                println!("{}", prev_line);
+            }
+            for line in &lines[loc.start_loc.0..=loc.end_loc.0] {
+                println!("{}", line);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Identifier {
@@ -46,30 +92,28 @@ impl SymbolTable {
             current_function: None,
         }
     }
-    fn resolve_continue(&self) -> &str {
-        assert!(!self.loops.is_empty(), "Used continue outside loop!");
-        &self.loops[self.loops.len() - 1]
+    fn resolve_continue(&self) -> SemanticResult<&str> {
+        assert_or_err(!self.loops.is_empty(), "Used continue outside of loop!")?;
+        Ok(&self.loops[self.loops.len() - 1])
     }
-    fn resolve_break(&self) -> &str {
-        assert!(!self.break_scopes.is_empty(), "Used break outside loop or switch!");
-        &self.break_scopes[self.break_scopes.len() - 1]
+    fn resolve_break(&self) -> SemanticResult<&str> {
+        assert_or_err(!self.break_scopes.is_empty(), "Used break outside loop or switch!")?;
+        Ok(&self.break_scopes[self.break_scopes.len() - 1])
     }
-    fn resolve_case(&mut self, matcher: TypedExpression) -> String {
+    fn resolve_case(&mut self, matcher: TypedExpression) -> SemanticResult<String> {
         let stack_len = self.switches.len() - 1;
-        assert!(!self.switches.is_empty(), "Used case outside of switch!");
+        assert_or_err(!self.switches.is_empty(), "Used case outside of switch!")?;
         let case_label = case_name(&self.switches[stack_len].label);
         self.switches[stack_len].cases.push((case_label.clone(), matcher));
-        case_label
+        Ok(case_label)
     }
-    fn resolve_default(&mut self) -> String {
-        if self.switches.is_empty() {
-            panic!("Used default outside of switch!");
-        }
+    fn resolve_default(&mut self) -> SemanticResult<String> {
+        assert_or_err(!self.switches.is_empty(), "Used default outside of switch!")?;
         let stack_len = self.switches.len() - 1;
-        assert!(self.switches[stack_len].default.is_none(), "duplicate default!");
+        assert_or_err(self.switches[stack_len].default.is_none(), "duplicate default!")?;
         let default_label = format!("{}.default", &self.switches[stack_len].label);
         self.switches[stack_len].default = Some(default_label.clone());
-        default_label
+        Ok(default_label)
     }
     fn enter_scope(&mut self) {
         self.identifiers.push(HashMap::new());
@@ -132,28 +176,32 @@ impl SymbolTable {
             },
         );
     }
-    fn declare_parameter(&mut self, name: String) -> String {
+    fn declare_parameter(&mut self, name: String) -> SemanticResult<String> {
         let decl = self.declare_local_variable(VariableDeclaration {
             name: name.clone(),
             init: None,
             ctype: parse_tree::CType::Int,
             storage: None,
-        });
-        decl.name
+            location: Location { start_loc: (0, 0), end_loc: (0, 0) },
+        })?;
+        Ok(decl.name)
     }
-    fn declare_local_variable(&mut self, mut decl: VariableDeclaration) -> VariableDeclaration {
+    fn declare_local_variable(
+        &mut self,
+        mut decl: VariableDeclaration,
+    ) -> SemanticResult<VariableDeclaration> {
         let name = &decl.name;
         let stack_len = self.identifiers.len() - 1;
         if let Some(prev_declaration) = self.identifiers[stack_len].get(name) {
-            assert!(
+            assert_or_err_fmt(
                 prev_declaration.external && decl.storage == Some(StorageClass::Extern),
-                "Duplicate variable name in current scope: {}",
-                name
-            )
+                "Duplicate variable name in current scope",
+                name,
+            )?;
         }
         if decl.storage == Some(StorageClass::Extern) {
             self.declare_global_variable(decl.name.clone());
-            decl
+            Ok(decl)
         } else {
             let unique_name = variable_name(name);
             self.identifiers[stack_len].insert(
@@ -164,22 +212,22 @@ impl SymbolTable {
                 },
             );
             decl.name = unique_name;
-            decl
+            Ok(decl)
         }
     }
-    fn declare_function(&mut self, function: &FunctionDeclaration) {
+    fn declare_function(&mut self, function: &FunctionDeclaration) -> SemanticResult<()> {
         let defined = function.body.is_some();
         let name = &function.name;
         if self.current_function.is_some() {
-            assert!(!defined, "Nested function definitions not allowed");
-            assert!(
+            assert_or_err(!defined, "Nested function definitions not allowed")?;
+            assert_or_err(
                 function.storage != Some(StorageClass::Static),
-                "static only allowed at top level scope"
-            );
+                "static only allowed at top level scope",
+            )?;
         }
         let stack_len = self.identifiers.len() - 1;
         if let Some(ident) = self.identifiers[stack_len].get(name) {
-            assert!(ident.external, "Duplicate function declaration: {}", name);
+            assert_or_err_fmt(ident.external, "Duplicate function declaration", name)?;
         }
         self.identifiers[stack_len].insert(
             name.clone(),
@@ -188,30 +236,35 @@ impl SymbolTable {
                 external: true,
             },
         );
+        Ok(())
     }
-    fn resolve_identifier(&self, name: &str) -> String {
+    fn resolve_identifier(&self, name: &str) -> SemanticResult<String> {
         let ident =
-            self._lookup_identifier(name).unwrap_or_else(|| panic!("Undeclared variable {}", name));
-        ident.unique_name.to_string()
+            self._lookup_identifier(name).ok_or(SemanticError::fmt("Undeclared variable", name))?;
+        Ok(ident.unique_name.to_string())
     }
-    fn resolve_label(&mut self, target: String) -> String {
-        let function = self.current_function.as_ref().expect("Labels must be in functions");
+    fn resolve_label(&mut self, target: String) -> SemanticResult<String> {
+        let function = self
+            .current_function
+            .as_ref()
+            .ok_or(SemanticError::new("Labels must be in functions"))?;
         for table in &self.labels {
-            if table.contains(&target) {
-                panic!("Duplicate label: {}", target);
-            }
+            assert_or_err_fmt(!table.contains(&target), "Duplicate label", &target)?;
         }
         let stack_len = self.labels.len() - 1;
         let mangled_label = format!("{}_{}_{}", target, function, target);
         self.labels[stack_len].insert(target);
-        mangled_label
+        Ok(mangled_label)
     }
-    fn resolve_goto(&mut self, target: String) -> String {
+    fn resolve_goto(&mut self, target: String) -> SemanticResult<String> {
         let stack_len = self.gotos.len() - 1;
-        let function = &self.current_function.as_ref().expect("Goto must be in function!");
+        let function = &self
+            .current_function
+            .as_ref()
+            .ok_or(SemanticError::new("Goto must be in function!"))?;
         let mangled_label = format!("{}_{}_{}", target, function, target);
         self.gotos[stack_len].insert(target);
-        mangled_label
+        Ok(mangled_label)
     }
 }
 
@@ -224,100 +277,117 @@ fn variable_name(name: &str) -> String {
     format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-pub fn resolve_program(program: Program) -> Program {
+pub fn resolve_program(program: Program) -> SemanticResult<Program> {
     let symbols = &mut SymbolTable::new();
-    program.into_iter().map(|decl| resolve_declaration(decl, symbols, true)).collect()
+    let new_program: SemanticResult<Vec<Declaration>> =
+        program.into_iter().map(|decl| resolve_declaration(decl, symbols, true)).collect();
+    new_program
 }
 
 fn resolve_function(
     mut function: FunctionDeclaration,
     symbols: &mut SymbolTable,
-) -> FunctionDeclaration {
-    symbols.declare_function(&function);
+) -> SemanticResult<FunctionDeclaration> {
+    symbols.declare_function(&function)?;
     symbols.enter_scope();
-    function.params =
-        function.params.into_iter().map(|param| symbols.declare_parameter(param)).collect();
+    function.params = function
+        .params
+        .into_iter()
+        .map(|param| symbols.declare_parameter(param))
+        .collect::<SemanticResult<Vec<String>>>()?;
     if let Some(body) = function.body {
         symbols.enter_function(function.name.to_string());
-        function.body =
-            Some(body.into_iter().map(|item| resolve_block_item(item, symbols)).collect());
+        function.body = Some(
+            body.into_iter()
+                .map(|item| resolve_block_item(item, symbols))
+                .collect::<SemanticResult<Vec<BlockItem>>>()?,
+        );
         symbols.leave_function();
     }
     symbols.leave_scope();
-    function
+    Ok(function)
 }
-fn resolve_block_item(block_item: BlockItem, symbols: &mut SymbolTable) -> BlockItem {
+fn resolve_block_item(
+    block_item: BlockItem,
+    symbols: &mut SymbolTable,
+) -> SemanticResult<BlockItem> {
     match block_item {
-        BlockItem::StatementItem(statement) => {
-            BlockItem::StatementItem(resolve_statement(statement, symbols))
+        BlockItem::StatementItem(statement, location) => {
+            let stmt = resolve_statement(statement, symbols);
+            let stmt = SemanticError::add_location(stmt, location)?;
+            Ok(BlockItem::StatementItem(stmt, location))
         }
         BlockItem::DeclareItem(decl) => {
-            BlockItem::DeclareItem(resolve_declaration(decl, symbols, false))
+            Ok(BlockItem::DeclareItem(resolve_declaration(decl, symbols, false)?))
         }
     }
 }
-fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Statement {
+fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> SemanticResult<Statement> {
     use parse_tree::Statement::*;
-    match statement {
-        Return(expr) => Return(resolve_expression(expr, symbols)),
-        ExprStmt(expr) => ExprStmt(resolve_expression(expr, symbols)),
-        While(loop_data) => While(resolve_loop(loop_data, symbols, true)),
-        DoWhile(loop_data) => DoWhile(resolve_loop(loop_data, symbols, true)),
+    let new_statement = match statement {
+        Return(expr) => Return(resolve_expression(expr, symbols)?),
+        ExprStmt(expr) => ExprStmt(resolve_expression(expr, symbols)?),
+        While(loop_data) => While(resolve_loop(loop_data, symbols, true)?),
+        DoWhile(loop_data) => DoWhile(resolve_loop(loop_data, symbols, true)?),
         If(cond, if_true, if_false) => {
             symbols.enter_scope();
             let result = If(
-                resolve_expression(cond, symbols),
-                resolve_statement(*if_true, symbols).into(),
-                if_false.map(|stmt| resolve_statement(stmt, symbols)).into(),
+                resolve_expression(cond, symbols)?,
+                resolve_statement(*if_true, symbols)?.into(),
+                if_false.map(|stmt| resolve_statement(stmt, symbols)).transpose()?.into(),
             );
             symbols.leave_scope();
             result
         }
-        Break(_) => Break(symbols.resolve_break().to_string()),
-        Continue(_) => Continue(symbols.resolve_continue().to_string()),
+        Break(_) => Break(symbols.resolve_break()?.to_string()),
+        Continue(_) => Continue(symbols.resolve_continue()?.to_string()),
         Compound(statements) => {
             symbols.enter_scope();
-            let result = Compound(
-                statements.into_iter().map(|item| resolve_block_item(item, symbols)).collect(),
-            );
+            let new_statements: SemanticResult<Vec<BlockItem>> =
+                statements.into_iter().map(|item| resolve_block_item(item, symbols)).collect();
+            let result = Compound(new_statements?);
             symbols.leave_scope();
             result
         }
-        Goto(label) => Goto(symbols.resolve_goto(label)),
+        Goto(label) => Goto(symbols.resolve_goto(label)?),
         Label(label, statement) => {
-            Label(symbols.resolve_label(label), resolve_statement(*statement, symbols).into())
+            Label(symbols.resolve_label(label)?, resolve_statement(*statement, symbols)?.into())
         }
         For(init, loop_data, post) => {
             symbols.enter_scope();
-            let init = match init {
+            let init = match *init {
                 ForInit::Decl(decl) => {
-                    assert!(
+                    assert_or_err(
                         decl.storage.is_none(),
-                        "For loop initializer cannot be static or extern"
-                    );
-                    let mut decl = symbols.declare_local_variable(decl);
-                    decl.init = resolve_initializer(decl.init, symbols);
+                        "For loop initializer cannot be static or extern",
+                    )?;
+                    let mut decl = symbols.declare_local_variable(decl)?;
+                    decl.init = resolve_initializer(decl.init, symbols)?;
                     ForInit::Decl(decl)
                 }
                 ForInit::Expr(expr) => {
-                    ForInit::Expr(expr.map(|expr| resolve_expression(expr, symbols)))
+                    let expr = match expr {
+                        Some(expr) => Some(resolve_expression(expr, symbols)?),
+                        None => None,
+                    };
+                    ForInit::Expr(expr)
                 }
             };
-            let post = post.map(|expr| resolve_expression(expr, symbols));
-            let loop_data = resolve_loop(loop_data, symbols, false);
+            let post = post.map(|expr| resolve_expression(expr, symbols)).transpose()?;
+            let loop_data = resolve_loop(loop_data, symbols, false)?;
             symbols.leave_scope();
-            For(init, loop_data, post)
+            For(init.into(), loop_data, post)
         }
         Case(matcher, statement) => {
-            Label(symbols.resolve_case(matcher), resolve_statement(*statement, symbols).into())
+            Label(symbols.resolve_case(matcher)?, resolve_statement(*statement, symbols)?.into())
         }
         Default(statement) => {
-            Label(symbols.resolve_default(), resolve_statement(*statement, symbols).into())
+            Label(symbols.resolve_default()?, resolve_statement(*statement, symbols)?.into())
         }
         Switch(mut switch) => {
             symbols.enter_switch(&switch);
-            switch.condition = resolve_expression(switch.condition, symbols);
-            switch.statement = resolve_statement(*switch.statement, symbols).into();
+            switch.condition = resolve_expression(switch.condition, symbols)?;
+            switch.statement = resolve_statement(*switch.statement, symbols)?.into();
             let switch_symbols = symbols.leave_switch();
             switch.cases = switch_symbols.cases;
             switch.label = switch_symbols.label;
@@ -325,96 +395,113 @@ fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Stateme
             Switch(switch)
         }
         Null => Null,
-    }
+    };
+    Ok(new_statement)
 }
 
-fn resolve_declaration(decl: Declaration, symbols: &mut SymbolTable, global: bool) -> Declaration {
-    match decl {
+fn resolve_declaration(
+    decl: Declaration,
+    symbols: &mut SymbolTable,
+    global: bool,
+) -> SemanticResult<Declaration> {
+    let decl = match decl {
         Declaration::Variable(mut var_decl) => {
             if global {
                 symbols.declare_global_variable(var_decl.name.clone());
             } else {
-                var_decl = symbols.declare_local_variable(var_decl);
+                var_decl = symbols.declare_local_variable(var_decl)?;
             }
-            var_decl.init = resolve_initializer(var_decl.init, symbols);
+            let new_init = resolve_initializer(var_decl.init, symbols);
+            var_decl.init = SemanticError::add_location(new_init, var_decl.location)?;
             Declaration::Variable(var_decl)
         }
         Declaration::Function(func_decl) => {
-            Declaration::Function(resolve_function(func_decl, symbols))
+            let location = func_decl.location;
+            let new_func = resolve_function(func_decl, symbols);
+            Declaration::Function(SemanticError::add_location(new_func, location)?)
         }
-    }
+    };
+    Ok(decl)
 }
 
 fn resolve_initializer(
     init: Option<VariableInitializer>,
     symbols: &mut SymbolTable,
-) -> Option<VariableInitializer> {
-    match init {
+) -> SemanticResult<Option<VariableInitializer>> {
+    let result = match init {
         Some(VariableInitializer::SingleElem(expr)) => {
-            Some(VariableInitializer::SingleElem(resolve_expression(expr, symbols)))
+            Some(VariableInitializer::SingleElem(resolve_expression(expr, symbols)?))
         }
         Some(VariableInitializer::CompoundInit(initializers)) => {
-            Some(VariableInitializer::CompoundInit(
-                initializers
-                    .into_iter()
-                    .map(|init| resolve_initializer(Some(init), symbols).unwrap())
-                    .collect(),
-            ))
+            let mut new_initializers = Vec::new();
+            for init in initializers {
+                new_initializers.push(resolve_initializer(Some(init), symbols)?.expect("Is Some"));
+            }
+            Some(VariableInitializer::CompoundInit(new_initializers))
         }
         None => None,
-    }
+    };
+    Ok(result)
 }
 
-fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> TypedExpression {
+fn resolve_expression(
+    expr: TypedExpression,
+    symbols: &mut SymbolTable,
+) -> SemanticResult<TypedExpression> {
     use parse_tree::Expression::*;
     let expr = expr.expr;
     let result = match expr {
-        Unary(operator, expr) => Unary(operator, resolve_expression(*expr, symbols).into()),
+        Unary(operator, expr) => Unary(operator, resolve_expression(*expr, symbols)?.into()),
         Binary(mut binexpr) => {
-            binexpr.left = resolve_expression(binexpr.left, symbols);
-            binexpr.right = resolve_expression(binexpr.right, symbols);
+            binexpr.left = resolve_expression(binexpr.left, symbols)?;
+            binexpr.right = resolve_expression(binexpr.right, symbols)?;
             Binary(binexpr)
         }
         Condition(mut cond) => {
-            cond.condition = resolve_expression(cond.condition, symbols);
-            cond.if_true = resolve_expression(cond.if_true, symbols);
-            cond.if_false = resolve_expression(cond.if_false, symbols);
+            cond.condition = resolve_expression(cond.condition, symbols)?;
+            cond.if_true = resolve_expression(cond.if_true, symbols)?;
+            cond.if_false = resolve_expression(cond.if_false, symbols)?;
             Condition(cond)
         }
         Assignment(mut assign) => {
-            assign.left = resolve_expression(assign.left, symbols);
-            assign.right = resolve_expression(assign.right, symbols);
+            assign.left = resolve_expression(assign.left, symbols)?;
+            assign.right = resolve_expression(assign.right, symbols)?;
             Assignment(assign)
         }
-        Variable(name) => Variable(symbols.resolve_identifier(&name)),
+        Variable(name) => Variable(symbols.resolve_identifier(&name)?),
         Constant(_) => expr,
         FunctionCall(name, args) => {
-            let name = symbols.resolve_identifier(&name);
-            let args = args.into_iter().map(|arg| resolve_expression(arg, symbols)).collect();
-            FunctionCall(name, args)
+            let name = symbols.resolve_identifier(&name)?;
+            let args: SemanticResult<Vec<TypedExpression>> =
+                args.into_iter().map(|arg| resolve_expression(arg, symbols)).collect();
+            FunctionCall(name, args?)
         }
-        Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols).into()),
-        Dereference(inner) => Dereference(resolve_expression(*inner, symbols).into()),
-        AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols).into()),
+        Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols)?.into()),
+        Dereference(inner) => Dereference(resolve_expression(*inner, symbols)?.into()),
+        AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols)?.into()),
         Subscript(expr, sub_expr) => Subscript(
-            resolve_expression(*expr, symbols).into(),
-            resolve_expression(*sub_expr, symbols).into(),
+            resolve_expression(*expr, symbols)?.into(),
+            resolve_expression(*sub_expr, symbols)?.into(),
         ),
     };
     // Convert to TypedExpression
-    result.into()
+    Ok(result.into())
 }
 
-fn resolve_loop(mut loop_data: Loop, symbols: &mut SymbolTable, scoped: bool) -> Loop {
+fn resolve_loop(
+    mut loop_data: Loop,
+    symbols: &mut SymbolTable,
+    scoped: bool,
+) -> SemanticResult<Loop> {
     symbols.enter_loop(loop_data.label.clone());
     if scoped {
         symbols.enter_scope();
     }
-    loop_data.condition = resolve_expression(loop_data.condition, symbols);
-    loop_data.body = resolve_statement(*loop_data.body, symbols).into();
+    loop_data.condition = resolve_expression(loop_data.condition, symbols)?;
+    loop_data.body = resolve_statement(*loop_data.body, symbols)?.into();
     symbols.leave_loop();
     if scoped {
         symbols.leave_scope();
     }
-    loop_data
+    Ok(loop_data)
 }

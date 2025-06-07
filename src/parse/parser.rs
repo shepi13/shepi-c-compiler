@@ -9,7 +9,7 @@ use super::declarators::{
 };
 use lazy_static::lazy_static;
 
-use crate::parse::lexer::Tokens;
+use crate::parse::{lexer::Tokens, parse_tree::Location};
 
 use super::{
     lexer::{self, ParseResult},
@@ -195,7 +195,7 @@ fn parse_post_operator(
         )
     } else if tokens.try_consume(Token::OpenBracket) {
         let sub_expr = parse_expression(tokens, 0)?;
-        tokens.expect(Token::CloseBracket)?;
+        tokens.expect_token(Token::CloseBracket)?;
         parse_post_operator(
             tokens,
             Expression::Subscript(expression.into(), sub_expr.into()).into(),
@@ -260,11 +260,11 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
                 let base_type = parse_type(type_tokens).map_err(|err| tokens.parse_error(err))?;
                 let abstract_decl = parse_abstract_declarator(tokens)?;
                 let ctype = process_abstract_declarator(abstract_decl, base_type)?;
-                tokens.expect(Token::CloseParen)?;
+                tokens.expect_token(Token::CloseParen)?;
                 Expression::Cast(ctype, parse_factor(tokens)?.into())
             } else {
                 let expr = parse_expression(tokens, 0)?;
-                tokens.expect(Token::CloseParen)?;
+                tokens.expect_token(Token::CloseParen)?;
                 expr.expr
             }
         }
@@ -272,7 +272,7 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
             let name = name.to_string();
             if tokens.try_consume(Token::OpenParen) {
                 let args = parse_argument_list(tokens)?;
-                tokens.expect(Token::CloseParen)?;
+                tokens.expect_token(Token::CloseParen)?;
                 Expression::FunctionCall(name, args)
             } else {
                 Expression::Variable(name)
@@ -294,7 +294,7 @@ fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> ParseResult<TypedEx
             left = Expression::Assignment(AssignmentExpression { left, right }.into()).into();
         } else if tokens.try_consume(Token::QuestionMark) {
             let if_true = parse_expression(tokens, 0)?;
-            tokens.expect(Token::Colon)?;
+            tokens.expect_token(Token::Colon)?;
             let if_false = parse_expression(tokens, token_prec)?;
             left = Expression::Condition(
                 ConditionExpression { condition: left, if_true, if_false }.into(),
@@ -329,14 +329,14 @@ fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
     // Parses a statement
     if tokens.try_consume(Token::Keyword("return")) {
         let return_value = parse_expression(tokens, 0)?;
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::SemiColon)?;
         Ok(Statement::Return(return_value))
     } else if tokens.try_consume(Token::SemiColon) {
         Ok(Statement::Null)
     } else if tokens.try_consume(Token::Keyword("if")) {
-        tokens.expect(Token::OpenParen)?;
+        tokens.expect_token(Token::OpenParen)?;
         let cond = parse_expression(tokens, 0)?;
-        tokens.expect(Token::CloseParen)?;
+        tokens.expect_token(Token::CloseParen)?;
         let then = parse_statement(tokens)?;
         let otherwise = if tokens.try_consume(Token::Keyword("else")) {
             Some(parse_statement(tokens)?)
@@ -346,20 +346,20 @@ fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
         Ok(Statement::If(cond, then.into(), otherwise.into()))
     } else if tokens.try_consume(Token::Keyword("goto")) {
         let target = parse_identifier(tokens)?.to_string();
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::SemiColon)?;
         Ok(Statement::Goto(target))
     } else if tokens.try_consume(Token::OpenBrace) {
         Ok(Statement::Compound(parse_block(tokens)?))
     } else if tokens.try_consume(Token::Keyword("break")) {
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::SemiColon)?;
         Ok(Statement::Break(String::new()))
     } else if tokens.try_consume(Token::Keyword("continue")) {
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::SemiColon)?;
         Ok(Statement::Continue(String::new()))
     } else if tokens.try_consume(Token::Keyword("while")) {
-        tokens.expect(Token::OpenParen)?;
+        tokens.expect_token(Token::OpenParen)?;
         let condition = parse_expression(tokens, 0)?;
-        tokens.expect(Token::CloseParen)?;
+        tokens.expect_token(Token::CloseParen)?;
         Ok(Statement::While(Loop {
             label: loop_name(),
             condition,
@@ -367,34 +367,34 @@ fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
         }))
     } else if tokens.try_consume(Token::Keyword("do")) {
         let body = parse_statement(tokens)?;
-        tokens.expect(Token::Keyword("while"))?;
-        tokens.expect(Token::OpenParen)?;
+        tokens.expect_token(Token::Keyword("while"))?;
+        tokens.expect_token(Token::OpenParen)?;
         let condition = parse_expression(tokens, 0)?;
-        tokens.expect(Token::CloseParen)?;
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::CloseParen)?;
+        tokens.expect_token(Token::SemiColon)?;
         Ok(Statement::DoWhile(Loop {
             label: loop_name(),
             condition,
             body: body.into(),
         }))
     } else if tokens.try_consume(Token::Keyword("for")) {
-        tokens.expect(Token::OpenParen)?;
+        tokens.expect_token(Token::OpenParen)?;
         let init = if matches!(tokens[0], Token::Specifier(_)) {
             ForInit::Decl(parse_variable_declaration(tokens)?)
         } else {
             let init = ForInit::Expr(parse_optional_expression(tokens)?);
-            tokens.expect(Token::SemiColon)?;
+            tokens.expect_token(Token::SemiColon)?;
             init
         };
         let condition = match parse_optional_expression(tokens)? {
             Some(expr) => expr,
             None => Expression::Constant(Constant::Int(1)).into(),
         };
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::SemiColon)?;
         let post_loop = parse_optional_expression(tokens)?;
-        tokens.expect(Token::CloseParen)?;
+        tokens.expect_token(Token::CloseParen)?;
         Ok(Statement::For(
-            init,
+            init.into(),
             Loop {
                 label: loop_name(),
                 condition,
@@ -404,34 +404,37 @@ fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
         ))
     } else if tokens.try_consume(Token::Keyword("switch")) {
         let label = switch_name();
-        tokens.expect(Token::OpenParen)?;
+        tokens.expect_token(Token::OpenParen)?;
         let condition = parse_expression(tokens, 0)?;
-        tokens.expect(Token::CloseParen)?;
+        tokens.expect_token(Token::CloseParen)?;
         let cases = Vec::new();
         let statement = parse_statement(tokens)?.into();
-        Ok(Statement::Switch(SwitchStatement {
-            label,
-            condition,
-            cases,
-            statement,
-            default: None,
-        }))
+        Ok(Statement::Switch(
+            SwitchStatement {
+                label,
+                condition,
+                cases,
+                statement,
+                default: None,
+            }
+            .into(),
+        ))
     } else if tokens.try_consume(Token::Keyword("default")) {
-        tokens.expect(Token::Colon)?;
+        tokens.expect_token(Token::Colon)?;
         Ok(Statement::Default(parse_statement(tokens)?.into()))
     } else if tokens.try_consume(Token::Keyword("case")) {
         let matcher = parse_expression(tokens, 0)?;
-        tokens.expect(Token::Colon)?;
+        tokens.expect_token(Token::Colon)?;
         let statement = parse_statement(tokens)?.into();
         Ok(Statement::Case(matcher, statement))
     } else if matches!(tokens[0], Token::Identifier(_)) && tokens[1] == Token::Colon {
         let Token::Identifier(name) = tokens.consume() else { panic!("Unreachable!") };
         let label_name = name.to_string();
-        tokens.expect(Token::Colon)?;
+        tokens.expect_token(Token::Colon)?;
         Ok(Statement::Label(label_name, parse_statement(tokens)?.into()))
     } else {
         let expr = parse_expression(tokens, 0)?;
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::SemiColon)?;
         Ok(Statement::ExprStmt(expr))
     }
 }
@@ -444,6 +447,7 @@ fn parse_variable_declaration(tokens: &mut Tokens) -> ParseResult<VariableDeclar
 }
 
 fn parse_declaration(tokens: &mut Tokens) -> ParseResult<Declaration> {
+    let start_loc = tokens.location();
     let (ctype, storage) = parse_specifiers(tokens)?;
     let declarator = parse_declarator(tokens)?;
     let decl_result = process_declarator(declarator, ctype)?;
@@ -451,7 +455,7 @@ fn parse_declaration(tokens: &mut Tokens) -> ParseResult<Declaration> {
         let body = if tokens.try_consume(Token::OpenBrace) {
             Some(parse_block(tokens)?)
         } else {
-            tokens.expect(Token::SemiColon)?;
+            tokens.expect_token(Token::SemiColon)?;
             None
         };
         Ok(Declaration::Function(FunctionDeclaration {
@@ -460,16 +464,18 @@ fn parse_declaration(tokens: &mut Tokens) -> ParseResult<Declaration> {
             params: decl_result.params,
             storage,
             body,
+            location: Location { start_loc, end_loc: tokens.location() },
         }))
     } else {
         let init =
             if tokens.try_consume(Token::Equal) { Some(parse_initializer(tokens)?) } else { None };
-        tokens.expect(Token::SemiColon)?;
+        tokens.expect_token(Token::SemiColon)?;
         Ok(Declaration::Variable(VariableDeclaration {
             name: decl_result.name,
             ctype: decl_result.ctype,
             init,
             storage,
+            location: Location { start_loc, end_loc: tokens.location() },
         }))
     }
 }
@@ -481,7 +487,7 @@ fn parse_initializer(tokens: &mut Tokens) -> ParseResult<VariableInitializer> {
         while !tokens.try_consume(Token::CloseBrace) {
             initializers.push(parse_initializer(tokens)?);
             if !tokens.try_consume(Token::Comma) {
-                tokens.expect(Token::CloseBrace)?;
+                tokens.expect_token(Token::CloseBrace)?;
                 break;
             }
         }
@@ -495,7 +501,10 @@ fn parse_block_item(tokens: &mut Tokens) -> ParseResult<BlockItem> {
     if matches!(tokens.peek(), Token::Specifier(_)) {
         Ok(BlockItem::DeclareItem(parse_declaration(tokens)?))
     } else {
-        Ok(BlockItem::StatementItem(parse_statement(tokens)?))
+        let start_loc = tokens.location();
+        let stmt = parse_statement(tokens)?;
+        let end_loc = tokens.location();
+        Ok(BlockItem::StatementItem(stmt, Location { start_loc, end_loc }))
     }
 }
 fn parse_block(tokens: &mut Tokens) -> ParseResult<Block> {
@@ -503,7 +512,7 @@ fn parse_block(tokens: &mut Tokens) -> ParseResult<Block> {
     while tokens.peek() != Token::CloseBrace {
         body.push(parse_block_item(tokens)?);
     }
-    tokens.expect(Token::CloseBrace)?;
+    tokens.expect_token(Token::CloseBrace)?;
     Ok(body)
 }
 pub fn parse(tokens: &mut Tokens) -> ParseResult<Program> {
