@@ -97,7 +97,7 @@ fn main() {
     let mut tokens = match parse::lexer::parse(&program_source) {
         Ok(tokens) => tokens,
         Err(lex_error) => {
-            println!("Lexing failed:\n{}", lex_error);
+            eprintln!("Lexing failed:\n\t{}", lex_error);
             exit(1);
         }
     };
@@ -109,7 +109,7 @@ fn main() {
     let parser_ast = match parse::parser::parse(&mut tokens) {
         Ok(program) => program,
         Err(parse_error) => {
-            println!("Parsing failed:\n{}", parse_error);
+            eprintln!("Parsing failed:\n\t{}", parse_error);
             exit(2);
         }
     };
@@ -121,7 +121,7 @@ fn main() {
     let resolved_ast = match validate::semantics::resolve_program(parser_ast) {
         Ok(program) => program,
         Err(semantic_error) => {
-            semantic_error.print_error_message(&program_source);
+            eprintln!("Semantic Error: \n\t{}", semantic_error.error_message(&program_source));
             exit(3);
         }
     };
@@ -130,7 +130,13 @@ fn main() {
         return;
     }
     // Run type checking
-    let mut typed_program = validate::type_check::type_check_program(resolved_ast);
+    let mut typed_program = match validate::type_check::type_check_program(resolved_ast) {
+        Ok(typed_program) => typed_program,
+        Err(type_error) => {
+            eprintln!("Type Error: \n\t{}", type_error.error_message(&program_source));
+            exit(4);
+        }
+    };
     if args.validate {
         println!("Resolved AST: {:#?}", typed_program.program);
         println!("Symbols: {:#?}", typed_program.symbols);

@@ -4,6 +4,7 @@ use crate::parse::parse_tree::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Write,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -20,16 +21,16 @@ fn assert_or_err_fmt(assertion: bool, message: &str, value: &str) -> SemanticRes
     if assertion { Ok(()) } else { Err(SemanticError::fmt(message, value)) }
 }
 impl SemanticError {
-    fn new(msg: &str) -> Self {
+    pub fn new(msg: &str) -> Self {
         Self { location: None, message: msg.to_string() }
     }
-    fn fmt(msg: &str, value: &str) -> Self {
+    pub fn fmt(msg: &str, value: &str) -> Self {
         Self {
             location: None,
             message: format!("{}: {}", msg, value),
         }
     }
-    fn add_location<T>(value: Result<T, Self>, location: Location) -> Result<T, Self> {
+    pub fn add_location<T>(value: Result<T, Self>, location: Location) -> Result<T, Self> {
         match value {
             Ok(val) => Ok(val),
             Err(mut error) => {
@@ -38,18 +39,20 @@ impl SemanticError {
             }
         }
     }
-    pub fn print_error_message(&self, source: &str) {
-        println!("Semantic Error: {}", self.message);
+    pub fn error_message(&self, source: &str) -> String {
+        let mut result = String::new();
+        writeln!(result, "{}", self.message).unwrap();
         let lines: Vec<&str> = source.lines().filter(|line| !line.starts_with("#")).collect();
         if let Some(loc) = self.location {
-            println!("At line: {}", loc.start_loc.0 + 1);
+            writeln!(result, "At line {}:", loc.start_loc.0 + 1).unwrap();
             if let Some(prev_line) = lines.get(loc.start_loc.0 - 1) {
-                println!("{}", prev_line);
+                writeln!(result, "{}", prev_line).unwrap();
             }
             for line in &lines[loc.start_loc.0..=loc.end_loc.0] {
-                println!("{}", line);
+                writeln!(result, "{}", line).unwrap();
             }
         }
+        result.trim().to_string()
     }
 }
 
@@ -406,13 +409,19 @@ fn resolve_declaration(
 ) -> SemanticResult<Declaration> {
     let decl = match decl {
         Declaration::Variable(mut var_decl) => {
+            let location = var_decl.location;
             if global {
                 symbols.declare_global_variable(var_decl.name.clone());
             } else {
-                var_decl = symbols.declare_local_variable(var_decl)?;
+                var_decl = SemanticError::add_location(
+                    symbols.declare_local_variable(var_decl),
+                    location,
+                )?;
             }
-            let new_init = resolve_initializer(var_decl.init, symbols);
-            var_decl.init = SemanticError::add_location(new_init, var_decl.location)?;
+            var_decl.init = SemanticError::add_location(
+                resolve_initializer(var_decl.init, symbols),
+                var_decl.location,
+            )?;
             Declaration::Variable(var_decl)
         }
         Declaration::Function(func_decl) => {
