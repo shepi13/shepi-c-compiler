@@ -10,7 +10,7 @@ use crate::{
         Program, Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
         VariableInitializer,
     },
-    validate::semantics::SemanticError,
+    validate::semantics::{SemanticError, assert_or_err},
 };
 
 type TypeError = SemanticError;
@@ -243,15 +243,13 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> TypeResu
     let result = match statement {
         Return(expr) => {
             let expr = type_check_and_convert(expr, table)?;
-            let cur_func =
-                table.current_function.as_ref().expect("Return must be inside function!");
+            let cur_func = table
+                .current_function
+                .as_ref()
+                .ok_or(TypeError::new("Return must be inside function!"))?;
             let cur_func_type = &table.symbols[cur_func].ctype;
-            if let CType::Function(_, return_type) = cur_func_type {
-                let expr = convert_by_assignment(expr, return_type)?;
-                Return(expr)
-            } else {
-                panic!("Failed to match function type!")
-            }
+            let CType::Function(_, return_type) = cur_func_type else { panic!("Match failed!") };
+            Return(convert_by_assignment(expr, return_type)?)
         }
         ExprStmt(expr) => ExprStmt(type_check_and_convert(expr, table)?),
         Label(name, statement) => Label(name, type_check_statement(*statement, table)?.into()),
@@ -353,12 +351,15 @@ fn type_check_expression(
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_and_convert(*inner, table)?;
             let old_type = get_type(&typed_inner);
-            if new_type == CType::Double && old_type.is_pointer()
-                || old_type == CType::Double && new_type.is_pointer()
-            {
-                panic!("Cannot convert double to pointer or pointer to double!");
-            }
-            assert!(!matches!(new_type, CType::Array(_, _)), "Cannot cast to array type");
+            assert_or_err(
+                new_type != CType::Double || !old_type.is_pointer(),
+                "Cannot convert pointer to double!",
+            )?;
+            assert_or_err(
+                old_type != CType::Double || !new_type.is_pointer(),
+                "Cannot convert double to pointer!",
+            )?;
+            assert_or_err(!matches!(new_type, CType::Array(_, _)), "Cannot cast to array type")?;
             let cast_expr = Expression::Cast(new_type.clone(), typed_inner.into());
             set_type(cast_expr.into(), &new_type)
         }
@@ -415,7 +416,7 @@ fn type_check_expression(
                     let call_expr = Expression::FunctionCall(name, converted_args);
                     set_type(call_expr.into(), &ret_type)
                 }
-                _ => panic!("Variable used as function!"),
+                _ => Err(TypeError::new("Variable used as function!")),
             }
         }
         Expression::Dereference(inner) => {
@@ -425,7 +426,7 @@ fn type_check_expression(
                     let deref_expr = Expression::Dereference(typed_inner.into());
                     set_type(deref_expr.into(), &reference_t)
                 }
-                _ => panic!("Invalid dreference!"),
+                _ => Err(TypeError::new("Invalid dreference!")),
             }
         }
         Expression::AddrOf(inner) => {
@@ -450,7 +451,7 @@ fn type_check_expression(
                 // Swap left and right so left is always the pointer
                 set_type(Expression::Subscript(right.into(), left.into()).into(), ptr_t)
             } else {
-                panic!("Subscript must have integer and pointer operands!")
+                Err(TypeError::new("Subscript must have integer and pointer operands!"))
             }
         }
     }
@@ -522,7 +523,7 @@ fn type_check_binary_expr(
                 let binexpr = BinaryExpression { left: right, right: left, ..binary };
                 set_type(Binary(binexpr.into()).into(), &right_t)
             } else {
-                panic!("Invalid operands for addition")
+                Err(TypeError::new("Invalid operands for addition"))
             }
         }
         Subtract => {
@@ -543,7 +544,7 @@ fn type_check_binary_expr(
                 let binexpr = BinaryExpression { left, right, ..binary };
                 set_type(Binary(binexpr.into()).into(), &CType::Long)
             } else {
-                panic!("Invalid operands for subtraction")
+                Err(TypeError::new("Invalid operands for subtraction"))
             }
         }
     }
@@ -619,8 +620,8 @@ fn parse_static_initializer(
     init: Option<&VariableInitializer>,
     ctype: &CType,
 ) -> TypeResult<StaticInitializer> {
-    let result = match (ctype, init) {
-        (_, None) => StaticInitializer::Initialized(vec![Initializer::ZeroInit(ctype.size())]),
+    match (ctype, init) {
+        (_, None) => Ok(StaticInitializer::Initialized(vec![Initializer::ZeroInit(ctype.size())])),
         (_, Some(VariableInitializer::SingleElem(expr))) => {
             assert!(!matches!(ctype, CType::Array(_, _)), "Cannot initialize array with a scalar!");
             let expr_constant = eval_constant_expr(expr, ctype);
@@ -630,9 +631,9 @@ fn parse_static_initializer(
                     parse_initializer_value(val, ctype)
                 }
                 Ok(Constant::Double(val)) => parse_initializer_value(val, ctype),
-                Err(_) => panic!("Failed to parse static initializer"),
+                Err(_) => return Err(TypeError::new("Failed to parse static initializer")),
             };
-            StaticInitializer::Initialized(vec![init_val])
+            Ok(StaticInitializer::Initialized(vec![init_val]))
         }
         (CType::Array(elem_t, size), Some(VariableInitializer::CompoundInit(init_list))) => {
             assert!(init_list.len() as u64 <= *size, "Initializer longer than array!");
@@ -648,11 +649,10 @@ fn parse_static_initializer(
                 let zero_bytes = (size - init_list.len() as u64) * elem_t.size();
                 initializers.push(Initializer::ZeroInit(zero_bytes));
             }
-            StaticInitializer::Initialized(initializers)
+            Ok(StaticInitializer::Initialized(initializers))
         }
-        _ => panic!("Cannot initiate static scalar with compound initializer"),
-    };
-    Ok(result)
+        _ => Err(TypeError::new("Cannot initiate static scalar with compound initializer")),
+    }
 }
 
 fn parse_initializer_value<T>(val: T, ctype: &CType) -> Initializer
@@ -718,7 +718,7 @@ fn type_check_initializer(
             }
             Ok(VariableInitializer::CompoundInit(typechecked_list))
         }
-        _ => panic!("Cannot initializer a scalar with a compound initializer!"),
+        _ => Err(TypeError::new("Cannot initializer a scalar with a compound initializer!")),
     }
 }
 
@@ -768,7 +768,7 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) ->
         if var.storage == Some(StorageClass::Extern) {
             global = attrs.global;
         } else if attrs.global != global {
-            panic!("Conflicting linkage!");
+            return Err(TypeError::new("Conflicting linkage!"));
         }
         if matches!(attrs.init, Initialized(_)) {
             assert!(!matches!(init_value, Initialized(_)), "Conflicting static initializers!");

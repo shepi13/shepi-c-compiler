@@ -14,10 +14,10 @@ pub struct SemanticError {
     message: String,
 }
 type SemanticResult<T> = Result<T, SemanticError>;
-fn assert_or_err(assertion: bool, message: &str) -> SemanticResult<()> {
+pub fn assert_or_err(assertion: bool, message: &str) -> SemanticResult<()> {
     if assertion { Ok(()) } else { Err(SemanticError::new(message)) }
 }
-fn assert_or_err_fmt(assertion: bool, message: &str, value: &str) -> SemanticResult<()> {
+pub fn assert_or_err_fmt(assertion: bool, message: &str, value: &str) -> SemanticResult<()> {
     if assertion { Ok(()) } else { Err(SemanticError::fmt(message, value)) }
 }
 impl SemanticError {
