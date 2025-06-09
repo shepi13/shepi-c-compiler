@@ -333,7 +333,7 @@ impl std::fmt::Display for Tokens<'_> {
     }
 }
 
-pub fn parse(mut data: &str) -> LexResult<Tokens> {
+pub fn lex(mut data: &str) -> LexResult<Tokens> {
     let mut tokens = Tokens::from(data);
     let mut source_location = (0, 0); // (line_number, col)
     while let Some(first_char) = data.chars().next() {
