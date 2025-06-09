@@ -8,11 +8,14 @@ pub enum Token<'a> {
     Specifier(&'a str),
     Keyword(&'a str),
     Identifier(&'a str),
+    // Constants
     Constant(&'a str),
     ConstantLong(&'a str),
     Unsigned(&'a str),
     UnsignedLong(&'a str),
     Double(&'a str),
+    Character(&'a str),
+    String(&'a str),
     // Symbols
     OpenParen,
     CloseParen,
@@ -85,7 +88,7 @@ impl<'a> Token<'a> {
     pub fn is_type_specifier(&self) -> bool {
         match self {
             Token::Specifier(specifier) => {
-                ["int", "long", "signed", "unsigned", "double"].contains(specifier)
+                ["int", "long", "signed", "unsigned", "double", "char"].contains(specifier)
             }
             _ => false,
         }
@@ -95,7 +98,7 @@ impl<'a> Token<'a> {
         let mut token_type = token_type;
         match &mut token_type {
             Keyword(val) | Identifier(val) | Constant(val) | ConstantLong(val) | Specifier(val)
-            | Unsigned(val) | UnsignedLong(val) | Double(val) => {
+            | Unsigned(val) | UnsignedLong(val) | Double(val) | Character(val) | String(val) => {
                 *val = data;
             }
             _ => (),
@@ -116,6 +119,7 @@ lazy_static! {
             r"^signed\b",
             r"^unsigned\b",
             r"^double\b",
+            r"^char\b",
         ].join("|")).unwrap()),
         // Other keywords
         (Token::Keyword(""), Regex::new(&[
@@ -143,6 +147,8 @@ lazy_static! {
             Token::Double(""),
             Regex::new(r"^(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]").unwrap(),
         ),
+        (Token::Character(""), Regex::new(r#"^('(?<val>[^'\\\n]|\\['"?\\abfnrtv])')"#).unwrap()),
+        (Token::String(""), Regex::new(r#"^("(?<val>([^"\\\n]|\\['"\\?abfnrtv])*)")"#).unwrap()),
         // 3 Character Symbols
         (Token::RightShiftEqual, Regex::new(r"^>>=").unwrap()),
         (Token::LeftShiftEqual, Regex::new(r"^<<=").unwrap()),
