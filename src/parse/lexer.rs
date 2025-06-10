@@ -289,7 +289,7 @@ impl Tokens<'_> {
     }
     pub fn expect_token(&mut self, token: Token) -> ParseResult<()> {
         let next_token = self.tokens[self.current_token];
-        let result = self.try_consume(token);
+        let result = self.consume() == token;
         self.assert(
             result,
             format!("Syntax Error: Expected `{:?}`, found `{:?}`", token, next_token).as_str(),

@@ -64,6 +64,9 @@ pub enum VariableInitializer {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum CType {
+    Char,
+    SignedChar,
+    UnsignedChar,
     Int,
     Long,
     UnsignedInt,
@@ -77,6 +80,7 @@ pub enum CType {
 impl CType {
     pub fn size(&self) -> u64 {
         match self {
+            CType::Char | CType::UnsignedChar | CType::SignedChar => 1,
             CType::Int | CType::UnsignedInt => 4,
             CType::Long | CType::UnsignedLong => 8,
             CType::Double => 8,
@@ -94,7 +98,13 @@ impl CType {
     }
     pub fn is_int(&self) -> bool {
         match self {
-            Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong => true,
+            Self::Int
+            | Self::Long
+            | Self::UnsignedInt
+            | Self::UnsignedLong
+            | Self::Char
+            | Self::UnsignedChar
+            | Self::SignedChar => true,
             Self::Double | Self::Function(_, _) | Self::Pointer(_) | Self::Array(_, _) => false,
         }
     }
@@ -102,10 +112,7 @@ impl CType {
         matches!(self, Self::Pointer(_))
     }
     pub fn is_arithmetic(&self) -> bool {
-        match self {
-            Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong | Self::Double => true,
-            Self::Function(_, _) | Self::Pointer(_) | Self::Array(_, _) => false,
-        }
+        self.is_int() || *self == Self::Double
     }
 }
 
@@ -168,6 +175,7 @@ impl TypedExpression {
 #[derive(Debug, Clone)]
 pub enum Expression {
     Constant(Constant),
+    StringLiteral(String),
     Variable(String),
     Unary(UnaryOperator, Box<TypedExpression>),
     Binary(Box<BinaryExpression>),
@@ -238,22 +246,24 @@ pub enum BinaryOperator {
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Constant {
+    Char(i64),
     Int(i64), // Limited to i32, but we'll store it as i64 for convenient conversions
     Long(i64),
-    UnsignedInt(u64),
-    UnsignedLong(u64),
+    UChar(u64),
+    UInt(u64),
+    ULong(u64),
     Double(f64),
 }
 
 impl Constant {
     pub fn int_value(&self) -> i128 {
         match self {
-            Self::Int(val) | Self::Long(val) => *val as i128,
-            Self::UnsignedInt(val) | Self::UnsignedLong(val) => *val as i128,
+            Self::Int(val) | Self::Long(val) | Self::Char(val) => *val as i128,
+            Self::UInt(val) | Self::ULong(val) | Self::UChar(val) => *val as i128,
             Self::Double(val) => *val as i128,
         }
     }
     pub fn is_integer(&self) -> bool {
-        matches!(self, Self::Int(_) | Self::Long(_) | Self::UnsignedInt(_) | Self::UnsignedLong(_))
+        matches!(self, Self::Int(_) | Self::Long(_) | Self::UInt(_) | Self::ULong(_))
     }
 }

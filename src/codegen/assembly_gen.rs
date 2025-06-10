@@ -67,7 +67,6 @@ pub enum Instruction {
     IDiv(Operand, AssemblyType),
     Div(Operand, AssemblyType),
     Cdq(AssemblyType),
-
     Jmp(String),
     JmpCond(Condition, String),
     SetCond(Condition, Operand),
@@ -127,6 +126,7 @@ impl AssemblyType {
                 AssemblyType::ByteArray(size, alignment as usize)
             }
             CType::Function(_, _) => panic!("Not a variable!"),
+            CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!"),
         }
     }
     pub fn get_alignment(&self) -> usize {
@@ -830,10 +830,13 @@ fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
         generator::Value::Variable(name) => symbols[name].ctype.clone(),
         generator::Value::ConstValue(constexpr) => match constexpr {
             parse_tree::Constant::Int(_) => CType::Int,
-            parse_tree::Constant::UnsignedInt(_) => CType::UnsignedInt,
+            parse_tree::Constant::UInt(_) => CType::UnsignedInt,
             parse_tree::Constant::Long(_) => CType::Long,
-            parse_tree::Constant::UnsignedLong(_) => CType::UnsignedLong,
+            parse_tree::Constant::ULong(_) => CType::UnsignedLong,
             parse_tree::Constant::Double(_) => CType::Double,
+            parse_tree::Constant::Char(_) | parse_tree::Constant::UChar(_) => {
+                todo!("Implement char types!")
+            }
         },
     }
 }
@@ -853,12 +856,15 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
             parse_tree::Constant::Int(val) | parse_tree::Constant::Long(val) => {
                 Operand::Imm(val.into())
             }
-            parse_tree::Constant::UnsignedInt(val) | parse_tree::Constant::UnsignedLong(val) => {
+            parse_tree::Constant::UInt(val) | parse_tree::Constant::ULong(val) => {
                 Operand::Imm(val.into())
             }
             parse_tree::Constant::Double(val) => {
                 let name = stack.static_constant(val, false);
                 Operand::Data(name)
+            }
+            parse_tree::Constant::Char(_) | parse_tree::Constant::UChar(_) => {
+                todo!("Implement char types!")
             }
         },
         generator::Value::Variable(name) => {
