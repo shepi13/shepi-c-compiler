@@ -8,17 +8,17 @@ fn main() {
     match run_main(args) {
         Err(error) => {
             match error.exit_code {
-                1 => println!("GCC Preprocessing Failed!\n"),
-                2 => println!("Lex Error: "),
-                3 => println!("Parse Error: "),
-                4 => println!("Semantic Error: "),
-                5 => println!("Type Error: "),
-                6 => println!("Code Emission Failed!\n"),
-                7 => println!("GCC Assembler Failed!\n"),
-                8 => println!("GCC Assemble and Link Failed!\n"),
-                _ => println!("Unknown error!"),
+                1 => eprintln!("GCC Preprocessing Failed!\n"),
+                2 => eprintln!("Lex Error: "),
+                3 => eprintln!("Parse Error: "),
+                4 => eprintln!("Semantic Error: "),
+                5 => eprintln!("Type Error: "),
+                6 => eprintln!("Code Emission Failed!\n"),
+                7 => eprintln!("GCC Assembler Failed!\n"),
+                8 => eprintln!("GCC Assemble and Link Failed!\n"),
+                _ => eprintln!("Unknown error!"),
             }
-            println!("\t{}", error.message);
+            eprintln!("\t{}", error.message);
             exit(error.exit_code as i32);
         }
         Ok(_) => (),

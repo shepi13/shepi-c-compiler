@@ -105,8 +105,8 @@ fn eval_constant(constant: &Constant, ctype: &CType) -> TypeResult<Constant> {
     match ctype {
         CType::Int => Ok(Constant::Int((constant.int_value() & 0xFFFFFFFF) as i64)),
         CType::Long => Ok(Constant::Long((constant.int_value() & 0xFFFFFFFFFFFFFFFF) as i64)),
-        CType::UnsignedInt => Ok(Constant::UnsignedInt((constant.int_value() as u64) & 0xFFFFFFFF)),
-        CType::UnsignedLong => Ok(Constant::UnsignedLong(constant.int_value() as u64)),
+        CType::UnsignedInt => Ok(Constant::UInt((constant.int_value() as u64) & 0xFFFFFFFF)),
+        CType::UnsignedLong => Ok(Constant::ULong(constant.int_value() as u64)),
         CType::Double => match constant {
             Constant::Double(val) => Ok(Constant::Double(*val)),
             _ => Ok(Constant::Double(constant.int_value() as f64)),
@@ -346,13 +346,14 @@ fn type_check_expression(
         Expression::Constant(constant) => match constant {
             Constant::Int(_) => set_type(Expression::Constant(constant).into(), &CType::Int),
             Constant::Long(_) => set_type(Expression::Constant(constant).into(), &CType::Long),
-            Constant::UnsignedInt(_) => {
+            Constant::UInt(_) => {
                 set_type(Expression::Constant(constant).into(), &CType::UnsignedInt)
             }
-            Constant::UnsignedLong(_) => {
+            Constant::ULong(_) => {
                 set_type(Expression::Constant(constant).into(), &CType::UnsignedLong)
             }
             Constant::Double(_) => set_type(Expression::Constant(constant).into(), &CType::Double),
+            Constant::Char(_) | Constant::UChar(_) => todo!("Implement char types!")
         },
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_and_convert(*inner, table)?;
@@ -461,6 +462,7 @@ fn type_check_expression(
                 Err(TypeError::new("Subscript takes integer and pointer operands!"))
             }
         }
+        Expression::StringLiteral(_) => todo!("Add string literal!")
     }
 }
 
@@ -654,8 +656,8 @@ fn parse_static_initializer(
             )?;
             let expr_constant = eval_constant_expr(expr, ctype);
             let init_val = match expr_constant {
-                Ok(Constant::Int(val) | Constant::Long(val)) => parse_initializer_value(val, ctype),
-                Ok(Constant::UnsignedInt(val) | Constant::UnsignedLong(val)) => {
+                Ok(Constant::Int(val) | Constant::Long(val) | Constant::Char(val)) => parse_initializer_value(val, ctype),
+                Ok(Constant::UInt(val) | Constant::ULong(val) | Constant::UChar(val)) => {
                     parse_initializer_value(val, ctype)
                 }
                 Ok(Constant::Double(val)) => parse_initializer_value(val, ctype),
@@ -702,6 +704,7 @@ where
             Initializer::UnsignedLong(0)
         }
         CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) => panic!("Not a variable!"),
+        CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!")
     }
 }
 
@@ -712,11 +715,12 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::Long | CType::Pointer(_) => {
             SingleElem(Expression::Constant(Constant::Long(0)).into())
         }
-        CType::UnsignedInt => SingleElem(Expression::Constant(Constant::UnsignedInt(0)).into()),
-        CType::UnsignedLong => SingleElem(Expression::Constant(Constant::UnsignedLong(0)).into()),
+        CType::UnsignedInt => SingleElem(Expression::Constant(Constant::UInt(0)).into()),
+        CType::UnsignedLong => SingleElem(Expression::Constant(Constant::ULong(0)).into()),
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
         CType::Function(_, _) => panic!("Cannot zero initialize a function"),
+        CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!")
     }
 }
 

@@ -506,6 +506,7 @@ fn gen_expression(
             };
             ExpResult::DereferencedPointer(result)
         }
+        Expression::StringLiteral(_) => todo!("Add string literal!")
     }
 }
 

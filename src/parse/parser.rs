@@ -9,7 +9,7 @@ use super::declarators::{
 };
 use lazy_static::lazy_static;
 
-use crate::parse::{lexer::Tokens, parse_tree::Location};
+use crate::{helpers::lib::{unescape_char, unescape_string}, parse::{lexer::Tokens, parse_tree::Location}};
 
 use super::{
     lexer::{self, ParseResult},
@@ -78,6 +78,7 @@ pub fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
     let int_count = count_token(Specifier("int"));
     let long_count = count_token(Specifier("long"));
     let double_count = count_token(Specifier("double"));
+    let char_count = count_token(Specifier("char"));
 
     let is_signed = match (signed_count, unsigned_count) {
         (0, 0) | (1, 0) => true,
@@ -87,14 +88,28 @@ pub fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
     assert(!tokens.is_empty(), "Must specify type!")?;
     assert(int_count <= 1, "Repeated int keyword!")?;
 
-    // Doubles must be either double or long double
+    // Double and long double declaration and checks
     if double_count == 1 && [0, 1].contains(&long_count) {
         assert(unsigned_count == 0, "Double cannot be unsigned!")?;
         assert(signed_count == 0, "Double cannot be signed!")?;
         assert(int_count == 0, "Mixed int/double declaration!")?;
+        assert(char_count == 0, "Mixed char/double declaration!")?;
         return Ok(CType::Double);
     }
     assert(double_count == 0, "Invalid double declaration")?;
+    // Char declaration and checks
+    if char_count == 1 {
+        assert(long_count == 0, "Char cannot be long!")?;
+        assert(int_count == 0, "Mixed int/char declaration!")?;
+        if signed_count == 1 {
+            return Ok(CType::SignedChar)
+        } else if unsigned_count == 1 {
+            return Ok(CType::UnsignedChar)
+        } else {
+            return Ok(CType::Char)
+        }
+    }
+    assert(char_count == 0, "Invalid char declaration!")?;
 
     match (long_count, is_signed) {
         (0, false) => Ok(CType::UnsignedInt),
@@ -214,16 +229,24 @@ pub fn parse_constant(tokens: &mut Tokens) -> ParseResult<Constant> {
 }
 fn try_parse_constant(token: Token) -> Result<Constant, Box<dyn Error>> {
     match token {
+        Token::Character(data) => {
+            match unescape_char(data) {
+                Ok(val) => Ok(Constant::Int(val as i64)),
+                Err(message) => {
+                    return Err(message.into())
+                }
+            }
+        }
         Token::Constant(val) => match val.parse::<i32>() {
             Ok(val) => Ok(Constant::Int(val.into())),
             Err(_) => Ok(Constant::Long(val.parse()?)),
         },
         Token::ConstantLong(val) => Ok(Constant::Long(val.parse()?)),
         Token::Unsigned(val) => match val.parse::<u32>() {
-            Ok(val) => Ok(Constant::UnsignedInt(val.into())),
-            Err(_) => Ok(Constant::UnsignedLong(val.parse()?)),
+            Ok(val) => Ok(Constant::UInt(val.into())),
+            Err(_) => Ok(Constant::ULong(val.parse()?)),
         },
-        Token::UnsignedLong(val) => Ok(Constant::UnsignedLong(val.parse()?)),
+        Token::UnsignedLong(val) => Ok(Constant::ULong(val.parse()?)),
         Token::Double(val) => Ok(Constant::Double(val.parse()?)),
         _ => Err("Unexpected token!".into()),
     }
@@ -237,9 +260,25 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
         | Token::ConstantLong(_)
         | Token::Unsigned(_)
         | Token::UnsignedLong(_)
+        | Token::Character(_)
         | Token::Double(_) => {
             tokens.rewind();
             Expression::Constant(parse_constant(tokens)?)
+        }
+        Token::String(_) => {
+            tokens.rewind();
+            let mut string_data = String::new();
+            while matches!(tokens.peek(), Token::String(_)) {
+                let Token::String(data) = tokens.consume() else { panic!("Is string") };
+                match unescape_string(data) {
+                    Ok(data) => string_data.push_str(&data),
+                    Err(message) => {
+                        tokens.rewind();
+                        return Err(tokens.parse_error(&message))
+                    }
+                }
+            }
+            Expression::StringLiteral(string_data)
         }
         Token::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens)?.into()),
         Token::Tilde => Expression::Unary(UnaryOperator::Complement, parse_factor(tokens)?.into()),
