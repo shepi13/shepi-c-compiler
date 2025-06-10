@@ -98,7 +98,13 @@ impl CType {
     }
     pub fn is_int(&self) -> bool {
         match self {
-            Self::Int | Self::Long | Self::UnsignedInt | Self::UnsignedLong | Self::Char | Self::UnsignedChar | Self::SignedChar => true,
+            Self::Int
+            | Self::Long
+            | Self::UnsignedInt
+            | Self::UnsignedLong
+            | Self::Char
+            | Self::UnsignedChar
+            | Self::SignedChar => true,
             Self::Double | Self::Function(_, _) | Self::Pointer(_) | Self::Array(_, _) => false,
         }
     }
@@ -239,8 +245,7 @@ pub enum BinaryOperator {
     GreaterThanEqual,
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Constant 
-{
+pub enum Constant {
     Char(i64),
     Int(i64), // Limited to i32, but we'll store it as i64 for convenient conversions
     Long(i64),

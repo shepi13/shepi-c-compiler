@@ -353,7 +353,7 @@ fn type_check_expression(
                 set_type(Expression::Constant(constant).into(), &CType::UnsignedLong)
             }
             Constant::Double(_) => set_type(Expression::Constant(constant).into(), &CType::Double),
-            Constant::Char(_) | Constant::UChar(_) => todo!("Implement char types!")
+            Constant::Char(_) | Constant::UChar(_) => todo!("Implement char types!"),
         },
         Expression::Cast(new_type, inner) => {
             let typed_inner = type_check_and_convert(*inner, table)?;
@@ -462,7 +462,7 @@ fn type_check_expression(
                 Err(TypeError::new("Subscript takes integer and pointer operands!"))
             }
         }
-        Expression::StringLiteral(_) => todo!("Add string literal!")
+        Expression::StringLiteral(_) => todo!("Add string literal!"),
     }
 }
 
@@ -656,7 +656,9 @@ fn parse_static_initializer(
             )?;
             let expr_constant = eval_constant_expr(expr, ctype);
             let init_val = match expr_constant {
-                Ok(Constant::Int(val) | Constant::Long(val) | Constant::Char(val)) => parse_initializer_value(val, ctype),
+                Ok(Constant::Int(val) | Constant::Long(val) | Constant::Char(val)) => {
+                    parse_initializer_value(val, ctype)
+                }
                 Ok(Constant::UInt(val) | Constant::ULong(val) | Constant::UChar(val)) => {
                     parse_initializer_value(val, ctype)
                 }
@@ -704,7 +706,7 @@ where
             Initializer::UnsignedLong(0)
         }
         CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) => panic!("Not a variable!"),
-        CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!")
+        CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!"),
     }
 }
 
@@ -720,7 +722,7 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
         CType::Function(_, _) => panic!("Cannot zero initialize a function"),
-        CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!")
+        CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!"),
     }
 }
 

@@ -9,7 +9,10 @@ use super::declarators::{
 };
 use lazy_static::lazy_static;
 
-use crate::{helpers::lib::{unescape_char, unescape_string}, parse::{lexer::Tokens, parse_tree::Location}};
+use crate::{
+    helpers::lib::{unescape_char, unescape_string},
+    parse::{lexer::Tokens, parse_tree::Location},
+};
 
 use super::{
     lexer::{self, ParseResult},
@@ -102,11 +105,11 @@ pub fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
         assert(long_count == 0, "Char cannot be long!")?;
         assert(int_count == 0, "Mixed int/char declaration!")?;
         if signed_count == 1 {
-            return Ok(CType::SignedChar)
+            return Ok(CType::SignedChar);
         } else if unsigned_count == 1 {
-            return Ok(CType::UnsignedChar)
+            return Ok(CType::UnsignedChar);
         } else {
-            return Ok(CType::Char)
+            return Ok(CType::Char);
         }
     }
     assert(char_count == 0, "Invalid char declaration!")?;
@@ -229,14 +232,10 @@ pub fn parse_constant(tokens: &mut Tokens) -> ParseResult<Constant> {
 }
 fn try_parse_constant(token: Token) -> Result<Constant, Box<dyn Error>> {
     match token {
-        Token::Character(data) => {
-            match unescape_char(data) {
-                Ok(val) => Ok(Constant::Int(val as i64)),
-                Err(message) => {
-                    return Err(message.into())
-                }
-            }
-        }
+        Token::Character(data) => match unescape_char(data) {
+            Ok(val) => Ok(Constant::Int(val as i64)),
+            Err(message) => return Err(message.into()),
+        },
         Token::Constant(val) => match val.parse::<i32>() {
             Ok(val) => Ok(Constant::Int(val.into())),
             Err(_) => Ok(Constant::Long(val.parse()?)),
@@ -274,7 +273,7 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
                     Ok(data) => string_data.push_str(&data),
                     Err(message) => {
                         tokens.rewind();
-                        return Err(tokens.parse_error(&message))
+                        return Err(tokens.parse_error(&message));
                     }
                 }
             }

@@ -126,7 +126,7 @@ impl AssemblyType {
                 AssemblyType::ByteArray(size, alignment as usize)
             }
             CType::Function(_, _) => panic!("Not a variable!"),
-            CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!")
+            CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!"),
         }
     }
     pub fn get_alignment(&self) -> usize {
@@ -834,7 +834,9 @@ fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
             parse_tree::Constant::Long(_) => CType::Long,
             parse_tree::Constant::ULong(_) => CType::UnsignedLong,
             parse_tree::Constant::Double(_) => CType::Double,
-            parse_tree::Constant::Char(_) | parse_tree::Constant::UChar(_) => todo!("Implement char types!")
+            parse_tree::Constant::Char(_) | parse_tree::Constant::UChar(_) => {
+                todo!("Implement char types!")
+            }
         },
     }
 }
@@ -861,7 +863,9 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
                 let name = stack.static_constant(val, false);
                 Operand::Data(name)
             }
-            parse_tree::Constant::Char(_) | parse_tree::Constant::UChar(_) => todo!("Implement char types!"),
+            parse_tree::Constant::Char(_) | parse_tree::Constant::UChar(_) => {
+                todo!("Implement char types!")
+            }
         },
         generator::Value::Variable(name) => {
             let symbol = &symbols[&name];

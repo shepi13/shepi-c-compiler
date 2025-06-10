@@ -6,11 +6,11 @@ pub fn unescape_char(value: &str) -> Result<i32, String> {
             Ok(_escape_char_code(next_char)?)
         }
         Some(val) => Ok(val as i32),
-        None => return Err("Empty character literal!".into())
+        None => return Err("Empty character literal!".into()),
     }
 }
 
-pub fn unescape_string (value: &str) -> Result<String, String> {
+pub fn unescape_string(value: &str) -> Result<String, String> {
     let mut chars = value.chars();
     let mut result = String::new();
     while let Some(current_char) = chars.next() {
