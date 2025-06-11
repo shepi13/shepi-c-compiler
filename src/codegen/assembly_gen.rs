@@ -1,275 +1,60 @@
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter::zip;
-use std::sync::atomic::AtomicUsize;
 
 use super::assembly_rewrite::check_overflow;
+use crate::codegen::assembly_ast::{
+    self, AsmSymbol, AssemblyType, BinaryOperator, Condition, FLOAT_REGISTERS, Function,
+    INT_REGISTERS, Instruction, Operand, Program, Register, StackGen, StaticVar, TopLevelDecl,
+    UnaryOperator,
+};
 use crate::parse::parse_tree;
-use crate::parse::parse_tree::CType;
-use crate::tac_generation::generator::{self, Value, gen_label};
-use crate::validate::type_check::{Initializer, SymbolAttr, Symbols};
+use crate::tac_generation::generator::gen_label;
+use crate::tac_generation::tac_ast::{self, Value};
+use crate::validate::ctype::{CType, SymbolAttr, Symbols};
 
-use Operand::Imm;
-use Operand::Memory;
-use Operand::Register as Reg;
-use Register::*;
+use assembly_ast::Operand::{Data, Imm, Memory, Register as Reg};
+use assembly_ast::Register::*;
 
-pub type BackendSymbols = HashMap<String, AsmSymbol>;
-#[derive(Debug, Clone)]
-pub struct Program {
-    pub program: Vec<TopLevelDecl>,
-    pub backend_symbols: HashMap<String, AsmSymbol>,
-}
-#[derive(Debug, Clone)]
-pub enum TopLevelDecl {
-    FunctionDecl(Function),
-    Var(StaticVar),
-    Constant(StaticConstant),
-}
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum AsmSymbol {
-    ObjectEntry(AssemblyType, bool),
-    FunctionEntry(bool),
-}
-#[derive(Debug, Clone)]
-pub struct StaticVar {
-    pub name: String,
-    pub global: bool,
-    pub alignment: u64,
-    pub init: Vec<Initializer>,
-}
-#[derive(Debug, Clone)]
-pub struct StaticConstant {
-    pub name: String,
-    pub alignment: u64,
-    pub init: Initializer,
-    pub neg_zero: bool,
-}
-#[derive(Debug, Clone)]
-pub struct Function {
-    pub name: String,
-    pub instructions: Vec<Instruction>,
-    pub global: bool,
-}
-// Instructions
-#[derive(Debug, Clone)]
-pub enum Instruction {
-    Mov(Operand, Operand, AssemblyType),
-    MovSignExtend(Operand, Operand),
-    MovZeroExtend(Operand, Operand),
-    Lea(Operand, Operand),
-    Cvttsd2si(Operand, Operand, AssemblyType),
-    Cvtsi2sd(Operand, Operand, AssemblyType),
-    Unary(UnaryOperator, Operand, AssemblyType),
-    Binary(BinaryOperator, Operand, Operand, AssemblyType),
-    Compare(Operand, Operand, AssemblyType),
-    IDiv(Operand, AssemblyType),
-    Div(Operand, AssemblyType),
-    Cdq(AssemblyType),
-    Jmp(String),
-    JmpCond(Condition, String),
-    SetCond(Condition, Operand),
-    Label(String),
-    Push(Operand),
-    Call(String),
-    Ret,
-    Nop,
-}
-#[derive(Debug, Clone, Copy)]
-pub enum UnaryOperator {
-    Not,
-    Neg,
-    Shr,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOperator {
-    Add,
-    Mult,
-    Sub,
-    DoubleDiv,
-    BitAnd,
-    BitOr,
-    BitXor,
-    LeftShift,
-    RightShift,
-    LeftShiftUnsigned,
-    RightShiftUnsigned,
-}
-// Operands
-#[derive(Debug, Clone, PartialEq)]
-pub enum Operand {
-    Imm(i128),
-    Memory(Register, isize),
-    Register(Register),
-    Data(String),
-    Indexed(Register, Register, u64),
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssemblyType {
-    Longword,
-    Quadword,
-    Double,
-    ByteArray(u64, usize),
-}
-impl AssemblyType {
-    pub fn from(ctype: &CType) -> Self {
-        match ctype {
-            CType::Int | CType::UnsignedInt => AssemblyType::Longword,
-            CType::Long | CType::UnsignedLong => AssemblyType::Quadword,
-            CType::Double => AssemblyType::Double,
-            CType::Pointer(_) => AssemblyType::Quadword,
-            CType::Array(elem_t, _) => {
-                let size = ctype.size();
-                let alignment = if size < 16 { elem_t.size() } else { 16 };
-                assert!([1, 2, 4, 8, 16].contains(&alignment), "Alignment error: {:#?}", alignment);
-                AssemblyType::ByteArray(size, alignment as usize)
-            }
-            CType::Function(_, _) => panic!("Not a variable!"),
-            CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Add char type!"),
-        }
-    }
-    pub fn get_alignment(&self) -> usize {
-        match self {
-            Self::Double | Self::Quadword => 8,
-            Self::Longword => 4,
-            Self::ByteArray(_, alignment) => *alignment,
-        }
-    }
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Register {
-    AX,
-    CX,
-    DX,
-    DI,
-    SI,
-    R8,
-    R9,
-    R10,
-    R11,
-    CL,
-    SP,
-    BP,
-    XMM0,
-    XMM1,
-    XMM2,
-    XMM3,
-    XMM4,
-    XMM5,
-    XMM6,
-    XMM7,
-    XMM14,
-    XMM15,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Condition {
-    Equal,
-    NotEqual,
-    GreaterThan,
-    GreaterThanEqual,
-    LessThan,
-    LessThanEqual,
-    UnsignedGreaterThan,
-    UnsignedGreaterEqual,
-    UnsignedLessThan,
-    UnsignedLessEqual,
-    Parity,
-}
-
-struct StackGen {
-    static_constants: Vec<(f64, StaticConstant)>,
-    stack_variables: HashMap<String, usize>,
-    stack_offset: usize,
-}
-
-impl StackGen {
-    pub fn new() -> StackGen {
-        StackGen {
-            static_constants: Vec::new(),
-            stack_variables: HashMap::new(),
-            stack_offset: 0,
-        }
-    }
-    pub fn reset_stack(&mut self) {
-        self.stack_variables = HashMap::new();
-        self.stack_offset = 0;
-    }
-    pub fn static_constant(&mut self, value: f64, neg_zero: bool) -> String {
-        let search_result = self.static_constants.binary_search_by(|probe| {
-            if probe.0 == value && probe.1.neg_zero == neg_zero {
-                Ordering::Equal
-            } else if probe.0 > value || probe.0 == value && probe.1.neg_zero {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            }
-        });
-        match search_result {
-            Ok(location) => self.static_constants[location].1.name.clone(),
-            Err(location) => {
-                let name = StackGen::gen_static_constant_name();
-                let alignment = if neg_zero { 16 } else { 8 };
-                let static_constant = StaticConstant {
-                    name: name.clone(),
-                    alignment,
-                    init: Initializer::Double(value),
-                    neg_zero,
-                };
-                self.static_constants.insert(location, (value, static_constant));
-                name
-            }
-        }
-    }
-    fn gen_static_constant_name() -> String {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        format!(".Lconst_double.{}", COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-}
-
-const INT_REGISTERS: [Register; 6] = [DI, SI, DX, CX, R8, R9];
-const FLOAT_REGISTERS: [Register; 8] = [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7];
-
-pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
+pub fn gen_assembly_tree(ast: tac_ast::Program, symbols: Symbols) -> Program {
     let mut program = Vec::new();
-    let mut stack = StackGen::new();
+    let mut stack = StackGen::default();
     for decl in ast.into_iter() {
         match decl {
-            generator::TopLevelDecl::Function(function) => {
-                if function.instructions.is_empty() {
+            tac_ast::TopLevelDecl::Function { name, params, instructions, global } => {
+                if instructions.is_empty() {
                     continue;
                 }
                 // Setup initial state (including nop that will be replaced by stack allocation later)
-                let mut instructions: Vec<Instruction> = Vec::new();
-                instructions.push(Instruction::Nop);
+                let mut new_instructions: Vec<Instruction> = Vec::new();
+                new_instructions.push(Instruction::Nop);
                 stack.reset_stack();
                 // Pull arguments from registers/stack
-                let mut param_setup = set_up_parameters(function.params, &mut stack, &symbols);
-                instructions.append(&mut param_setup);
+                let mut param_setup = set_up_parameters(params, &mut stack, &symbols);
+                new_instructions.append(&mut param_setup);
                 // Generate instructions for function body
-                let mut body = gen_instructions(function.instructions, &mut stack, &symbols);
-                instructions.append(&mut body);
+                let mut body = gen_instructions(instructions, &mut stack, &symbols);
+                new_instructions.append(&mut body);
                 // Replace Nop with stack allocation, and add instructions to program
-                instructions[0] = Instruction::Binary(
+                new_instructions[0] = Instruction::Binary(
                     BinaryOperator::Sub,
                     Imm((stack.stack_offset + 16 - stack.stack_offset % 16) as i128),
                     Reg(SP),
                     AssemblyType::Quadword,
                 );
                 program.push(TopLevelDecl::FunctionDecl(Function {
-                    name: function.name,
-                    global: function.global,
-                    instructions,
+                    name,
+                    global,
+                    instructions: new_instructions,
                 }));
             }
-            generator::TopLevelDecl::StaticDecl(static_data) => {
+            tac_ast::TopLevelDecl::StaticDecl { identifier, global, ctype, initializer } => {
                 // Calculate smaller valid alignment if possible TODO:
-                let alignment = AssemblyType::from(&static_data.ctype).get_alignment() as u64;
+                let alignment = AssemblyType::from(ctype).get_alignment() as u64;
                 program.push(TopLevelDecl::Var(StaticVar {
-                    name: static_data.identifier,
-                    global: static_data.global,
+                    name: identifier,
+                    global,
                     alignment,
-                    init: static_data.initializer,
+                    init: initializer,
                 }));
             }
         }
@@ -284,7 +69,7 @@ pub fn gen_assembly_tree(ast: generator::Program, symbols: Symbols) -> Program {
 }
 
 fn set_up_parameters(
-    params: Vec<generator::Value>,
+    params: Vec<tac_ast::Value>,
     stack: &mut StackGen,
     symbols: &Symbols,
 ) -> Vec<Instruction> {
@@ -310,14 +95,14 @@ fn set_up_parameters(
 fn gen_backend_symbols(symbols: Symbols) -> HashMap<String, AsmSymbol> {
     let mut backend_symbols = HashMap::new();
     for (name, symbol) in symbols {
-        match &symbol.attrs {
-            SymbolAttr::Function(func_attrs) => {
-                backend_symbols.insert(name, AsmSymbol::FunctionEntry(func_attrs.defined));
+        match symbol.attrs {
+            SymbolAttr::Function { defined, global: _ } => {
+                backend_symbols.insert(name, AsmSymbol::FunctionEntry(defined));
             }
             _ => {
-                let asm_type = AssemblyType::from(&symbol.ctype);
                 let is_static = symbol.attrs != SymbolAttr::Local;
-                backend_symbols.insert(name, AsmSymbol::ObjectEntry(asm_type, is_static));
+                backend_symbols
+                    .insert(name, AsmSymbol::ObjectEntry(symbol.ctype.into(), is_static));
             }
         }
     }
@@ -325,7 +110,7 @@ fn gen_backend_symbols(symbols: Symbols) -> HashMap<String, AsmSymbol> {
 }
 
 fn gen_instructions(
-    instructions: Vec<generator::Instruction>,
+    instructions: Vec<tac_ast::Instruction>,
     stack: &mut StackGen,
     symbols: &Symbols,
 ) -> Vec<Instruction> {
@@ -333,22 +118,22 @@ fn gen_instructions(
     for instruction in instructions {
         use Instruction::*;
         match instruction {
-            generator::Instruction::Return(val) => {
-                let val_type = AssemblyType::from(&get_type(&val, symbols));
+            tac_ast::Instruction::Return(val) => {
+                let val_type = AssemblyType::from(get_type(&val, symbols));
                 let val = gen_operand(val, stack, symbols);
                 let reg = if val_type == AssemblyType::Double { Reg(XMM0) } else { Reg(AX) };
                 asm_instructions.push(Mov(val, reg, val_type));
                 asm_instructions.push(Ret);
             }
-            generator::Instruction::UnaryOp(val) => {
+            tac_ast::Instruction::UnaryOp { operator, src, dst } => {
                 use BinaryOperator::BitXor;
-                let src_type = AssemblyType::from(&get_type(&val.src, symbols));
-                let dst_type = AssemblyType::from(&get_type(&val.dst, symbols));
-                let src = gen_operand(val.src, stack, symbols);
-                let dst = gen_operand(val.dst, stack, symbols);
-                let operator = match val.operator {
-                    generator::UnaryOperator::Complement => UnaryOperator::Not,
-                    generator::UnaryOperator::Negate => {
+                let src_type = AssemblyType::from(get_type(&src, symbols));
+                let dst_type = AssemblyType::from(get_type(&dst, symbols));
+                let src = gen_operand(src, stack, symbols);
+                let dst = gen_operand(dst, stack, symbols);
+                let operator = match operator {
+                    tac_ast::UnaryOperator::Complement => UnaryOperator::Not,
+                    tac_ast::UnaryOperator::Negate => {
                         if src_type == AssemblyType::Double {
                             // Doubles use xor with -0.0 for negation
                             let neg_zero = Operand::Data(stack.static_constant(-0.0, true));
@@ -359,7 +144,7 @@ fn gen_instructions(
                             UnaryOperator::Neg
                         }
                     }
-                    generator::UnaryOperator::LogicalNot => {
+                    tac_ast::UnaryOperator::LogicalNot => {
                         // Logical not uses cmp instead of unary operators
                         if src_type == AssemblyType::Double {
                             let nan_label = gen_label("nan");
@@ -384,57 +169,57 @@ fn gen_instructions(
                 asm_instructions.push(Mov(src, dst.clone(), src_type));
                 asm_instructions.push(Unary(operator, dst, src_type));
             }
-            generator::Instruction::BinaryOp(binop) => {
-                gen_binary_op(&mut asm_instructions, binop, stack, symbols);
+            tac_ast::Instruction::BinaryOp { operator: _, src1: _, src2: _, dst: _ } => {
+                gen_binary_op(&mut asm_instructions, instruction, stack, symbols);
             }
-            generator::Instruction::Jump(target) => {
+            tac_ast::Instruction::Jump(target) => {
                 asm_instructions.push(Jmp(target));
             }
-            generator::Instruction::JumpCond(jump) => {
+            tac_ast::Instruction::JumpCond { jump_type, condition, target } => {
                 use BinaryOperator::BitXor;
-                let condition = match jump.jump_type {
-                    generator::JumpType::JumpIfZero => Condition::Equal,
-                    generator::JumpType::JumpIfNotZero => Condition::NotEqual,
+                let condition_t = match jump_type {
+                    tac_ast::JumpType::JumpIfZero => Condition::Equal,
+                    tac_ast::JumpType::JumpIfNotZero => Condition::NotEqual,
                 };
-                let cmp_type = AssemblyType::from(&get_type(&jump.condition, symbols));
-                let dst = gen_operand(jump.condition, stack, symbols);
+                let cmp_type = AssemblyType::from(get_type(&condition, symbols));
+                let dst = gen_operand(condition, stack, symbols);
                 if cmp_type == AssemblyType::Double {
                     let end_label = gen_label("jumpcond_end");
                     asm_instructions.push(Binary(BitXor, Reg(XMM0), Reg(XMM0), cmp_type));
                     asm_instructions.push(Compare(dst, Reg(XMM0), cmp_type));
-                    match jump.jump_type {
-                        generator::JumpType::JumpIfNotZero => {
-                            asm_instructions.push(JmpCond(Condition::Parity, jump.target.clone()))
+                    match jump_type {
+                        tac_ast::JumpType::JumpIfNotZero => {
+                            asm_instructions.push(JmpCond(Condition::Parity, target.clone()))
                         }
-                        generator::JumpType::JumpIfZero => {
+                        tac_ast::JumpType::JumpIfZero => {
                             asm_instructions.push(JmpCond(Condition::Parity, end_label.clone()))
                         }
                     }
-                    asm_instructions.push(JmpCond(condition, jump.target));
+                    asm_instructions.push(JmpCond(condition_t, target));
                     asm_instructions.push(Label(end_label));
                 } else {
                     asm_instructions.push(Compare(Imm(0), dst, cmp_type));
-                    asm_instructions.push(JmpCond(condition, jump.target));
+                    asm_instructions.push(JmpCond(condition_t, target));
                 }
             }
-            generator::Instruction::Copy(src, dst) => {
-                let src_type = AssemblyType::from(&get_type(&src, symbols));
+            tac_ast::Instruction::Copy(src, dst) => {
+                let src_type = AssemblyType::from(get_type(&src, symbols));
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Mov(src, dst, src_type));
             }
-            generator::Instruction::Label(target) => {
+            tac_ast::Instruction::Label(target) => {
                 asm_instructions.push(Label(target));
             }
-            generator::Instruction::Function(name, args, dst) => {
+            tac_ast::Instruction::Function(name, args, dst) => {
                 gen_func_call(&mut asm_instructions, stack, name, args, dst, symbols);
             }
-            generator::Instruction::SignExtend(src, dst) => {
+            tac_ast::Instruction::SignExtend(src, dst) => {
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(MovSignExtend(src, dst));
             }
-            generator::Instruction::Truncate(src, dst) => {
+            tac_ast::Instruction::Truncate(src, dst) => {
                 let mut src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 if check_overflow(&src, i32::MAX as i128) {
@@ -443,24 +228,24 @@ fn gen_instructions(
                 }
                 asm_instructions.push(Mov(src, dst, AssemblyType::Longword));
             }
-            generator::Instruction::ZeroExtend(src, dst) => {
+            tac_ast::Instruction::ZeroExtend(src, dst) => {
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(MovZeroExtend(src, dst));
             }
-            generator::Instruction::DoubleToInt(src, dst) => {
-                let dst_type = AssemblyType::from(&get_type(&dst, symbols));
+            tac_ast::Instruction::DoubleToInt(src, dst) => {
+                let dst_type = AssemblyType::from(get_type(&dst, symbols));
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Cvttsd2si(src, dst, dst_type));
             }
-            generator::Instruction::IntToDouble(src, dst) => {
-                let src_type = AssemblyType::from(&get_type(&src, symbols));
+            tac_ast::Instruction::IntToDouble(src, dst) => {
+                let src_type = AssemblyType::from(get_type(&src, symbols));
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Cvtsi2sd(src, dst, src_type));
             }
-            generator::Instruction::DoubleToUInt(src, dst) => match get_type(&dst, symbols) {
+            tac_ast::Instruction::DoubleToUInt(src, dst) => match get_type(&dst, symbols) {
                 CType::UnsignedInt => {
                     let src = gen_operand(src, stack, symbols);
                     let dst = gen_operand(dst, stack, symbols);
@@ -472,7 +257,7 @@ fn gen_instructions(
                 }
                 _ => panic!("Expected an unsigned dst"),
             },
-            generator::Instruction::UIntToDouble(src, dst) => match get_type(&src, symbols) {
+            tac_ast::Instruction::UIntToDouble(src, dst) => match get_type(&src, symbols) {
                 CType::UnsignedInt => {
                     let src = gen_operand(src, stack, symbols);
                     let dst = gen_operand(dst, stack, symbols);
@@ -484,26 +269,26 @@ fn gen_instructions(
                 }
                 _ => panic!("Expected an unsigned src!"),
             },
-            generator::Instruction::GetAddress(src, dst) => {
+            tac_ast::Instruction::GetAddress(src, dst) => {
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Lea(src, dst));
             }
-            generator::Instruction::Load(ptr, dst) => {
-                let dst_type = AssemblyType::from(&get_type(&dst, symbols));
+            tac_ast::Instruction::Load(ptr, dst) => {
+                let dst_type = AssemblyType::from(get_type(&dst, symbols));
                 let ptr = gen_operand(ptr, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
                 asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
                 asm_instructions.push(Mov(Memory(AX, 0), dst, dst_type));
             }
-            generator::Instruction::Store(src, ptr) => {
-                let src_type = AssemblyType::from(&get_type(&src, symbols));
+            tac_ast::Instruction::Store(src, ptr) => {
+                let src_type = AssemblyType::from(get_type(&src, symbols));
                 let src = gen_operand(src, stack, symbols);
                 let ptr = gen_operand(ptr, stack, symbols);
                 asm_instructions.push(Mov(ptr, Reg(AX), AssemblyType::Quadword));
                 asm_instructions.push(Mov(src, Memory(AX, 0), src_type));
             }
-            generator::Instruction::AddPtr(ptr, index, scale, dst) => {
+            tac_ast::Instruction::AddPtr(ptr, index, scale, dst) => {
                 let ptr = gen_operand(ptr, stack, symbols);
                 let index = gen_operand(index, stack, symbols);
                 let dst = gen_operand(dst, stack, symbols);
@@ -525,8 +310,8 @@ fn gen_instructions(
                     asm_instructions.push(Lea(Operand::Indexed(AX, DX, 1), dst));
                 }
             }
-            generator::Instruction::CopyToOffset(src, dst, offset) => {
-                let src_type = AssemblyType::from(&get_type(&src, symbols));
+            tac_ast::Instruction::CopyToOffset(src, dst, offset) => {
+                let src_type = AssemblyType::from(get_type(&src, symbols));
                 let src = gen_operand(src, stack, symbols);
                 let dst = gen_mem_offset(dst, offset as isize, stack, symbols);
                 asm_instructions.push(Mov(src, dst, src_type));
@@ -545,7 +330,6 @@ fn gen_double2ull(
 ) {
     use BinaryOperator::{Add, Sub};
     use Instruction::*;
-    use Operand::Data;
     let src = gen_operand(src, stack, symbols);
     let dst = gen_operand(dst, stack, symbols);
     // Long max + 1
@@ -621,7 +405,7 @@ fn classify_parameters(
     let mut float_args = Vec::new();
     let mut stack_args = Vec::new();
     for param in parameters {
-        let param_type = AssemblyType::from(&get_type(&param, symbols));
+        let param_type = AssemblyType::from(get_type(&param, symbols));
         let operand = gen_operand(param, stack, symbols);
         if param_type == AssemblyType::Double && float_args.len() < 8 {
             float_args.push((param_type, operand));
@@ -638,8 +422,8 @@ fn gen_func_call(
     instructions: &mut Vec<Instruction>,
     stack: &mut StackGen,
     name: String,
-    args: Vec<generator::Value>,
-    dst: generator::Value,
+    args: Vec<tac_ast::Value>,
+    dst: tac_ast::Value,
     symbols: &Symbols,
 ) {
     use AssemblyType::*;
@@ -675,7 +459,7 @@ fn gen_func_call(
         instructions.push(Binary(BinaryOperator::Add, Imm(bytes_to_remove), Reg(SP), Quadword));
     }
     // Get return value from eax or xmm0
-    let dst_type = AssemblyType::from(&get_type(&dst, symbols));
+    let dst_type = AssemblyType::from(get_type(&dst, symbols));
     let dst = gen_operand(dst, stack, symbols);
     let result_reg = if dst_type == AssemblyType::Double { Reg(XMM0) } else { Reg(AX) };
     instructions.push(Instruction::Mov(result_reg, dst, dst_type));
@@ -683,22 +467,25 @@ fn gen_func_call(
 
 fn gen_binary_op(
     instructions: &mut Vec<Instruction>,
-    binary_instruction: generator::InstructionBinary,
+    binary_instruction: tac_ast::Instruction,
     stack: &mut StackGen,
     symbols: &Symbols,
 ) {
+    let tac_ast::Instruction::BinaryOp { operator, src1, src2, dst } = binary_instruction else {
+        panic!("Expected binary instruction!")
+    };
     use parse_tree::BinaryOperator::*;
-    let src_ctype = get_type(&binary_instruction.src1, symbols);
-    let asm_type = AssemblyType::from(&src_ctype);
-    let src1 = gen_operand(binary_instruction.src1, stack, symbols);
-    let src2 = gen_operand(binary_instruction.src2, stack, symbols);
-    let dst = gen_operand(binary_instruction.dst, stack, symbols);
+    let src_ctype = get_type(&src1, symbols);
+    let asm_type = AssemblyType::from(src_ctype.clone());
+    let src1 = gen_operand(src1, stack, symbols);
+    let src2 = gen_operand(src2, stack, symbols);
+    let dst = gen_operand(dst, stack, symbols);
     // Instructions for generic binary ops (addition, subtraction, mult, bitwise)
     let mut gen_arithmetic = |operator| {
         instructions.push(Instruction::Mov(src1.clone(), dst.clone(), asm_type));
         instructions.push(Instruction::Binary(operator, src2.clone(), dst.clone(), asm_type));
     };
-    match &binary_instruction.operator {
+    match &operator {
         // Handle arithmetic binary operators
         Add => gen_arithmetic(BinaryOperator::Add),
         Multiply => gen_arithmetic(BinaryOperator::Mult),
@@ -742,8 +529,8 @@ fn gen_binary_op(
                 src_ctype.is_arithmetic() && src_ctype.is_signed()
             };
             // NAN returns true for !=, false otherwise
-            let nan_result = (binary_instruction.operator == NotEqual) as i128;
-            let condition = get_condition(binary_instruction.operator, signed);
+            let nan_result = (operator == NotEqual) as i128;
+            let condition = get_condition(operator, signed);
             let nan_label = gen_label("is_nan");
             let end_label = gen_label("end");
             instructions.push(Instruction::Compare(src2, src1, asm_type));
@@ -825,10 +612,10 @@ fn gen_division(
     instructions.push(Instruction::Mov(Reg(result_reg), dst, div_type));
 }
 
-fn get_type(value: &generator::Value, symbols: &Symbols) -> CType {
+fn get_type(value: &tac_ast::Value, symbols: &Symbols) -> CType {
     match &value {
-        generator::Value::Variable(name) => symbols[name].ctype.clone(),
-        generator::Value::ConstValue(constexpr) => match constexpr {
+        tac_ast::Value::Variable(name) => symbols[name].ctype.clone(),
+        tac_ast::Value::ConstValue(constexpr) => match constexpr {
             parse_tree::Constant::Int(_) => CType::Int,
             parse_tree::Constant::UInt(_) => CType::UnsignedInt,
             parse_tree::Constant::Long(_) => CType::Long,
@@ -850,9 +637,9 @@ fn gen_mem_offset(name: String, offset: isize, stack: &mut StackGen, symbols: &S
     }
 }
 
-fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols) -> Operand {
+fn gen_operand(value: tac_ast::Value, stack: &mut StackGen, symbols: &Symbols) -> Operand {
     match value {
-        generator::Value::ConstValue(constexpr) => match constexpr {
+        tac_ast::Value::ConstValue(constexpr) => match constexpr {
             parse_tree::Constant::Int(val) | parse_tree::Constant::Long(val) => {
                 Operand::Imm(val.into())
             }
@@ -867,10 +654,10 @@ fn gen_operand(value: generator::Value, stack: &mut StackGen, symbols: &Symbols)
                 todo!("Implement char types!")
             }
         },
-        generator::Value::Variable(name) => {
+        tac_ast::Value::Variable(name) => {
             let symbol = &symbols[&name];
-            let var_type = AssemblyType::from(&symbol.ctype);
-            if matches!(symbol.attrs, SymbolAttr::Static(_)) {
+            let var_type = AssemblyType::from(symbol.ctype.clone());
+            if matches!(symbol.attrs, SymbolAttr::Static { init: _, global: _ }) {
                 Operand::Data(name)
             } else if let Some(location) = stack.stack_variables.get(&name) {
                 Operand::Memory(BP, -(*location as isize))

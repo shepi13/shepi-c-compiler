@@ -4,122 +4,34 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
     parse::parse_tree::{
-        self, BinaryExpression, BinaryOperator, CType, Constant, Expression, ForInit,
-        IncrementType, Statement, StorageClass, TypedExpression, VariableInitializer,
+        self, BinaryExpression, BinaryOperator, Constant, Expression, ForInit, IncrementType,
+        Statement, TypedExpression, VariableInitializer,
     },
-    validate::type_check::{Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_type},
+    tac_generation::tac_ast::{Instruction, JumpType, Program, TopLevelDecl, Value},
+    validate::{
+        ctype::{CType, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols},
+        type_check::get_type,
+    },
 };
-
-pub type Program = Vec<TopLevelDecl>;
-#[derive(Debug, Clone)]
-pub enum TopLevelDecl {
-    Function(Function),
-    StaticDecl(StaticVariable),
-}
-#[derive(Debug, Clone)]
-pub struct Function {
-    pub name: String,
-    pub params: Vec<Value>,
-    pub instructions: Vec<Instruction>,
-    pub global: bool,
-}
-#[derive(Debug, Clone)]
-pub struct StaticVariable {
-    pub identifier: String,
-    pub global: bool,
-    pub ctype: CType,
-    pub initializer: Vec<Initializer>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Instruction {
-    Return(Value),
-    SignExtend(Value, Value),
-    ZeroExtend(Value, Value),
-    Truncate(Value, Value),
-    DoubleToInt(Value, Value),
-    DoubleToUInt(Value, Value),
-    IntToDouble(Value, Value),
-    UIntToDouble(Value, Value),
-    UnaryOp(InstructionUnary),
-    BinaryOp(InstructionBinary),
-    Copy(Value, Value),
-    GetAddress(Value, Value),
-    Load(Value, Value),
-    Store(Value, Value),
-    Label(String),
-    Jump(String),
-    JumpCond(InstructionJump),
-    Function(String, Vec<Value>, Value),
-    AddPtr(Value, Value, u64, Value),
-    CopyToOffset(Value, String, u64),
-}
-#[derive(Debug, Clone)]
-pub struct InstructionUnary {
-    pub operator: UnaryOperator,
-    pub src: Value,
-    pub dst: Value,
-}
-#[derive(Debug, Clone, Copy)]
-pub enum UnaryOperator {
-    Complement,
-    Negate,
-    LogicalNot,
-}
-impl InstructionUnary {
-    fn from(operator: parse_tree::UnaryOperator, src: Value, dst: Value) -> Self {
-        let operator = match operator {
-            parse_tree::UnaryOperator::Complement => UnaryOperator::Complement,
-            parse_tree::UnaryOperator::LogicalNot => UnaryOperator::LogicalNot,
-            parse_tree::UnaryOperator::Negate => UnaryOperator::Negate,
-            _ => panic!("Invalid TAC operator"),
-        };
-        Self { operator, src, dst }
-    }
-}
-#[derive(Debug, Clone)]
-pub struct InstructionBinary {
-    pub operator: BinaryOperator,
-    pub src1: Value,
-    pub src2: Value,
-    pub dst: Value,
-}
-#[derive(Debug, Clone)]
-pub struct InstructionJump {
-    pub jump_type: JumpType,
-    pub condition: Value,
-    pub target: String,
-}
-#[derive(Debug, Clone, Copy)]
-pub enum JumpType {
-    JumpIfZero,
-    JumpIfNotZero,
-}
-
-#[derive(Debug, Clone)]
-pub enum Value {
-    ConstValue(Constant),
-    Variable(String),
-}
 
 pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Program {
     let mut program: Program = Vec::new();
 
     for decl in parser_ast {
         if let parse_tree::Declaration::Function(function) = decl {
-            program.push(TopLevelDecl::Function(gen_function(function, symbols)));
+            program.push(gen_function(function, symbols));
         }
     }
     for (name, entry) in symbols {
-        if let SymbolAttr::Static(var_attrs) = &entry.attrs {
-            match &var_attrs.init {
+        if let SymbolAttr::Static { init, global } = &entry.attrs {
+            match &init {
                 StaticInitializer::Initialized(initializer) => {
-                    program.push(TopLevelDecl::StaticDecl(StaticVariable {
+                    program.push(TopLevelDecl::StaticDecl {
                         identifier: name.clone(),
-                        global: var_attrs.global,
+                        global: *global,
                         ctype: entry.ctype.clone(),
                         initializer: initializer.clone(),
-                    }));
+                    });
                 }
                 StaticInitializer::Tentative => {
                     let initializer = match &entry.ctype {
@@ -132,12 +44,12 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
                         | CType::Array(_, _) => Initializer::ZeroInit(entry.ctype.size()),
                         _ => panic!("Not a variable"),
                     };
-                    program.push(TopLevelDecl::StaticDecl(StaticVariable {
+                    program.push(TopLevelDecl::StaticDecl {
                         identifier: name.clone(),
-                        global: var_attrs.global,
+                        global: *global,
                         ctype: entry.ctype.clone(),
                         initializer: vec![initializer],
-                    }));
+                    });
                 }
                 StaticInitializer::None => (),
             }
@@ -145,15 +57,17 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
     }
     program
 }
-fn gen_function(function: parse_tree::FunctionDeclaration, symbols: &mut Symbols) -> Function {
+fn gen_function(function: parse_tree::FunctionDeclaration, symbols: &mut Symbols) -> TopLevelDecl {
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions, symbols);
         instructions.push(Instruction::Return(Value::ConstValue(parse_tree::Constant::Int(0))));
     }
-    let global = symbols[&function.name].get_function_attrs().global;
+    let SymbolAttr::Function { defined: _, global } = symbols[&function.name].attrs else {
+        panic!("Expected function!")
+    };
     let params = function.params.into_iter().map(Value::Variable).collect();
-    Function {
+    TopLevelDecl::Function {
         name: function.name,
         params,
         global,
@@ -178,12 +92,17 @@ fn gen_declaration(
     instructions: &mut Vec<Instruction>,
     symbols: &mut Symbols,
 ) {
-    if declaration.storage == Some(StorageClass::Extern)
-        || declaration.storage == Some(StorageClass::Static)
-    {
+    if declaration.storage.is_some() {
         return;
     }
     match declaration.init {
+        Some(VariableInitializer::SingleElem(TypedExpression {
+            ctype: _,
+            expr: Expression::StringLiteral(_),
+        })) => {
+            let v_init = vec![declaration.init.expect("Is some")];
+            gen_init_list(instructions, v_init, declaration.name, &declaration.ctype, 0, symbols);
+        }
         Some(VariableInitializer::SingleElem(value)) => {
             let result = gen_expression_and_convert(value, instructions, symbols);
             instructions.push(Instruction::Copy(result, Value::Variable(declaration.name)));
@@ -208,8 +127,12 @@ fn gen_init_list(
         let offset = initial_offset + (i as u64) * elem_t.size();
         match initializer {
             VariableInitializer::SingleElem(expr) => {
-                let result = gen_expression_and_convert(expr, instructions, symbols);
-                instructions.push(Instruction::CopyToOffset(result, name.clone(), offset));
+                if let Expression::StringLiteral(_s_data) = expr.expr {
+                    todo!("String literal initialization of local arrays!")
+                } else {
+                    let result = gen_expression_and_convert(expr, instructions, symbols);
+                    instructions.push(Instruction::CopyToOffset(result, name.clone(), offset));
+                }
             }
             VariableInitializer::CompoundInit(init_list) => {
                 gen_init_list(instructions, init_list, name.clone(), elem_t, offset, symbols);
@@ -236,11 +159,11 @@ fn gen_instructions(
             let end_label = gen_label("end");
             let else_label = gen_label("else");
             let condition = gen_expression_and_convert(condition, instructions, symbols);
-            instructions.push(Instruction::JumpCond(InstructionJump {
+            instructions.push(Instruction::JumpCond {
                 jump_type: JumpType::JumpIfZero,
                 condition,
                 target: else_label.clone(),
-            }));
+            });
             gen_instructions(*if_true, instructions, symbols);
             instructions.push(Instruction::Jump(end_label.clone()));
             instructions.push(Instruction::Label(else_label));
@@ -271,11 +194,11 @@ fn gen_instructions(
             gen_instructions(*loop_data.body, instructions, symbols);
             instructions.push(Instruction::Label(format!("continue_{}", loop_data.label)));
             let result = gen_expression_and_convert(loop_data.condition, instructions, symbols);
-            instructions.push(Instruction::JumpCond(InstructionJump {
+            instructions.push(Instruction::JumpCond {
                 jump_type: JumpType::JumpIfNotZero,
                 condition: result,
                 target: start,
-            }));
+            });
             instructions.push(Instruction::Label(format!("break_{}", loop_data.label)));
         }
         Statement::While(loop_data) => {
@@ -283,11 +206,11 @@ fn gen_instructions(
             let continue_label = format!("continue_{}", loop_data.label);
             instructions.push(Instruction::Label(continue_label.clone()));
             let result = gen_expression_and_convert(loop_data.condition, instructions, symbols);
-            instructions.push(Instruction::JumpCond(InstructionJump {
+            instructions.push(Instruction::JumpCond {
                 jump_type: JumpType::JumpIfZero,
                 condition: result,
                 target: break_label.clone(),
-            }));
+            });
             gen_instructions(*loop_data.body, instructions, symbols);
             instructions.push(Instruction::Jump(continue_label));
             instructions.push(Instruction::Label(break_label));
@@ -306,11 +229,11 @@ fn gen_instructions(
             let start_label = format!("start_{}", loop_data.label);
             instructions.push(Instruction::Label(start_label.clone()));
             let condition = gen_expression_and_convert(loop_data.condition, instructions, symbols);
-            instructions.push(Instruction::JumpCond(InstructionJump {
+            instructions.push(Instruction::JumpCond {
                 jump_type: JumpType::JumpIfZero,
                 condition,
                 target: break_label.clone(),
-            }));
+            });
             gen_instructions(*loop_data.body, instructions, symbols);
             instructions.push(Instruction::Label(format!("continue_{}", loop_data.label)));
             if let Some(post) = post_loop {
@@ -319,30 +242,36 @@ fn gen_instructions(
             instructions.push(Instruction::Jump(start_label));
             instructions.push(Instruction::Label(break_label));
         }
-        Statement::Switch(switch) => {
-            let src1 = gen_expression_and_convert(switch.condition, instructions, symbols);
+        Statement::Switch {
+            label,
+            condition,
+            cases,
+            statement,
+            default,
+        } => {
+            let src1 = gen_expression_and_convert(condition, instructions, symbols);
             let dst = gen_temp_var(CType::Int, symbols);
-            for case in switch.cases {
+            for case in cases {
                 let src2 = gen_expression_and_convert(case.1, instructions, symbols);
-                instructions.push(Instruction::BinaryOp(InstructionBinary {
+                instructions.push(Instruction::BinaryOp {
                     operator: BinaryOperator::IsEqual,
                     src1: src1.clone(),
                     src2: src2.clone(),
                     dst: dst.clone(),
-                }));
-                instructions.push(Instruction::JumpCond(InstructionJump {
+                });
+                instructions.push(Instruction::JumpCond {
                     jump_type: JumpType::JumpIfNotZero,
                     condition: dst.clone(),
                     target: case.0,
-                }));
+                });
             }
-            if let Some(target) = switch.default {
+            if let Some(target) = default {
                 instructions.push(Instruction::Jump(target));
             } else {
-                instructions.push(Instruction::Jump(format!("break_{}", switch.label)));
+                instructions.push(Instruction::Jump(format!("break_{}", label)));
             }
-            gen_instructions(*switch.statement, instructions, symbols);
-            instructions.push(Instruction::Label(format!("break_{}", switch.label)));
+            gen_instructions(*statement, instructions, symbols);
+            instructions.push(Instruction::Label(format!("break_{}", label)));
         }
         Statement::Case(_, _) | Statement::Default(_) => {
             panic!("Compiler error: case/default should be replaced in typecheck pass")
@@ -394,11 +323,11 @@ fn gen_expression(
             let expr_type = expression.ctype.expect("Undefined type!");
             let src = gen_expression_and_convert(*expr, instructions, symbols);
             let dst = gen_temp_var(expr_type, symbols);
-            instructions.push(Instruction::UnaryOp(InstructionUnary::from(
-                operator,
+            instructions.push(Instruction::UnaryOp {
+                operator: operator.into(),
                 src,
-                dst.clone(),
-            )));
+                dst: dst.clone(),
+            });
             ExpResult::Operand(dst)
         }
         Expression::Binary(binary) => {
@@ -417,12 +346,12 @@ fn gen_expression(
                 let src1 = gen_expression_and_convert(binary.left, instructions, symbols);
                 let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
                 let dst = gen_temp_var(expr_t, symbols);
-                instructions.push(Instruction::BinaryOp(InstructionBinary {
+                instructions.push(Instruction::BinaryOp {
                     operator: binary.operator,
                     src1,
                     src2,
                     dst: dst.clone(),
-                }));
+                });
                 ExpResult::Operand(dst)
             }
         }
@@ -447,11 +376,11 @@ fn gen_expression(
             let end_label = gen_label("cond_end");
             let e2_label = gen_label("cond_e2");
             let cond = gen_expression_and_convert(condition.condition, instructions, symbols);
-            instructions.push(Instruction::JumpCond(InstructionJump {
+            instructions.push(Instruction::JumpCond {
                 jump_type: JumpType::JumpIfZero,
                 condition: cond,
                 target: e2_label.clone(),
-            }));
+            });
             let e1 = gen_expression_and_convert(condition.if_true, instructions, symbols);
             instructions.push(Instruction::Copy(e1, dst.clone()));
             instructions.push(Instruction::Jump(end_label.clone()));
@@ -540,12 +469,12 @@ fn gen_increment(
             PreIncrement | PostIncrement => BinaryOperator::Add,
             PreDecrement | PostDecrement => BinaryOperator::Subtract,
         };
-        instructions.push(Instruction::BinaryOp(InstructionBinary {
+        instructions.push(Instruction::BinaryOp {
             operator,
             src1,
             src2: Value::ConstValue(src2),
             dst: dst.clone(),
-        }));
+        });
     }
     // Assign result or store if lvalue is pointer
     let result = match &lval {
@@ -608,23 +537,21 @@ fn gen_pointer_subtraction(
     let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
     // Subtract into temp var
     let tmp = gen_temp_var(CType::Long, symbols);
-    let subtract_expr = InstructionBinary {
+    instructions.push(BinaryOp {
         src1,
         src2,
         dst: tmp.clone(),
         operator: Subtract,
-    };
-    instructions.push(BinaryOp(subtract_expr));
+    });
     // Divide into final result
     let result = gen_temp_var(CType::Long, symbols);
     let src2 = Value::ConstValue(Constant::Long(ptr_size as i64));
-    let divide_expr = InstructionBinary {
+    instructions.push(BinaryOp {
         src1: tmp,
         src2,
         dst: result.clone(),
         operator: Divide,
-    };
-    instructions.push(BinaryOp(divide_expr));
+    });
     ExpResult::Operand(result)
 }
 
@@ -644,7 +571,7 @@ fn gen_compound_assignment(
     let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
     let dst = gen_temp_var(expr_t.clone(), symbols);
     let operator = binary.operator;
-    instructions.push(BinaryOp(InstructionBinary { operator, src1, src2, dst: dst.clone() }));
+    instructions.push(BinaryOp { operator, src1, src2, dst: dst.clone() });
     let result = gen_cast(instructions, left_t, expr_t.clone(), dst, symbols);
     // Handle assigning to pointer.
     match lval {
@@ -709,17 +636,17 @@ fn gen_short_circuit(
     let end = gen_label("end");
     let dst = gen_temp_var(CType::Int, symbols);
     let v1 = gen_expression_and_convert(left, instructions, symbols);
-    instructions.push(JumpCond(InstructionJump {
+    instructions.push(JumpCond {
         jump_type,
         condition: v1,
         target: target.clone(),
-    }));
+    });
     let v2 = gen_expression_and_convert(right, instructions, symbols);
-    instructions.push(JumpCond(InstructionJump {
+    instructions.push(JumpCond {
         jump_type,
         condition: v2,
         target: target.clone(),
-    }));
+    });
     instructions.push(Copy(Value::ConstValue(Constant::Int(!label_type as i64)), dst.clone()));
     instructions.push(Jump(end.clone()));
     instructions.push(Label(target));

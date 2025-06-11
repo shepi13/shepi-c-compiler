@@ -1,22 +1,23 @@
-use super::assembly_gen::{
-    self, AsmSymbol, AssemblyType, BackendSymbols, Condition, Function, StaticConstant, StaticVar,
+use super::assembly_ast::{
+    self, AsmSymbol, AssemblyType, BackendSymbols, BinaryOperator, Condition, Function,
+    StaticConstant, StaticVar,
 };
-use crate::{codegen::assembly_gen::BinaryOperator, validate::type_check::Initializer};
+use crate::validate::ctype::Initializer;
 use std::error::Error;
 
 type EmptyResult = Result<(), Box<dyn Error>>;
 
-pub fn emit_program<T>(output: &mut T, program: assembly_gen::Program) -> EmptyResult
+pub fn emit_program<T>(output: &mut T, program: assembly_ast::Program) -> EmptyResult
 where
     T: std::fmt::Write,
 {
     for top_level in program.program {
         match top_level {
-            assembly_gen::TopLevelDecl::FunctionDecl(function) => {
+            assembly_ast::TopLevelDecl::FunctionDecl(function) => {
                 emit_function(output, function, &program.backend_symbols)?;
             }
-            assembly_gen::TopLevelDecl::Var(var) => emit_static_var(output, var)?,
-            assembly_gen::TopLevelDecl::Constant(var) => emit_static_const(output, var)?,
+            assembly_ast::TopLevelDecl::Var(var) => emit_static_var(output, var)?,
+            assembly_ast::TopLevelDecl::Constant(var) => emit_static_const(output, var)?,
         }
     }
     writeln!(output, "    .section .note.GNU-stack,\"\",@progbits")?;
@@ -45,7 +46,9 @@ where
             Double(val) => format!(".double {}", val),
             ZeroInit(size) => format!(".zero {size}"),
             Char(_) | UChar(_) => todo!("Char static initializer emission!"),
-            StringInit(_, _) | PointerInit(_) => todo!("Pointer/String initializer emission!"),
+            StringInit { data: _, null_terminated: _ } | PointerInit(_) => {
+                todo!("Pointer/String initializer emission!")
+            }
         };
         writeln!(output, "    {}", init_str)?;
     }
@@ -84,50 +87,50 @@ where
 }
 fn emit_instructions<T: std::fmt::Write>(
     output: &mut T,
-    instructions: &Vec<assembly_gen::Instruction>,
+    instructions: &Vec<assembly_ast::Instruction>,
     symbols: &BackendSymbols,
 ) -> EmptyResult {
     for instruction in instructions {
         match instruction {
-            assembly_gen::Instruction::Mov(src, dst, move_type) => {
+            assembly_ast::Instruction::Mov(src, dst, move_type) => {
                 let src = get_operand(src, move_type);
                 let dst = get_operand(dst, move_type);
                 let t = get_size_suffix(move_type);
                 writeln!(output, "    mov{t} {src}, {dst}")?;
             }
-            assembly_gen::Instruction::MovSignExtend(src, dst) => {
+            assembly_ast::Instruction::MovSignExtend(src, dst) => {
                 let src = get_operand(src, &AssemblyType::Longword);
                 let dst = get_operand(dst, &AssemblyType::Quadword);
                 writeln!(output, "    movslq {src}, {dst}")?;
             }
-            assembly_gen::Instruction::Ret => {
+            assembly_ast::Instruction::Ret => {
                 writeln!(output, "    movq %rbp, %rsp")?;
                 writeln!(output, "    popq %rbp")?;
                 writeln!(output, "    ret")?;
             }
-            assembly_gen::Instruction::Unary(operator, operand, asm_type) => {
+            assembly_ast::Instruction::Unary(operator, operand, asm_type) => {
                 let operator = get_unary_operator(operator);
                 let operand = get_operand(operand, asm_type);
                 let t = get_size_suffix(asm_type);
                 writeln!(output, "    {operator}{t} {operand}")?;
             }
-            assembly_gen::Instruction::Cdq(asm_type) => match asm_type {
+            assembly_ast::Instruction::Cdq(asm_type) => match asm_type {
                 AssemblyType::Longword => writeln!(output, "    cdq")?,
                 AssemblyType::Quadword => writeln!(output, "    cqo")?,
                 AssemblyType::Double => panic!("Cdq not supported for double!"),
                 AssemblyType::ByteArray(_, _) => panic!("Cdq not supported for array!"),
             },
-            assembly_gen::Instruction::IDiv(operand, asm_type) => {
+            assembly_ast::Instruction::IDiv(operand, asm_type) => {
                 let t = get_size_suffix(asm_type);
                 let operand = get_operand(operand, asm_type);
                 writeln!(output, "    idiv{t} {operand}")?;
             }
-            assembly_gen::Instruction::Div(operand, asm_type) => {
+            assembly_ast::Instruction::Div(operand, asm_type) => {
                 let t = get_size_suffix(asm_type);
                 let operand = get_operand(operand, asm_type);
                 writeln!(output, "    div{t} {operand}")?;
             }
-            assembly_gen::Instruction::Binary(operator, left, right, asm_type) => {
+            assembly_ast::Instruction::Binary(operator, left, right, asm_type) => {
                 let src = get_operand(left, asm_type);
                 let dst = get_operand(right, asm_type);
                 // Xor and Mult have special impls for double
@@ -141,12 +144,12 @@ fn emit_instructions<T: std::fmt::Write>(
                     writeln!(output, "    {operator}{t} {src}, {dst}")?;
                 }
             }
-            assembly_gen::Instruction::SetCond(cond, val) => {
+            assembly_ast::Instruction::SetCond(cond, val) => {
                 let code = get_cond_code(cond);
                 let reg = get_short_reg(val);
                 writeln!(output, "    set{} {}", code, reg)?;
             }
-            assembly_gen::Instruction::Compare(left, right, cmp_type) => {
+            assembly_ast::Instruction::Compare(left, right, cmp_type) => {
                 let left = get_operand(left, cmp_type);
                 let right = get_operand(right, cmp_type);
                 let t = get_size_suffix(cmp_type);
@@ -156,54 +159,54 @@ fn emit_instructions<T: std::fmt::Write>(
                     writeln!(output, "    cmp{t} {left}, {right}")?;
                 }
             }
-            assembly_gen::Instruction::JmpCond(cond, target) => {
+            assembly_ast::Instruction::JmpCond(cond, target) => {
                 writeln!(output, "    j{} .L_{}", get_cond_code(cond), target)?;
             }
-            assembly_gen::Instruction::Jmp(target) => {
+            assembly_ast::Instruction::Jmp(target) => {
                 writeln!(output, "    jmp .L_{}", target)?;
             }
-            assembly_gen::Instruction::Label(target) => {
+            assembly_ast::Instruction::Label(target) => {
                 writeln!(output, ".L_{}:", target)?;
             }
-            assembly_gen::Instruction::Push(operand) => {
+            assembly_ast::Instruction::Push(operand) => {
                 writeln!(output, "    pushq {}", get_operand_quadword(operand))?;
             }
-            assembly_gen::Instruction::Call(label) => {
+            assembly_ast::Instruction::Call(label) => {
                 if let AsmSymbol::FunctionEntry(true) = &symbols[label] {
                     writeln!(output, "    call {}", label)?;
                 } else {
                     writeln!(output, "    call {}@PLT", label)?;
                 }
             }
-            assembly_gen::Instruction::MovZeroExtend(_, _) => {
+            assembly_ast::Instruction::MovZeroExtend(_, _) => {
                 panic!("Should be replaced with Mov instructions by rewriter!")
             }
-            assembly_gen::Instruction::Cvttsd2si(src, dst, asm_type) => {
+            assembly_ast::Instruction::Cvttsd2si(src, dst, asm_type) => {
                 let src = get_operand(src, asm_type);
                 let dst = get_operand(dst, asm_type);
                 let t = get_size_suffix(asm_type);
                 writeln!(output, "    cvttsd2si{t} {src}, {dst}")?;
             }
-            assembly_gen::Instruction::Cvtsi2sd(src, dst, asm_type) => {
+            assembly_ast::Instruction::Cvtsi2sd(src, dst, asm_type) => {
                 let src = get_operand(src, asm_type);
                 let dst = get_operand(dst, asm_type);
                 let t = get_size_suffix(asm_type);
                 writeln!(output, "    cvtsi2sd{t} {src}, {dst}")?;
             }
-            assembly_gen::Instruction::Lea(src, dst) => {
+            assembly_ast::Instruction::Lea(src, dst) => {
                 let src = get_operand_quadword(src);
                 let dst = get_operand_quadword(dst);
                 writeln!(output, "    leaq {src}, {dst}")?;
             }
-            assembly_gen::Instruction::Nop => panic!("Noop should just be a placeholder"),
+            assembly_ast::Instruction::Nop => panic!("Noop should just be a placeholder"),
         }
     }
     Ok(())
 }
 
-fn get_operand_quadword(operand: &assembly_gen::Operand) -> String {
-    use assembly_gen::Operand::*;
-    use assembly_gen::Register::*;
+fn get_operand_quadword(operand: &assembly_ast::Operand) -> String {
+    use assembly_ast::Operand::*;
+    use assembly_ast::Register::*;
     match operand {
         Register(AX) => String::from("%rax"),
         Register(CX) => String::from("%rcx"),
@@ -225,9 +228,9 @@ fn get_operand_quadword(operand: &assembly_gen::Operand) -> String {
         _ => get_operand_longword(operand),
     }
 }
-fn get_operand_longword(operand: &assembly_gen::Operand) -> String {
-    use assembly_gen::Operand::*;
-    use assembly_gen::Register::*;
+fn get_operand_longword(operand: &assembly_ast::Operand) -> String {
+    use assembly_ast::Operand::*;
+    use assembly_ast::Register::*;
     match operand {
         Imm(val) => format!("${val}"),
         // x86 int registers
@@ -268,7 +271,7 @@ fn get_operand_longword(operand: &assembly_gen::Operand) -> String {
     }
 }
 
-fn get_operand(operand: &assembly_gen::Operand, asm_type: &AssemblyType) -> String {
+fn get_operand(operand: &assembly_ast::Operand, asm_type: &AssemblyType) -> String {
     match asm_type {
         AssemblyType::Longword => get_operand_longword(operand),
         AssemblyType::Quadword | AssemblyType::Double => get_operand_quadword(operand),
@@ -276,24 +279,24 @@ fn get_operand(operand: &assembly_gen::Operand, asm_type: &AssemblyType) -> Stri
     }
 }
 
-fn get_short_reg(operand: &assembly_gen::Operand) -> String {
+fn get_short_reg(operand: &assembly_ast::Operand) -> String {
     match operand {
-        assembly_gen::Operand::Register(assembly_gen::Register::AX) => String::from("%al"),
-        assembly_gen::Operand::Register(assembly_gen::Register::CX) => String::from("%cl"),
-        assembly_gen::Operand::Register(assembly_gen::Register::DX) => String::from("%dl"),
-        assembly_gen::Operand::Register(assembly_gen::Register::DI) => String::from("%dil"),
-        assembly_gen::Operand::Register(assembly_gen::Register::SI) => String::from("%sil"),
-        assembly_gen::Operand::Register(assembly_gen::Register::R8) => String::from("%r8b"),
-        assembly_gen::Operand::Register(assembly_gen::Register::R9) => String::from("%r9b"),
-        assembly_gen::Operand::Register(assembly_gen::Register::R10) => String::from("%r10b"),
-        assembly_gen::Operand::Register(assembly_gen::Register::R11) => String::from("%r11b"),
-        assembly_gen::Operand::Register(assembly_gen::Register::CL) => String::from("%cl"),
-        assembly_gen::Operand::Register(assembly_gen::Register::SP) => String::from("%rsp"),
+        assembly_ast::Operand::Register(assembly_ast::Register::AX) => String::from("%al"),
+        assembly_ast::Operand::Register(assembly_ast::Register::CX) => String::from("%cl"),
+        assembly_ast::Operand::Register(assembly_ast::Register::DX) => String::from("%dl"),
+        assembly_ast::Operand::Register(assembly_ast::Register::DI) => String::from("%dil"),
+        assembly_ast::Operand::Register(assembly_ast::Register::SI) => String::from("%sil"),
+        assembly_ast::Operand::Register(assembly_ast::Register::R8) => String::from("%r8b"),
+        assembly_ast::Operand::Register(assembly_ast::Register::R9) => String::from("%r9b"),
+        assembly_ast::Operand::Register(assembly_ast::Register::R10) => String::from("%r10b"),
+        assembly_ast::Operand::Register(assembly_ast::Register::R11) => String::from("%r11b"),
+        assembly_ast::Operand::Register(assembly_ast::Register::CL) => String::from("%cl"),
+        assembly_ast::Operand::Register(assembly_ast::Register::SP) => String::from("%rsp"),
         _ => get_operand_longword(operand),
     }
 }
 
-fn get_cond_code(condition: &assembly_gen::Condition) -> &str {
+fn get_cond_code(condition: &assembly_ast::Condition) -> &str {
     match condition {
         Condition::Equal => "e",
         Condition::NotEqual => "ne",
@@ -309,27 +312,27 @@ fn get_cond_code(condition: &assembly_gen::Condition) -> &str {
     }
 }
 
-fn get_unary_operator(operator: &assembly_gen::UnaryOperator) -> &str {
+fn get_unary_operator(operator: &assembly_ast::UnaryOperator) -> &str {
     match operator {
-        assembly_gen::UnaryOperator::Neg => "neg",
-        assembly_gen::UnaryOperator::Not => "not",
-        assembly_gen::UnaryOperator::Shr => "shr",
+        assembly_ast::UnaryOperator::Neg => "neg",
+        assembly_ast::UnaryOperator::Not => "not",
+        assembly_ast::UnaryOperator::Shr => "shr",
     }
 }
 
-fn get_binary_operator(operator: &assembly_gen::BinaryOperator) -> &str {
+fn get_binary_operator(operator: &assembly_ast::BinaryOperator) -> &str {
     match operator {
-        assembly_gen::BinaryOperator::Add => "add",
-        assembly_gen::BinaryOperator::Sub => "sub",
-        assembly_gen::BinaryOperator::Mult => "imul",
-        assembly_gen::BinaryOperator::DoubleDiv => "div",
-        assembly_gen::BinaryOperator::BitAnd => "and",
-        assembly_gen::BinaryOperator::BitOr => "or",
-        assembly_gen::BinaryOperator::BitXor => "xor",
-        assembly_gen::BinaryOperator::LeftShift => "sal",
-        assembly_gen::BinaryOperator::LeftShiftUnsigned => "shl",
-        assembly_gen::BinaryOperator::RightShift => "sar",
-        assembly_gen::BinaryOperator::RightShiftUnsigned => "shr",
+        assembly_ast::BinaryOperator::Add => "add",
+        assembly_ast::BinaryOperator::Sub => "sub",
+        assembly_ast::BinaryOperator::Mult => "imul",
+        assembly_ast::BinaryOperator::DoubleDiv => "div",
+        assembly_ast::BinaryOperator::BitAnd => "and",
+        assembly_ast::BinaryOperator::BitOr => "or",
+        assembly_ast::BinaryOperator::BitXor => "xor",
+        assembly_ast::BinaryOperator::LeftShift => "sal",
+        assembly_ast::BinaryOperator::LeftShiftUnsigned => "shl",
+        assembly_ast::BinaryOperator::RightShift => "sar",
+        assembly_ast::BinaryOperator::RightShiftUnsigned => "shr",
     }
 }
 

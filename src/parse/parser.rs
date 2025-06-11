@@ -12,6 +12,7 @@ use lazy_static::lazy_static;
 use crate::{
     helpers::lib::{unescape_char, unescape_string},
     parse::{lexer::Tokens, parse_tree::Location},
+    validate::ctype::CType,
 };
 
 use super::{
@@ -21,10 +22,9 @@ use super::{
 use lexer::Token;
 
 use super::parse_tree::{
-    AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, CType,
-    ConditionExpression, Constant, Declaration, Expression, ForInit, FunctionDeclaration,
-    IncrementType, Loop, Program, Statement, StorageClass, SwitchStatement, TypedExpression,
-    UnaryOperator, VariableDeclaration,
+    AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, ConditionExpression,
+    Constant, Declaration, Expression, ForInit, FunctionDeclaration, IncrementType, Loop, Program,
+    Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
 };
 
 lazy_static! {
@@ -447,16 +447,13 @@ fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
         tokens.expect_token(Token::CloseParen)?;
         let cases = Vec::new();
         let statement = parse_statement(tokens)?.into();
-        Ok(Statement::Switch(
-            SwitchStatement {
-                label,
-                condition,
-                cases,
-                statement,
-                default: None,
-            }
-            .into(),
-        ))
+        Ok(Statement::Switch {
+            label,
+            condition,
+            cases,
+            statement,
+            default: None,
+        })
     } else if tokens.try_consume(Token::Keyword("default")) {
         tokens.expect_token(Token::Colon)?;
         Ok(Statement::Default(parse_statement(tokens)?.into()))

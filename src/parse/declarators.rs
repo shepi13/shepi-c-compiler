@@ -1,7 +1,5 @@
-use crate::parse::{
-    lexer::{ParseResult, Token, Tokens},
-    parse_tree::CType,
-};
+use crate::parse::lexer::{ParseResult, Token, Tokens};
+use crate::validate::ctype::CType;
 
 use super::parser::{parse_constant, parse_identifier, parse_type};
 

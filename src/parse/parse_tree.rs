@@ -1,3 +1,5 @@
+use crate::validate::ctype::CType;
+
 use super::lexer::Token;
 
 pub type Program = Vec<Declaration>;
@@ -22,7 +24,13 @@ pub enum Statement {
     While(Loop),
     DoWhile(Loop),
     For(Box<ForInit>, Loop, Option<TypedExpression>),
-    Switch(Box<SwitchStatement>),
+    Switch {
+        label: String,
+        condition: TypedExpression,
+        cases: Vec<(String, TypedExpression)>,
+        statement: Box<Statement>,
+        default: Option<String>,
+    },
     Case(TypedExpression, Box<Statement>),
     Default(Box<Statement>),
     Break(String),
@@ -31,14 +39,6 @@ pub enum Statement {
     Label(String, Box<Statement>),
     Goto(String),
     Null,
-}
-#[derive(Debug, Clone)]
-pub struct SwitchStatement {
-    pub label: String,
-    pub condition: TypedExpression,
-    pub cases: Vec<(String, TypedExpression)>,
-    pub statement: Box<Statement>,
-    pub default: Option<String>,
 }
 #[derive(Debug, Clone)]
 pub struct Loop {
@@ -60,63 +60,6 @@ pub enum Declaration {
 pub enum VariableInitializer {
     SingleElem(TypedExpression),
     CompoundInit(Vec<VariableInitializer>),
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum CType {
-    Char,
-    SignedChar,
-    UnsignedChar,
-    Int,
-    Long,
-    UnsignedInt,
-    UnsignedLong,
-    Double,
-    Function(Vec<CType>, Box<CType>),
-    Pointer(Box<CType>),
-    Array(Box<CType>, u64),
-}
-
-impl CType {
-    pub fn size(&self) -> u64 {
-        match self {
-            CType::Char | CType::UnsignedChar | CType::SignedChar => 1,
-            CType::Int | CType::UnsignedInt => 4,
-            CType::Long | CType::UnsignedLong => 8,
-            CType::Double => 8,
-            CType::Function(_, _) => panic!("Not a variable or constant!"),
-            CType::Pointer(_) => 8,
-            CType::Array(elem_t, elem_c) => elem_c * elem_t.size(),
-        }
-    }
-    pub fn is_signed(&self) -> bool {
-        match self {
-            CType::UnsignedInt | CType::UnsignedLong => false,
-            CType::Int | CType::Long => true,
-            _ => panic!("Not an integer type!"),
-        }
-    }
-    pub fn is_char(&self) -> bool {
-        matches!(self, Self::Char | Self::SignedChar | Self::UnsignedChar)
-    }
-    pub fn is_int(&self) -> bool {
-        match self {
-            Self::Int
-            | Self::Long
-            | Self::UnsignedInt
-            | Self::UnsignedLong
-            | Self::Char
-            | Self::UnsignedChar
-            | Self::SignedChar => true,
-            Self::Double | Self::Function(_, _) | Self::Pointer(_) | Self::Array(_, _) => false,
-        }
-    }
-    pub fn is_pointer(&self) -> bool {
-        matches!(self, Self::Pointer(_))
-    }
-    pub fn is_arithmetic(&self) -> bool {
-        self.is_int() || *self == Self::Double
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -166,17 +109,7 @@ impl From<Expression> for Box<TypedExpression> {
         TypedExpression { ctype: None, expr: value }.into()
     }
 }
-impl TypedExpression {
-    pub fn is_lvalue(&self) -> bool {
-        match self.expr {
-            Expression::Dereference(_)
-            | Expression::Subscript(_, _)
-            | Expression::StringLiteral(_) => true,
-            Expression::Variable(_) => !matches!(self.ctype, Some(CType::Array(_, _))),
-            _ => false,
-        }
-    }
-}
+
 #[derive(Debug, Clone)]
 pub enum Expression {
     Constant(Constant),
@@ -227,19 +160,16 @@ pub enum IncrementType {
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinaryOperator {
-    // Numeric
     Add,
     Subtract,
     Multiply,
     Divide,
     Remainder,
-    // Bitwise
     LeftShift,
     RightShift,
     BitXor,
     BitOr,
     BitAnd,
-    // Logical/Relational
     LogicalAnd,
     LogicalOr,
     IsEqual,

@@ -1,9 +1,9 @@
-use std::process::exit;
+use std::process::ExitCode;
 
 use clap::Parser;
 use compiler::{Args, run_main};
 
-fn main() {
+fn main() -> ExitCode {
     let args = Args::parse();
     if let Err(error) = run_main(args) {
         match error.exit_code {
@@ -18,6 +18,8 @@ fn main() {
             _ => eprintln!("Unknown error!"),
         }
         eprintln!("\t{}", error.message);
-        exit(error.exit_code as i32);
+        ExitCode::from(error.exit_code)
+    } else {
+        ExitCode::SUCCESS
     }
 }

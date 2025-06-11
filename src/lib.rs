@@ -16,7 +16,7 @@ use crate::codegen::emission::emit_program;
 use crate::parse::lexer::lex;
 use crate::parse::parser::parse;
 use crate::tac_generation::generator::gen_tac_ast as gen_tac;
-use crate::validate::semantics::{SemanticError, resolve_program as validate_program};
+use crate::validate::semantics::{Error, resolve_program as validate_program};
 use crate::validate::type_check::type_check_program;
 
 #[derive(Parser, Debug)]
@@ -74,7 +74,7 @@ impl<T, E: ToString> ConvertWithExitCode<Result<T, CompilerError>> for Result<T,
 trait ConvertWithSourceAndExitCode<T> {
     fn or_exit_with(self, exit_code: u8, source: &str) -> T;
 }
-impl<T> ConvertWithSourceAndExitCode<Result<T, CompilerError>> for Result<T, SemanticError> {
+impl<T> ConvertWithSourceAndExitCode<Result<T, CompilerError>> for Result<T, Error> {
     fn or_exit_with(self, exit_code: u8, source: &str) -> Result<T, CompilerError> {
         self.map_err(|err| CompilerError {
             message: err.error_message(source),
