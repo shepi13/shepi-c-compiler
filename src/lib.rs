@@ -160,8 +160,8 @@ pub fn run_main(args: Args) -> Result<(), CompilerError> {
             path_with_extension(&args.filename, "").expect("output extension failed!");
         let linker_args = [
             vec![&assembly_file, "-o", &output_file],
-            args.libraries.iter().flat_map(|lib| ["-l", &lib]).collect(),
-            args.library_paths.iter().flat_map(|path| ["-L", &path]).collect(),
+            args.libraries.iter().flat_map(|lib| ["-l", lib]).collect(),
+            args.library_paths.iter().flat_map(|path| ["-L", path]).collect(),
         ]
         .concat();
         run_gcc(&linker_args, args.print_commands).or_exit_with(8)

@@ -234,7 +234,7 @@ fn try_parse_constant(token: Token) -> Result<Constant, Box<dyn Error>> {
     match token {
         Token::Character(data) => match unescape_char(data) {
             Ok(val) => Ok(Constant::Int(val as i64)),
-            Err(message) => return Err(message.into()),
+            Err(message) => Err(message.into()),
         },
         Token::Constant(val) => match val.parse::<i32>() {
             Ok(val) => Ok(Constant::Int(val.into())),

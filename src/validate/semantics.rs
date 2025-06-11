@@ -492,7 +492,7 @@ fn resolve_expression(
             resolve_expression(*expr, symbols)?.into(),
             resolve_expression(*sub_expr, symbols)?.into(),
         ),
-        StringLiteral(_) => todo!("Add string literal!"),
+        StringLiteral(_) => expr,
     };
     // Convert to TypedExpression
     Ok(result.into())
