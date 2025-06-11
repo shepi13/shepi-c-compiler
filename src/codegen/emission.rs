@@ -40,10 +40,12 @@ where
     writeln!(output, "{}:", var.name)?;
     for init in var.init {
         let init_str = match init {
-            Int(_) | UnsignedInt(_) => format!(".long {}", init.int_value()),
-            Long(_) | UnsignedLong(_) => format!(".quad {}", init.int_value()),
+            Int(_) | UInt(_) => format!(".long {}", init.int_value()),
+            Long(_) | ULong(_) => format!(".quad {}", init.int_value()),
             Double(val) => format!(".double {}", val),
             ZeroInit(size) => format!(".zero {size}"),
+            Char(_) | UChar(_) => todo!("Char static initializer emission!"),
+            StringInit(_, _) | PointerInit(_) => todo!("Pointer/String initializer emission!"),
         };
         writeln!(output, "    {}", init_str)?;
     }

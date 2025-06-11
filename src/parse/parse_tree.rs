@@ -96,6 +96,9 @@ impl CType {
             _ => panic!("Not an integer type!"),
         }
     }
+    pub fn is_char(&self) -> bool {
+        matches!(self, Self::Char | Self::SignedChar | Self::UnsignedChar)
+    }
     pub fn is_int(&self) -> bool {
         match self {
             Self::Int
@@ -166,7 +169,9 @@ impl From<Expression> for Box<TypedExpression> {
 impl TypedExpression {
     pub fn is_lvalue(&self) -> bool {
         match self.expr {
-            Expression::Dereference(_) | Expression::Subscript(_, _) => true,
+            Expression::Dereference(_)
+            | Expression::Subscript(_, _)
+            | Expression::StringLiteral(_) => true,
             Expression::Variable(_) => !matches!(self.ctype, Some(CType::Array(_, _))),
             _ => false,
         }
@@ -206,7 +211,7 @@ pub struct ConditionExpression {
     pub if_true: TypedExpression,
     pub if_false: TypedExpression,
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOperator {
     Complement,
     Negate,
