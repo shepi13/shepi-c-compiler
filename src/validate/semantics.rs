@@ -1,6 +1,9 @@
-use crate::parse::parse_tree::{
-    self, BlockItem, Declaration, ForInit, FunctionDeclaration, Location, Loop, Program, Statement,
-    StorageClass, SwitchStatement, TypedExpression, VariableDeclaration, VariableInitializer,
+use crate::{
+    parse::parse_tree::{
+        self, BlockItem, Declaration, ForInit, FunctionDeclaration, Location, Loop, Program,
+        Statement, StorageClass, TypedExpression, VariableDeclaration, VariableInitializer,
+    },
+    validate::ctype::CType,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -9,18 +12,18 @@ use std::{
 };
 
 #[derive(Debug)]
-pub struct SemanticError {
+pub struct Error {
     location: Option<Location>,
     message: String,
 }
-type SemanticResult<T> = Result<T, SemanticError>;
-pub fn assert_or_err(assertion: bool, message: &str) -> SemanticResult<()> {
-    if assertion { Ok(()) } else { Err(SemanticError::new(message)) }
+type Result<T> = std::result::Result<T, Error>;
+pub fn assert_or_err(assertion: bool, message: &str) -> Result<()> {
+    if assertion { Ok(()) } else { Err(Error::new(message)) }
 }
-pub fn assert_or_err_fmt(assertion: bool, message: &str, value: &str) -> SemanticResult<()> {
-    if assertion { Ok(()) } else { Err(SemanticError::fmt(message, value)) }
+pub fn assert_or_err_fmt(assertion: bool, message: &str, value: &str) -> Result<()> {
+    if assertion { Ok(()) } else { Err(Error::fmt(message, value)) }
 }
-impl SemanticError {
+impl Error {
     pub fn new(msg: &str) -> Self {
         Self { location: None, message: msg.to_string() }
     }
@@ -28,15 +31,6 @@ impl SemanticError {
         Self {
             location: None,
             message: format!("{}: {}", msg, value),
-        }
-    }
-    pub fn add_location<T>(value: Result<T, Self>, location: Location) -> Result<T, Self> {
-        match value {
-            Ok(val) => Ok(val),
-            Err(mut error) => {
-                error.location = Some(error.location.unwrap_or(location));
-                Err(error)
-            }
         }
     }
     pub fn error_message(&self, source: &str) -> String {
@@ -55,21 +49,35 @@ impl SemanticError {
         result.trim().to_string()
     }
 }
+pub trait AddLocation {
+    fn add_location(self, location: Location) -> Self;
+}
+impl<T> AddLocation for Result<T> {
+    fn add_location(self, location: Location) -> Self {
+        match self {
+            Ok(val) => Ok(val),
+            Err(mut error) => {
+                error.location = Some(error.location.unwrap_or(location));
+                Err(error)
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
-pub struct Identifier {
+struct Identifier {
     pub unique_name: String,
     pub external: bool,
 }
 
-pub struct SwitchData {
+struct SwitchData {
     pub label: String,
     pub cases: Vec<(String, TypedExpression)>,
     pub default: Option<String>,
 }
 
-pub struct SymbolTable {
-    // Stacks (tracks visibility)
+/// Local symbol table for checking scope of local variables, loops, and labels
+struct SymbolTable {
     identifiers: Vec<HashMap<String, Identifier>>,
 
     labels: Vec<HashSet<String>>,
@@ -95,22 +103,22 @@ impl SymbolTable {
             current_function: None,
         }
     }
-    fn resolve_continue(&self) -> SemanticResult<&str> {
+    fn resolve_continue(&self) -> Result<&str> {
         assert_or_err(!self.loops.is_empty(), "Used continue outside of loop!")?;
         Ok(&self.loops[self.loops.len() - 1])
     }
-    fn resolve_break(&self) -> SemanticResult<&str> {
+    fn resolve_break(&self) -> Result<&str> {
         assert_or_err(!self.break_scopes.is_empty(), "Used break outside loop or switch!")?;
         Ok(&self.break_scopes[self.break_scopes.len() - 1])
     }
-    fn resolve_case(&mut self, matcher: TypedExpression) -> SemanticResult<String> {
+    fn resolve_case(&mut self, matcher: TypedExpression) -> Result<String> {
         let stack_len = self.switches.len() - 1;
         assert_or_err(!self.switches.is_empty(), "Used case outside of switch!")?;
         let case_label = case_name(&self.switches[stack_len].label);
         self.switches[stack_len].cases.push((case_label.clone(), matcher));
         Ok(case_label)
     }
-    fn resolve_default(&mut self) -> SemanticResult<String> {
+    fn resolve_default(&mut self) -> Result<String> {
         assert_or_err(!self.switches.is_empty(), "Used default outside of switch!")?;
         let stack_len = self.switches.len() - 1;
         assert_or_err(self.switches[stack_len].default.is_none(), "duplicate default!")?;
@@ -132,10 +140,10 @@ impl SymbolTable {
         self.loops.pop();
         self.break_scopes.pop();
     }
-    fn enter_switch(&mut self, switch: &SwitchStatement) {
-        self.break_scopes.push(switch.label.to_string());
+    fn enter_switch(&mut self, switch_name: String) {
+        self.break_scopes.push(switch_name.clone());
         self.switches.push(SwitchData {
-            label: switch.label.to_string(),
+            label: switch_name,
             cases: Vec::new(),
             default: None,
         });
@@ -179,11 +187,11 @@ impl SymbolTable {
             },
         );
     }
-    fn declare_parameter(&mut self, name: String) -> SemanticResult<String> {
+    fn declare_parameter(&mut self, name: String) -> Result<String> {
         let decl = self.declare_local_variable(VariableDeclaration {
             name: name.clone(),
             init: None,
-            ctype: parse_tree::CType::Int,
+            ctype: CType::Int,
             storage: None,
             location: Location { start_loc: (0, 0), end_loc: (0, 0) },
         })?;
@@ -192,7 +200,7 @@ impl SymbolTable {
     fn declare_local_variable(
         &mut self,
         mut decl: VariableDeclaration,
-    ) -> SemanticResult<VariableDeclaration> {
+    ) -> Result<VariableDeclaration> {
         let name = &decl.name;
         let stack_len = self.identifiers.len() - 1;
         if let Some(prev_declaration) = self.identifiers[stack_len].get(name) {
@@ -218,7 +226,7 @@ impl SymbolTable {
             Ok(decl)
         }
     }
-    fn declare_function(&mut self, function: &FunctionDeclaration) -> SemanticResult<()> {
+    fn declare_function(&mut self, function: &FunctionDeclaration) -> Result<()> {
         let defined = function.body.is_some();
         let name = &function.name;
         if self.current_function.is_some() {
@@ -241,16 +249,13 @@ impl SymbolTable {
         );
         Ok(())
     }
-    fn resolve_identifier(&self, name: &str) -> SemanticResult<String> {
-        let ident =
-            self._lookup_identifier(name).ok_or(SemanticError::fmt("Undeclared variable", name))?;
+    fn resolve_identifier(&self, name: &str) -> Result<String> {
+        let ident = self._lookup_identifier(name).ok_or(Error::fmt("Undeclared variable", name))?;
         Ok(ident.unique_name.to_string())
     }
-    fn resolve_label(&mut self, target: String) -> SemanticResult<String> {
-        let function = self
-            .current_function
-            .as_ref()
-            .ok_or(SemanticError::new("Labels must be in functions"))?;
+    fn resolve_label(&mut self, target: String) -> Result<String> {
+        let function =
+            self.current_function.as_ref().ok_or(Error::new("Labels must be in functions"))?;
         for table in &self.labels {
             assert_or_err_fmt(!table.contains(&target), "Duplicate label", &target)?;
         }
@@ -259,12 +264,10 @@ impl SymbolTable {
         self.labels[stack_len].insert(target);
         Ok(mangled_label)
     }
-    fn resolve_goto(&mut self, target: String) -> SemanticResult<String> {
+    fn resolve_goto(&mut self, target: String) -> Result<String> {
         let stack_len = self.gotos.len() - 1;
-        let function = &self
-            .current_function
-            .as_ref()
-            .ok_or(SemanticError::new("Goto must be in function!"))?;
+        let function =
+            &self.current_function.as_ref().ok_or(Error::new("Goto must be in function!"))?;
         let mangled_label = format!("{}_{}_{}", target, function, target);
         self.gotos[stack_len].insert(target);
         Ok(mangled_label)
@@ -280,9 +283,9 @@ fn variable_name(name: &str) -> String {
     format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-pub fn resolve_program(program: Program) -> SemanticResult<Program> {
+pub fn resolve_program(program: Program) -> Result<Program> {
     let symbols = &mut SymbolTable::new();
-    let new_program: SemanticResult<Vec<Declaration>> =
+    let new_program: Result<Vec<Declaration>> =
         program.into_iter().map(|decl| resolve_declaration(decl, symbols, true)).collect();
     new_program
 }
@@ -290,34 +293,30 @@ pub fn resolve_program(program: Program) -> SemanticResult<Program> {
 fn resolve_function(
     mut function: FunctionDeclaration,
     symbols: &mut SymbolTable,
-) -> SemanticResult<FunctionDeclaration> {
+) -> Result<FunctionDeclaration> {
     symbols.declare_function(&function)?;
     symbols.enter_scope();
     function.params = function
         .params
         .into_iter()
         .map(|param| symbols.declare_parameter(param))
-        .collect::<SemanticResult<Vec<String>>>()?;
+        .collect::<Result<Vec<String>>>()?;
     if let Some(body) = function.body {
         symbols.enter_function(function.name.to_string());
         function.body = Some(
             body.into_iter()
                 .map(|item| resolve_block_item(item, symbols))
-                .collect::<SemanticResult<Vec<BlockItem>>>()?,
+                .collect::<Result<Vec<BlockItem>>>()?,
         );
         symbols.leave_function();
     }
     symbols.leave_scope();
     Ok(function)
 }
-fn resolve_block_item(
-    block_item: BlockItem,
-    symbols: &mut SymbolTable,
-) -> SemanticResult<BlockItem> {
+fn resolve_block_item(block_item: BlockItem, symbols: &mut SymbolTable) -> Result<BlockItem> {
     match block_item {
         BlockItem::StatementItem(statement, location) => {
-            let stmt = resolve_statement(statement, symbols);
-            let stmt = SemanticError::add_location(stmt, location)?;
+            let stmt = resolve_statement(statement, symbols).add_location(location)?;
             Ok(BlockItem::StatementItem(stmt, location))
         }
         BlockItem::DeclareItem(decl) => {
@@ -325,7 +324,7 @@ fn resolve_block_item(
         }
     }
 }
-fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> SemanticResult<Statement> {
+fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Result<Statement> {
     use parse_tree::Statement::*;
     let new_statement = match statement {
         Return(expr) => Return(resolve_expression(expr, symbols)?),
@@ -346,7 +345,7 @@ fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Semanti
         Continue(_) => Continue(symbols.resolve_continue()?.to_string()),
         Compound(statements) => {
             symbols.enter_scope();
-            let new_statements: SemanticResult<Vec<BlockItem>> =
+            let new_statements: Result<Vec<BlockItem>> =
                 statements.into_iter().map(|item| resolve_block_item(item, symbols)).collect();
             let result = Compound(new_statements?);
             symbols.leave_scope();
@@ -387,15 +386,24 @@ fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Semanti
         Default(statement) => {
             Label(symbols.resolve_default()?, resolve_statement(*statement, symbols)?.into())
         }
-        Switch(mut switch) => {
-            symbols.enter_switch(&switch);
-            switch.condition = resolve_expression(switch.condition, symbols)?;
-            switch.statement = resolve_statement(*switch.statement, symbols)?.into();
+        Switch {
+            label,
+            condition,
+            cases: _,
+            statement,
+            default: _,
+        } => {
+            symbols.enter_switch(label);
+            let condition = resolve_expression(condition, symbols)?;
+            let statement = resolve_statement(*statement, symbols)?.into();
             let switch_symbols = symbols.leave_switch();
-            switch.cases = switch_symbols.cases;
-            switch.label = switch_symbols.label;
-            switch.default = switch_symbols.default;
-            Switch(switch)
+            Switch {
+                label: switch_symbols.label,
+                condition,
+                cases: switch_symbols.cases,
+                statement,
+                default: switch_symbols.default,
+            }
         }
         Null => Null,
     };
@@ -406,28 +414,22 @@ fn resolve_declaration(
     decl: Declaration,
     symbols: &mut SymbolTable,
     global: bool,
-) -> SemanticResult<Declaration> {
+) -> Result<Declaration> {
     let decl = match decl {
         Declaration::Variable(mut var_decl) => {
             let location = var_decl.location;
             if global {
                 symbols.declare_global_variable(var_decl.name.clone());
             } else {
-                var_decl = SemanticError::add_location(
-                    symbols.declare_local_variable(var_decl),
-                    location,
-                )?;
+                var_decl = symbols.declare_local_variable(var_decl).add_location(location)?;
             }
-            var_decl.init = SemanticError::add_location(
-                resolve_initializer(var_decl.init, symbols),
-                var_decl.location,
-            )?;
+            var_decl.init =
+                resolve_initializer(var_decl.init, symbols).add_location(var_decl.location)?;
             Declaration::Variable(var_decl)
         }
         Declaration::Function(func_decl) => {
             let location = func_decl.location;
-            let new_func = resolve_function(func_decl, symbols);
-            Declaration::Function(SemanticError::add_location(new_func, location)?)
+            Declaration::Function(resolve_function(func_decl, symbols).add_location(location)?)
         }
     };
     Ok(decl)
@@ -436,7 +438,7 @@ fn resolve_declaration(
 fn resolve_initializer(
     init: Option<VariableInitializer>,
     symbols: &mut SymbolTable,
-) -> SemanticResult<Option<VariableInitializer>> {
+) -> Result<Option<VariableInitializer>> {
     let result = match init {
         Some(VariableInitializer::SingleElem(expr)) => {
             Some(VariableInitializer::SingleElem(resolve_expression(expr, symbols)?))
@@ -453,10 +455,7 @@ fn resolve_initializer(
     Ok(result)
 }
 
-fn resolve_expression(
-    expr: TypedExpression,
-    symbols: &mut SymbolTable,
-) -> SemanticResult<TypedExpression> {
+fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Result<TypedExpression> {
     use parse_tree::Expression::*;
     let expr = expr.expr;
     let result = match expr {
@@ -481,7 +480,7 @@ fn resolve_expression(
         Constant(_) => expr,
         FunctionCall(name, args) => {
             let name = symbols.resolve_identifier(&name)?;
-            let args: SemanticResult<Vec<TypedExpression>> =
+            let args: Result<Vec<TypedExpression>> =
                 args.into_iter().map(|arg| resolve_expression(arg, symbols)).collect();
             FunctionCall(name, args?)
         }
@@ -498,11 +497,7 @@ fn resolve_expression(
     Ok(result.into())
 }
 
-fn resolve_loop(
-    mut loop_data: Loop,
-    symbols: &mut SymbolTable,
-    scoped: bool,
-) -> SemanticResult<Loop> {
+fn resolve_loop(mut loop_data: Loop, symbols: &mut SymbolTable, scoped: bool) -> Result<Loop> {
     symbols.enter_loop(loop_data.label.clone());
     if scoped {
         symbols.enter_scope();

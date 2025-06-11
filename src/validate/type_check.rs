@@ -6,93 +6,20 @@ use std::{
 
 use crate::{
     parse::parse_tree::{
-        AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, CType,
+        AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem,
         ConditionExpression, Constant, Declaration, Expression, ForInit, FunctionDeclaration,
         Program, Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
         VariableInitializer,
     },
-    validate::semantics::{SemanticError, assert_or_err},
+    validate::{
+        ctype::{
+            CType, Initializer, IsLValue, StaticInitializer, Symbol, SymbolAttr, Symbols, TypeTable,
+        },
+        semantics::{AddLocation, Error, assert_or_err},
+    },
 };
 
-type TypeError = SemanticError;
-type TypeResult<T> = Result<T, TypeError>;
-
-#[derive(Debug, Clone)]
-struct TypeTable {
-    symbols: Symbols,
-    current_function: Option<String>,
-}
-
-pub type Symbols = HashMap<String, Symbol>;
-#[derive(Debug, Clone)]
-pub struct Symbol {
-    pub ctype: CType,
-    pub attrs: SymbolAttr,
-}
-
-impl Symbol {
-    pub fn get_function_attrs(&self) -> &FunctionAttributes {
-        match &self.attrs {
-            SymbolAttr::Function(attrs) => attrs,
-            _ => panic!("Not a function!"),
-        }
-    }
-    pub fn get_static_attrs(&self) -> &StaticAttributes {
-        match &self.attrs {
-            SymbolAttr::Static(attrs) => attrs,
-            _ => panic!("Not a static variable: {:#?}", self),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum SymbolAttr {
-    Function(FunctionAttributes),
-    Static(StaticAttributes),
-    Constant(Initializer),
-    Local,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct FunctionAttributes {
-    pub defined: bool,
-    pub global: bool,
-}
-#[derive(Debug, PartialEq, Clone)]
-pub struct StaticAttributes {
-    pub init: StaticInitializer,
-    pub global: bool,
-}
-#[derive(Debug, PartialEq, Clone)]
-pub enum StaticInitializer {
-    Tentative,
-    Initialized(Vec<Initializer>),
-    None,
-}
-#[derive(Debug, PartialEq, Clone)]
-pub enum Initializer {
-    Char(i64),
-    Int(i64), // Limited to i32, but we store as i64 for matching and do our own conversion
-    Long(i64),
-    UChar(u64),
-    UInt(u64),
-    ULong(u64),
-    Double(f64),
-    ZeroInit(u64),
-    StringInit(String, bool),
-    PointerInit(String),
-}
-impl Initializer {
-    pub fn int_value(&self) -> i128 {
-        match self {
-            Self::Int(val) | Self::Long(val) | Self::Char(val) => *val as i128,
-            Self::UInt(val) | Self::ULong(val) | Self::UChar(val) => *val as i128,
-            Self::Double(val) => *val as i128,
-            Self::ZeroInit(_) => 0,
-            Self::StringInit(_, _) | Self::PointerInit(_) => panic!("Non-numerical initializer!"),
-        }
-    }
-}
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct TypedProgram {
@@ -100,15 +27,15 @@ pub struct TypedProgram {
     pub symbols: Symbols,
 }
 
-pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> TypeResult<Constant> {
+pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Result<Constant> {
     match &expr.expr {
         Expression::Constant(constant) => eval_constant(constant, ctype),
         Expression::Unary(UnaryOperator::Negate, constexpr) => eval_constant_expr(constexpr, ctype),
-        _ => Err(TypeError::new("Failed to parse constant expression!")),
+        _ => Err(Error::new("Failed to parse constant expression!")),
     }
 }
 
-fn eval_constant(constant: &Constant, ctype: &CType) -> TypeResult<Constant> {
+fn eval_constant(constant: &Constant, ctype: &CType) -> Result<Constant> {
     match ctype {
         CType::Char | CType::SignedChar => Ok(Constant::Char((constant.int_value() & 0xFF) as i64)),
         CType::Int => Ok(Constant::Int((constant.int_value() & 0xFFFFFFFF) as i64)),
@@ -122,9 +49,9 @@ fn eval_constant(constant: &Constant, ctype: &CType) -> TypeResult<Constant> {
         },
         CType::Pointer(ctype) | CType::Array(ctype, _) => match eval_constant(constant, ctype) {
             Ok(constant) if constant.int_value() == 0 => Ok(constant),
-            _ => Err(TypeError::new("Failed to parse constant expression!")),
+            _ => Err(Error::new("Failed to parse constant expression!")),
         },
-        _ => Err(TypeError::new("Failed to parse constant expression!")),
+        _ => Err(Error::new("Failed to parse constant expression!")),
     }
 }
 
@@ -135,24 +62,21 @@ fn string_name() -> String {
 
 // Set/Get Type
 
-fn set_type(mut expression: TypedExpression, ctype: &CType) -> TypeResult<TypedExpression> {
+fn set_type(mut expression: TypedExpression, ctype: &CType) -> Result<TypedExpression> {
     expression.ctype = Some(ctype.clone());
     Ok(expression)
 }
 pub fn get_type(expression: &TypedExpression) -> CType {
     expression.ctype.clone().expect("Undefined type!")
 }
-pub fn is_null_ptr(expr: &TypedExpression) -> TypeResult<bool> {
+pub fn is_null_ptr(expr: &TypedExpression) -> Result<bool> {
     let result = match eval_constant_expr(expr, expr.ctype.as_ref().expect("Has a type")) {
         Ok(val) => val.is_integer() && val.int_value() == 0,
         Err(_) => false,
     };
     Ok(result)
 }
-pub fn get_common_pointer_type(
-    left: &TypedExpression,
-    right: &TypedExpression,
-) -> TypeResult<CType> {
+pub fn get_common_pointer_type(left: &TypedExpression, right: &TypedExpression) -> Result<CType> {
     let left_type = get_type(left);
     let right_type = get_type(right);
     if left_type == right_type || is_null_ptr(right)? {
@@ -160,10 +84,10 @@ pub fn get_common_pointer_type(
     } else if is_null_ptr(left)? {
         Ok(right_type)
     } else {
-        Err(TypeError::new("Expressions have incompatible types!"))
+        Err(Error::new("Expressions have incompatible types!"))
     }
 }
-pub fn get_common_type(left: &TypedExpression, right: &TypedExpression) -> TypeResult<CType> {
+pub fn get_common_type(left: &TypedExpression, right: &TypedExpression) -> Result<CType> {
     let left_type = get_type(left);
     let right_type = get_type(right);
     // Promote character types to int
@@ -183,18 +107,18 @@ pub fn get_common_type(left: &TypedExpression, right: &TypedExpression) -> TypeR
         Ok(right_type)
     }
 }
-fn convert_to(expression: TypedExpression, ctype: &CType) -> TypeResult<TypedExpression> {
+fn convert_to(expression: TypedExpression, ctype: &CType) -> Result<TypedExpression> {
     if get_type(&expression) == *ctype {
         Ok(expression)
     } else {
         set_type(Expression::Cast(ctype.clone(), expression.into()).into(), ctype)
     }
 }
-fn promote_char(expression: TypedExpression) -> TypeResult<TypedExpression> {
+fn promote_char(expression: TypedExpression) -> Result<TypedExpression> {
     let ctype = get_type(&expression);
     if ctype.is_char() { convert_to(expression, &CType::Int) } else { Ok(expression) }
 }
-fn convert_by_assignment(expr: TypedExpression, ctype: &CType) -> TypeResult<TypedExpression> {
+fn convert_by_assignment(expr: TypedExpression, ctype: &CType) -> Result<TypedExpression> {
     if get_type(&expr) == *ctype {
         Ok(expr)
     } else if (get_type(&expr).is_arithmetic() && ctype.is_arithmetic())
@@ -202,12 +126,12 @@ fn convert_by_assignment(expr: TypedExpression, ctype: &CType) -> TypeResult<Typ
     {
         convert_to(expr, ctype)
     } else {
-        Err(TypeError::new("Cannot convert type for assignment!"))
+        Err(Error::new("Cannot convert type for assignment!"))
     }
 }
 
 // Tree traversal functions
-pub fn type_check_program(program: Program) -> TypeResult<TypedProgram> {
+pub fn type_check_program(program: Program) -> Result<TypedProgram> {
     let mut table = TypeTable {
         symbols: HashMap::new(),
         current_function: None,
@@ -216,7 +140,7 @@ pub fn type_check_program(program: Program) -> TypeResult<TypedProgram> {
         program: program
             .into_iter()
             .map(|decl| type_check_declaration(decl, &mut table, true))
-            .collect::<TypeResult<Vec<Declaration>>>()?,
+            .collect::<Result<Vec<Declaration>>>()?,
         symbols: table.symbols,
     })
 }
@@ -225,33 +149,31 @@ fn type_check_declaration(
     decl: Declaration,
     table: &mut TypeTable,
     global: bool,
-) -> TypeResult<Declaration> {
+) -> Result<Declaration> {
     match decl {
         Declaration::Function(func) => {
             let location = func.location;
-            let new_func = TypeError::add_location(type_check_function(func, table), location)?;
-            Ok(Declaration::Function(new_func))
+            Ok(Declaration::Function(type_check_function(func, table).add_location(location)?))
         }
         Declaration::Variable(mut var) => {
             let location = var.location;
             if global {
-                TypeError::add_location(type_check_var_filescope(&var, table), location)?;
+                type_check_var_filescope(&var, table).add_location(location)?;
             } else {
-                var = TypeError::add_location(type_check_var_declaration(var, table), location)?;
+                var = type_check_var_declaration(var, table).add_location(location)?;
             }
             Ok(Declaration::Variable(var))
         }
     }
 }
 
-fn type_check_block(block: Block, table: &mut TypeTable) -> TypeResult<Block> {
+fn type_check_block(block: Block, table: &mut TypeTable) -> Result<Block> {
     block.into_iter().map(|item| type_check_block_item(item, table)).collect()
 }
-fn type_check_block_item(block_item: BlockItem, table: &mut TypeTable) -> TypeResult<BlockItem> {
+fn type_check_block_item(block_item: BlockItem, table: &mut TypeTable) -> Result<BlockItem> {
     match block_item {
         BlockItem::StatementItem(statement, location) => {
-            let stmt = type_check_statement(statement, table);
-            let stmt = TypeError::add_location(stmt, location)?;
+            let stmt = type_check_statement(statement, table).add_location(location)?;
             Ok(BlockItem::StatementItem(stmt, location))
         }
         BlockItem::DeclareItem(decl) => {
@@ -259,7 +181,7 @@ fn type_check_block_item(block_item: BlockItem, table: &mut TypeTable) -> TypeRe
         }
     }
 }
-fn type_check_statement(statement: Statement, table: &mut TypeTable) -> TypeResult<Statement> {
+fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<Statement> {
     use Statement::*;
     let result = match statement {
         Return(expr) => {
@@ -267,7 +189,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> TypeResu
             let cur_func = table
                 .current_function
                 .as_ref()
-                .ok_or(TypeError::new("Return must be inside function!"))?;
+                .ok_or(Error::new("Return must be inside function!"))?;
             let cur_func_type = &table.symbols[cur_func].ctype;
             let CType::Function(_, return_type) = cur_func_type else { panic!("Match failed!") };
             Return(convert_by_assignment(expr, return_type)?)
@@ -292,17 +214,20 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> TypeResu
             DoWhile(loop_data)
         }
         Compound(block) => Compound(type_check_block(block, table)?),
-        Switch(mut switch) => {
-            switch.condition = type_check_and_convert(switch.condition, table)?;
-            switch.condition = promote_char(switch.condition)?;
-            assert_or_err(
-                get_type(&switch.condition).is_int(),
-                "Can only switch on integer types!",
-            )?;
-            let cond_type = get_type(&switch.condition);
+        Switch {
+            label,
+            condition,
+            cases,
+            statement,
+            default,
+        } => {
+            let condition = type_check_and_convert(condition, table)?;
+            let condition = promote_char(condition)?;
+            assert_or_err(get_type(&condition).is_int(), "Can only switch on integer types!")?;
+            let cond_type = get_type(&condition);
             let mut new_cases = Vec::new();
             let mut case_vals = HashSet::new();
-            for case in switch.cases {
+            for case in cases {
                 let constexpr =
                     eval_constant_expr(&case.1, &cond_type).expect("Must be constexpr!");
                 let case_typed = type_check_and_convert(case.1, table)?;
@@ -312,9 +237,14 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> TypeResu
                 case_vals.insert(constexpr.int_value());
                 new_cases.push((case.0, Expression::Constant(constexpr).into()));
             }
-            switch.cases = new_cases;
-            switch.statement = type_check_statement(*switch.statement, table)?.into();
-            Switch(switch)
+            let statement = type_check_statement(*statement, table)?.into();
+            Switch {
+                label,
+                condition,
+                cases: new_cases,
+                statement,
+                default,
+            }
         }
         For(init, mut loop_data, post) => {
             let init = match *init {
@@ -338,10 +268,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> TypeResu
     Ok(result)
 }
 
-fn type_check_and_convert(
-    expr: TypedExpression,
-    table: &mut TypeTable,
-) -> TypeResult<TypedExpression> {
+fn type_check_and_convert(expr: TypedExpression, table: &mut TypeTable) -> Result<TypedExpression> {
     let typed_expr = type_check_expression(expr, table)?;
     match get_type(&typed_expr) {
         CType::Array(elem_t, _) => {
@@ -352,10 +279,7 @@ fn type_check_and_convert(
     }
 }
 
-fn type_check_expression(
-    expr: TypedExpression,
-    table: &mut TypeTable,
-) -> TypeResult<TypedExpression> {
+fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result<TypedExpression> {
     match expr.expr {
         Expression::Variable(name) => {
             let var_type = &table.symbols[&name].ctype;
@@ -452,7 +376,7 @@ fn type_check_expression(
                     let call_expr = Expression::FunctionCall(name, converted_args);
                     set_type(call_expr.into(), &ret_type)
                 }
-                _ => Err(TypeError::new("Variable used as function!")),
+                _ => Err(Error::new("Variable used as function!")),
             }
         }
         Expression::Dereference(inner) => {
@@ -462,7 +386,7 @@ fn type_check_expression(
                     let deref_expr = Expression::Dereference(typed_inner.into());
                     set_type(deref_expr.into(), &reference_t)
                 }
-                _ => Err(TypeError::new("Invalid dreference!")),
+                _ => Err(Error::new("Invalid dreference!")),
             }
         }
         Expression::AddrOf(inner) => {
@@ -487,7 +411,7 @@ fn type_check_expression(
                 // Swap left and right so left is always the pointer
                 set_type(Expression::Subscript(right.into(), left.into()).into(), ptr_t)
             } else {
-                Err(TypeError::new("Subscript takes integer and pointer operands!"))
+                Err(Error::new("Subscript takes integer and pointer operands!"))
             }
         }
         Expression::StringLiteral(ref string_data) => {
@@ -500,7 +424,7 @@ fn type_check_expression(
 fn type_check_binary_expr(
     binary: BinaryExpression,
     table: &mut TypeTable,
-) -> TypeResult<TypedExpression> {
+) -> Result<TypedExpression> {
     use BinaryOperator::*;
     use Expression::Binary;
     let left = type_check_and_convert(binary.left, table)?;
@@ -575,7 +499,7 @@ fn type_check_binary_expr(
                 let binexpr = BinaryExpression { left: right, right: left, ..binary };
                 set_type(Binary(binexpr.into()).into(), &right_t)
             } else {
-                Err(TypeError::new("Invalid operands for addition"))
+                Err(Error::new("Invalid operands for addition"))
             }
         }
         Subtract => {
@@ -602,7 +526,7 @@ fn type_check_binary_expr(
                 let binexpr = BinaryExpression { left, right, ..binary };
                 set_type(Binary(binexpr.into()).into(), &CType::Long)
             } else {
-                Err(TypeError::new("Invalid operands for subtraction"))
+                Err(Error::new("Invalid operands for subtraction"))
             }
         }
     }
@@ -613,7 +537,7 @@ fn type_check_arithmetic_binexpr(
     right: TypedExpression,
     operator: BinaryOperator,
     is_assignment: bool,
-) -> TypeResult<TypedExpression> {
+) -> Result<TypedExpression> {
     let common_type = get_common_type(&left, &right)?;
     let binexpr = if is_assignment {
         assert_or_err(left.is_lvalue(), "Can only assign to lvalue!")?;
@@ -630,20 +554,22 @@ fn type_check_arithmetic_binexpr(
 fn type_check_function(
     function: FunctionDeclaration,
     table: &mut TypeTable,
-) -> TypeResult<FunctionDeclaration> {
+) -> Result<FunctionDeclaration> {
     let function = type_check_array_params(function)?;
     let ctype = &function.ctype;
     let mut defined = function.body.is_some();
     let mut global = function.storage != Some(StorageClass::Static);
     if let Some(symbol) = table.symbols.get(&function.name) {
-        let attrs = symbol.get_function_attrs();
+        let SymbolAttr::Function { defined: prev_def, global: prev_global } = symbol.attrs else {
+            return Err(Error::new("Expected function!"));
+        };
         assert_or_err(symbol.ctype == *ctype, "Incompatible function declarations!")?;
-        assert_or_err(!attrs.defined || !defined, "Function redefinition!")?;
-        assert_or_err(!attrs.global || global, "static definition cannot follow non-static")?;
-        global = attrs.global;
-        defined = attrs.defined;
+        assert_or_err(!prev_def || !defined, "Function redefinition!")?;
+        assert_or_err(!prev_global || global, "static definition cannot follow non-static")?;
+        global = prev_global;
+        defined = prev_def;
     }
-    let attrs = SymbolAttr::Function(FunctionAttributes { defined, global });
+    let attrs = SymbolAttr::Function { defined, global };
     table.symbols.insert(function.name.clone(), Symbol { ctype: ctype.clone(), attrs });
     if let Some(body) = function.body {
         let CType::Function(param_types, _) = ctype else { panic!("Not a function!") };
@@ -660,7 +586,7 @@ fn type_check_function(
     }
 }
 
-fn type_check_array_params(mut function: FunctionDeclaration) -> TypeResult<FunctionDeclaration> {
+fn type_check_array_params(mut function: FunctionDeclaration) -> Result<FunctionDeclaration> {
     let CType::Function(param_types, return_t) = function.ctype else { panic!("Not a function!") };
     assert_or_err(!matches!(*return_t, CType::Array(_, _)), "Function cannot return array")?;
     let adjusted_params = param_types
@@ -677,18 +603,19 @@ fn type_check_array_params(mut function: FunctionDeclaration) -> TypeResult<Func
 fn parse_static_initializer(
     init: Option<&VariableInitializer>,
     ctype: &CType,
-) -> TypeResult<StaticInitializer> {
+) -> Result<StaticInitializer> {
     match init {
         None => Ok(StaticInitializer::Initialized(vec![Initializer::ZeroInit(ctype.size())])),
         Some(VariableInitializer::SingleElem(expr)) => {
             if let CType::Array(elem_t, size) = ctype {
                 let Expression::StringLiteral(s_data) = &expr.expr else {
-                    return Err(TypeError::new("Cannot initialize static array with a scalar!"));
+                    return Err(Error::new("Cannot initialize static array with a scalar!"));
                 };
                 assert_or_err(elem_t.is_char(), "Cannot initialize a non-char with a string!")?;
                 assert_or_err(s_data.len() as u64 <= *size, "Too many characters in string!")?;
                 let null_terminated = *size > s_data.len() as u64;
-                let mut init_list = vec![Initializer::StringInit(s_data.clone(), null_terminated)];
+                let mut init_list =
+                    vec![Initializer::StringInit { data: s_data.clone(), null_terminated }];
                 if null_terminated {
                     let padding = *size - s_data.len() as u64 - 1;
                     if padding != 0 {
@@ -710,14 +637,14 @@ fn parse_static_initializer(
                         parse_initializer_value(val, ctype)
                     }
                     Ok(Constant::Double(val)) => parse_initializer_value(val, ctype),
-                    Err(_) => return Err(TypeError::new("Failed to parse static initializer")),
+                    Err(_) => return Err(Error::new("Failed to parse static initializer")),
                 };
                 Ok(StaticInitializer::Initialized(vec![init_val]))
             }
         }
         Some(VariableInitializer::CompoundInit(init_list)) => {
             let CType::Array(elem_t, size) = ctype else {
-                return Err(TypeError::new("Cannot initiate static scalar with initializer list"));
+                return Err(Error::new("Cannot initiate static scalar with initializer list"));
             };
             assert_or_err(init_list.len() as u64 <= *size, "Initializer longer than array!")?;
             let mut initializers = Vec::new();
@@ -782,13 +709,13 @@ fn type_check_initializer(
     init: VariableInitializer,
     target_t: &CType,
     table: &mut TypeTable,
-) -> TypeResult<VariableInitializer> {
+) -> Result<VariableInitializer> {
     use VariableInitializer::*;
     match init {
         SingleElem(expr) => {
             if let CType::Array(elem_t, size) = target_t {
                 let Expression::StringLiteral(data) = &expr.expr else {
-                    return Err(TypeError::new("Cannot initialize array with a scalar!"));
+                    return Err(Error::new("Cannot initialize array with a scalar!"));
                 };
                 assert_or_err(
                     elem_t.is_char(),
@@ -808,15 +735,13 @@ fn type_check_initializer(
         }
         CompoundInit(init_list) => {
             let CType::Array(elem_t, size) = target_t else {
-                return Err(TypeError::new(
-                    "Cannot initialize a scalar with a compound initializer!",
-                ));
+                return Err(Error::new("Cannot initialize a scalar with a compound initializer!"));
             };
             assert_or_err(init_list.len() as u64 <= *size, "Too many items in initializer!")?;
             let mut typechecked_list = init_list
                 .into_iter()
                 .map(|init| type_check_initializer(init, elem_t, table))
-                .collect::<TypeResult<Vec<VariableInitializer>>>()?;
+                .collect::<Result<Vec<VariableInitializer>>>()?;
             while (typechecked_list.len() as u64) < *size {
                 typechecked_list.push(zero_initializer(elem_t));
             }
@@ -837,7 +762,7 @@ fn is_string_literal(initializer: &Option<VariableInitializer>) -> bool {
 fn type_check_var_declaration(
     var: VariableDeclaration,
     table: &mut TypeTable,
-) -> TypeResult<VariableDeclaration> {
+) -> Result<VariableDeclaration> {
     match var.storage {
         Some(StorageClass::Extern) => {
             assert_or_err(var.init.is_none(), "Local extern variable cannot have initializer!")?;
@@ -845,7 +770,7 @@ fn type_check_var_declaration(
                 assert_or_err(symbol.ctype == var.ctype, "Declaration types don't match!")?;
             } else {
                 let init = StaticInitializer::None;
-                let attrs = SymbolAttr::Static(StaticAttributes { init, global: true });
+                let attrs = SymbolAttr::Static { init, global: true };
                 table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
             }
             Ok(var)
@@ -867,17 +792,17 @@ fn type_check_var_declaration(
                         name.clone(),
                         Symbol {
                             ctype: CType::Array(CType::Char.into(), s_data.len() as u64 + 1),
-                            attrs: SymbolAttr::Constant(Initializer::StringInit(
-                                s_data.clone(),
-                                true,
-                            )),
+                            attrs: SymbolAttr::Constant(Initializer::StringInit {
+                                data: s_data.clone(),
+                                null_terminated: true,
+                            }),
                         },
                     );
                     // Insert variable into symbol table with PointerInit from the static string
-                    let attrs = SymbolAttr::Static(StaticAttributes {
+                    let attrs = SymbolAttr::Static {
                         init: StaticInitializer::Initialized(vec![Initializer::PointerInit(name)]),
                         global: false,
-                    });
+                    };
                     table
                         .symbols
                         .insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
@@ -885,7 +810,7 @@ fn type_check_var_declaration(
                 // Handle general static initializers
                 _ => {
                     let init = parse_static_initializer(var.init.as_ref(), &var.ctype)?;
-                    let attrs = SymbolAttr::Static(StaticAttributes { init, global: false });
+                    let attrs = SymbolAttr::Static { init, global: false };
                     table
                         .symbols
                         .insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
@@ -903,7 +828,7 @@ fn type_check_var_declaration(
     }
 }
 
-fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) -> TypeResult<()> {
+fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) -> Result<()> {
     use StaticInitializer::{Initialized, None as NoInitializer, Tentative};
     let mut init_value = match (&var.init, var.storage) {
         (Some(_), _) => parse_static_initializer(var.init.as_ref(), &var.ctype)?,
@@ -912,24 +837,26 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) ->
     };
     let mut global = var.storage != Some(StorageClass::Static);
     if let Some(symbol) = table.symbols.get(&var.name) {
-        let attrs = symbol.get_static_attrs();
+        let SymbolAttr::Static { init: prev_init, global: prev_global } = &symbol.attrs else {
+            return Err(Error::new("Expected static attributes!"));
+        };
         assert_or_err(symbol.ctype == var.ctype, "Declaration types don't match!")?;
         if var.storage == Some(StorageClass::Extern) {
-            global = attrs.global;
-        } else if attrs.global != global {
-            return Err(TypeError::new("Conflicting linkage!"));
+            global = *prev_global;
+        } else if global != *prev_global {
+            return Err(Error::new("Conflicting linkage!"));
         }
-        if matches!(attrs.init, Initialized(_)) {
+        if matches!(prev_init, Initialized(_)) {
             assert_or_err(
                 !matches!(init_value, Initialized(_)),
                 "Conflicting static initializers!",
             )?;
-            init_value = attrs.init.clone();
-        } else if attrs.init == Tentative && !matches!(init_value, Initialized(_)) {
+            init_value = prev_init.clone();
+        } else if *prev_init == Tentative && !matches!(init_value, Initialized(_)) {
             init_value = Tentative
         }
     }
-    let attrs = SymbolAttr::Static(StaticAttributes { init: init_value, global });
+    let attrs = SymbolAttr::Static { init: init_value, global };
     table.symbols.insert(var.name.clone(), Symbol { ctype: var.ctype.clone(), attrs });
     Ok(())
 }

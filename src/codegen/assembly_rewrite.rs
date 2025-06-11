@@ -1,5 +1,5 @@
-use super::assembly_gen::{AssemblyType, Register::*};
-use super::assembly_gen::{
+use super::assembly_ast::{AssemblyType, Register::*};
+use super::assembly_ast::{
     AssemblyType::Longword, AssemblyType::Quadword, BinaryOperator, Function, Instruction, Operand,
     Operand::Imm, Operand::Register as Reg, Program, TopLevelDecl,
 };
