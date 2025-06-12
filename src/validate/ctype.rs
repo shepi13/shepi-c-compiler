@@ -1,7 +1,10 @@
 //! Module for CType type and implementations, along with symbol table and other static
 //! variable initialization data structures.
 
-use crate::parse::parse_tree::{Expression, TypedExpression};
+use crate::{
+    parse::parse_tree::{Expression, TypedExpression},
+    validate::{semantics::Error, type_check::eval_constant_expr},
+};
 use std::collections::HashMap;
 
 // CType implementation
@@ -71,24 +74,6 @@ impl CType {
     }
 }
 
-/// Trait for types that can be lvalues
-pub trait IsLValue {
-    /// Should return whether or not the caller is an lvalue.
-    fn is_lvalue(&self) -> bool;
-}
-
-impl IsLValue for TypedExpression {
-    fn is_lvalue(&self) -> bool {
-        match self.expr {
-            Expression::Dereference(_)
-            | Expression::Subscript(_, _)
-            | Expression::StringLiteral(_) => true,
-            Expression::Variable(_) => !matches!(self.ctype, Some(CType::Array(_, _))),
-            _ => false,
-        }
-    }
-}
-
 /// Main symbol table for the compiler
 #[derive(Debug, Clone)]
 pub struct TypeTable {
@@ -146,5 +131,103 @@ impl Initializer {
                 panic!("Non-numerical initializer!")
             }
         }
+    }
+}
+
+type Result<T> = std::result::Result<T, Error>;
+
+// Typed expressions
+
+/// Trait for types that can be lvalues
+pub trait IsLValue {
+    /// Should return whether or not the caller is an lvalue.
+    fn is_lvalue(&self) -> bool;
+}
+
+impl IsLValue for TypedExpression {
+    fn is_lvalue(&self) -> bool {
+        match self.expr {
+            Expression::Dereference(_)
+            | Expression::Subscript(_, _)
+            | Expression::StringLiteral(_) => true,
+            Expression::Variable(_) => !matches!(self.ctype, Some(CType::Array(_, _))),
+            _ => false,
+        }
+    }
+}
+
+impl Expression {
+    pub fn set_type(self, ctype: &CType) -> Result<TypedExpression> {
+        let typed_expr = TypedExpression::from(self);
+        typed_expr.set_type(ctype)
+    }
+}
+
+impl TypedExpression {
+    pub fn set_type(mut self, ctype: &CType) -> Result<Self> {
+        self.ctype = Some(ctype.clone());
+        Ok(self)
+    }
+    pub fn get_type(&self) -> CType {
+        self.ctype.clone().expect("Undefined type!")
+    }
+    pub fn is_null_ptr(&self) -> Result<bool> {
+        let result = match eval_constant_expr(self, self.ctype.as_ref().expect("Has a type")) {
+            Ok(val) => val.is_integer() && val.int_value() == 0,
+            Err(_) => false,
+        };
+        Ok(result)
+    }
+    pub fn convert_to(self, ctype: &CType) -> Result<Self> {
+        if self.get_type() == *ctype {
+            Ok(self)
+        } else {
+            Expression::Cast(ctype.clone(), self.into()).set_type(ctype)
+        }
+    }
+    pub fn promote_char(self) -> Result<Self> {
+        if self.get_type().is_char() { self.convert_to(&CType::Int) } else { Ok(self) }
+    }
+    pub fn convert_by_assignment(self, ctype: &CType) -> Result<Self> {
+        if self.get_type() == *ctype {
+            Ok(self)
+        } else if (self.get_type().is_arithmetic() && ctype.is_arithmetic())
+            || (self.is_null_ptr()? && ctype.is_pointer())
+        {
+            self.convert_to(ctype)
+        } else {
+            Err(Error::new("Cannot convert type for assignment!"))
+        }
+    }
+}
+pub fn get_common_pointer_type(left: &TypedExpression, right: &TypedExpression) -> Result<CType> {
+    let left_type = left.get_type();
+    let right_type = right.get_type();
+    if left_type == right_type || right.is_null_ptr()? {
+        Ok(left_type)
+    } else if left.is_null_ptr()? {
+        Ok(right_type)
+    } else {
+        Err(Error::new("Expressions have incompatible types!"))
+    }
+}
+pub fn get_common_type(left: &TypedExpression, right: &TypedExpression) -> Result<CType> {
+    let left_type = left.get_type();
+    let right_type = right.get_type();
+    // Promote character types to int
+    let left_type = if left_type.is_char() { CType::Int } else { left_type };
+    let right_type = if right_type.is_char() { CType::Int } else { right_type };
+    if left_type.is_pointer() || right_type.is_pointer() {
+        get_common_pointer_type(left, right)
+    } else if left_type == CType::Double || right_type == CType::Double {
+        Ok(CType::Double)
+    } else if left_type == right_type {
+        Ok(left_type)
+    } else if left_type.size() == right_type.size() {
+        if left_type.is_signed() { Ok(right_type) } else { Ok(left_type) }
+    } else if left_type.size() > right_type.size() {
+        Ok(left_type)
+    } else {
+        Ok(right_type)
     }
 }

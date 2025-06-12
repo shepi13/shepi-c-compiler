@@ -8,10 +8,7 @@ use crate::{
         Statement, TypedExpression, VariableInitializer,
     },
     tac_generation::tac_ast::{Instruction, JumpType, Program, TopLevelDecl, Value},
-    validate::{
-        ctype::{CType, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols},
-        type_check::get_type,
-    },
+    validate::ctype::{CType, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols},
 };
 
 pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Program {
@@ -338,7 +335,7 @@ fn gen_expression(
                 gen_short_circuit(instructions, *binary, symbols)
             } else if binary.operator == Add && expr_t.is_pointer() {
                 gen_pointer_addition(instructions, *binary, symbols)
-            } else if binary.operator == Subtract && get_type(&binary.left).is_pointer() {
+            } else if binary.operator == Subtract && binary.left.get_type().is_pointer() {
                 gen_pointer_subtraction(instructions, *binary, symbols)
             } else if binary.is_assignment {
                 gen_compound_assignment(instructions, *binary, expr_t, symbols)
@@ -401,7 +398,7 @@ fn gen_expression(
             ExpResult::Operand(dst)
         }
         Expression::Cast(new_type, castexpr) => {
-            let old_type = get_type(&castexpr);
+            let old_type = castexpr.get_type();
             let result = gen_expression_and_convert(*castexpr, instructions, symbols);
             let dst = gen_cast(instructions, new_type, old_type, result, symbols);
             ExpResult::Operand(dst)
@@ -446,7 +443,7 @@ fn gen_increment(
     symbols: &mut Symbols,
 ) -> ExpResult {
     use parse_tree::IncrementType::*;
-    let expr_t = get_type(&expression);
+    let expr_t = expression.get_type();
     let lval = gen_expression(expression, instructions, symbols);
     let src1 = lvalue_convert(instructions, lval.clone(), Some(expr_t.clone()), symbols);
     let old_value = gen_temp_var(expr_t.clone(), symbols);
@@ -500,7 +497,7 @@ fn gen_pointer_addition(
     symbols: &mut Symbols,
 ) -> ExpResult {
     use Instruction::*;
-    let left_t = get_type(&binary.left);
+    let left_t = binary.left.get_type();
     let CType::Pointer(ref ptr_t) = left_t else { panic!("Left expr not pointer!") };
     let ptr_size = ptr_t.size();
     let lval = gen_expression(binary.left, instructions, symbols);
@@ -531,7 +528,7 @@ fn gen_pointer_subtraction(
 ) -> ExpResult {
     use BinaryOperator::{Divide, Subtract};
     use Instruction::*;
-    let CType::Pointer(ptr_t) = get_type(&binary.left) else { panic!("Expr not pointer!") };
+    let CType::Pointer(ptr_t) = binary.left.get_type() else { panic!("Expr not pointer!") };
     let ptr_size = ptr_t.size();
     let src1 = gen_expression_and_convert(binary.left, instructions, symbols);
     let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
@@ -562,7 +559,7 @@ fn gen_compound_assignment(
     symbols: &mut Symbols,
 ) -> ExpResult {
     use Instruction::*;
-    let left_t = get_type(&binary.left);
+    let left_t = binary.left.get_type();
     // Generate and cast lvalue to common type
     let lval = gen_expression(binary.left, instructions, symbols);
     let src1 = lvalue_convert(instructions, lval.clone(), Some(left_t.clone()), symbols);

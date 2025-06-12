@@ -128,30 +128,16 @@ impl From<CType> for AssemblyType {
         }
     }
 }
+#[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Register {
-    AX,
-    CX,
-    DX,
-    DI,
-    SI,
-    R8,
-    R9,
-    R10,
-    R11,
-    CL,
-    SP,
-    BP,
-    XMM0,
-    XMM1,
-    XMM2,
-    XMM3,
-    XMM4,
-    XMM5,
-    XMM6,
-    XMM7,
-    XMM14,
-    XMM15,
+    AX, CX, DX,             // x registers
+    DI, SI,                 // i registers
+    R8, R9, R10, R11,       // # registers (used for scratch operations)
+    CL,                     // Short c reg, used for bitshifts
+    SP, BP,                 // Stack and Base Pointers
+    XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,     // FP registers
+    XMM14, XMM15,           // FP scratch registers
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Condition {
