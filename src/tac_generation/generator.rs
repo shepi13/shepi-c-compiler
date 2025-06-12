@@ -1,6 +1,9 @@
 // Generates Three Adress Code Intermediate representation (Step between Parser AST and Assembly AST)
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    cmp::max,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use crate::{
     parse::parse_tree::{
@@ -124,8 +127,57 @@ fn gen_init_list(
         let offset = initial_offset + (i as u64) * elem_t.size();
         match initializer {
             VariableInitializer::SingleElem(expr) => {
-                if let Expression::StringLiteral(_s_data) = expr.expr {
-                    todo!("String literal initialization of local arrays!")
+                if let Expression::StringLiteral(s_data) = expr.expr {
+                    let buffer_len = if s_data.len() as u64 + offset > ctype.size() {
+                        max(ctype.size() as i64 - offset as i64, 0) as usize
+                    } else {
+                        s_data.len()
+                    };
+                    //Copy String Data
+                    for (i, chunk) in s_data.as_bytes()[..buffer_len].chunks(4).enumerate()
+                    {
+                        let offset = offset + (i * 4) as u64;
+                        if chunk.len() != 4 {
+                            for (loc, byte) in chunk.iter().enumerate() {
+                                let val = Value::ConstValue(Constant::Char(*byte as i64));
+                                instructions.push(Instruction::CopyToOffset(
+                                    val,
+                                    name.clone(),
+                                    offset + loc as u64,
+                                ));
+                            }
+                            break;
+                        } else{
+                            let val = i32::from_le_bytes(chunk.try_into().expect("4 bytes!"));
+                            let val = Value::ConstValue(Constant::Int(val as i64));
+                            instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
+                        } 
+                    }
+                    // Copy padding data
+                    let padding = if ctype.size() > s_data.len() as u64 {
+                        ctype.size() - s_data.len() as u64
+                    } else {
+                        0
+                    };
+                    for padding_offset in (0..padding).step_by(8) {
+                        if padding - padding_offset > chunk_size as u64 {
+                            let val = match chunk_size {
+                                1 => Value::ConstValue(Constant::Char(0)),
+                                4 => Value::ConstValue(Constant::Int(0)),
+                                8 => Value::ConstValue(Constant::Long(0)),
+                                _ => panic!("Invalid chunk size!"),
+                            };
+                            let offset = offset + buffer_len as u64 + padding_offset;
+                            instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
+                        } else {
+                            for loc in padding..padding_offset {
+                                let val = Value::ConstValue(Constant::Char(0));
+                                let offset = offset + buffer_len as u64 + loc;
+                                instructions.push(Instruction::CopyToOffset(val, name.clone(), offset + loc));
+                            }
+                            break;
+                        }
+                    }
                 } else {
                     let result = gen_expression_and_convert(expr, instructions, symbols);
                     instructions.push(Instruction::CopyToOffset(result, name.clone(), offset));

@@ -119,7 +119,7 @@ impl From<CType> for AssemblyType {
             CType::Pointer(_) => AssemblyType::Quadword,
             CType::Array(elem_t, _) => {
                 let size = ctype.size();
-                let alignment = if size < 16 { elem_t.size() } else { 16 };
+                let alignment = if size < 16 { elem_t.size().next_power_of_two() / 2 } else { 16 };
                 assert!([1, 2, 4, 8, 16].contains(&alignment), "Alignment error: {:#?}", alignment);
                 AssemblyType::ByteArray(size, alignment as usize)
             }
