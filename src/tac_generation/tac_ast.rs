@@ -8,6 +8,7 @@ pub type Program = Vec<TopLevelDecl>;
 pub enum TopLevelDecl {
     Function { name: String, params: Vec<Value>, instructions: Vec<Instruction>, global: bool },
     StaticDecl { identifier: String, global: bool, ctype: CType, initializer: Vec<Initializer> },
+    StaticConstant { identifier: String, ctype: CType, initializer: Initializer },
 }
 
 #[derive(Debug, Clone)]
