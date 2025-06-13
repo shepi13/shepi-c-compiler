@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     iter::zip,
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use crate::{
@@ -14,7 +13,7 @@ use crate::{
     validate::{
         ctype::{
             CType, Initializer, IsLValue, StaticInitializer, Symbol, SymbolAttr, Symbols,
-            TypeTable, get_common_type,
+            TypeTable, get_common_type, string_name,
         },
         semantics::{AddLocation, Error, assert_or_err},
     },
@@ -54,11 +53,6 @@ fn eval_constant(constant: &Constant, ctype: &CType) -> Result<Constant> {
         },
         _ => Err(Error::new("Failed to parse constant expression!")),
     }
-}
-
-fn string_name() -> String {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    format!("string.{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
 // Tree traversal functions

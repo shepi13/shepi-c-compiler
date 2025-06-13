@@ -5,7 +5,10 @@ use crate::{
     parse::parse_tree::{Expression, TypedExpression},
     validate::{semantics::Error, type_check::eval_constant_expr},
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 // CType implementation
 
@@ -95,6 +98,12 @@ pub enum SymbolAttr {
     Static { init: StaticInitializer, global: bool },
     Constant(Initializer),
     Local,
+}
+
+/// Generate a unique name for a constant string symbol table entry
+pub fn string_name() -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("string.{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
 /// Static Variable Initializers

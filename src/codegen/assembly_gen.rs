@@ -57,6 +57,9 @@ pub fn gen_assembly_tree(ast: tac_ast::Program, symbols: Symbols) -> Program {
                     init: initializer,
                 }));
             }
+            tac_ast::TopLevelDecl::StaticConstant { identifier: _, ctype: _, initializer: _ } => {
+                todo!("TAC static constant conversion!")
+            }
         }
     }
     program.append(

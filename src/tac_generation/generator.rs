@@ -11,7 +11,9 @@ use crate::{
         Statement, TypedExpression, VariableInitializer,
     },
     tac_generation::tac_ast::{Instruction, JumpType, Program, TopLevelDecl, Value},
-    validate::ctype::{CType, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols},
+    validate::ctype::{
+        CType, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, string_name,
+    },
 };
 
 pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Program {
@@ -53,6 +55,12 @@ pub fn gen_tac_ast(parser_ast: parse_tree::Program, symbols: &mut Symbols) -> Pr
                 }
                 StaticInitializer::None => (),
             }
+        } else if let SymbolAttr::Constant(init) = &entry.attrs {
+            program.push(TopLevelDecl::StaticConstant {
+                identifier: name.clone(),
+                ctype: entry.ctype.clone(),
+                initializer: init.clone(),
+            })
         }
     }
     program
@@ -461,7 +469,20 @@ fn gen_expression(
             };
             ExpResult::DereferencedPointer(result)
         }
-        Expression::StringLiteral(_) => todo!("Add string literal!"),
+        Expression::StringLiteral(s_data) => {
+            let name = string_name();
+            symbols.insert(
+                name.clone(),
+                Symbol {
+                    ctype: CType::Array(CType::Char.into(), s_data.len() as u64 + 1),
+                    attrs: SymbolAttr::Constant(Initializer::StringInit {
+                        data: s_data.clone(),
+                        null_terminated: true,
+                    }),
+                },
+            );
+            ExpResult::Operand(Value::Variable(name))
+        }
     }
 }
 
