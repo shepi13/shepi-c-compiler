@@ -143,7 +143,8 @@ fn gen_init_list(
                             let val = Value::ConstValue(val);
                             instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
                         } else if chunk.len() == 4 {
-                            let val = Constant::Int(i32::from_le_bytes(chunk.try_into().unwrap()) as i64);
+                            let val =
+                                Constant::Int(i32::from_le_bytes(chunk.try_into().unwrap()) as i64);
                             let val = Value::ConstValue(val);
                             instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
                         }
