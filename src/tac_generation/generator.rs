@@ -1,7 +1,7 @@
 // Generates Three Adress Code Intermediate representation (Step between Parser AST and Assembly AST)
 
 use std::{
-    cmp::max,
+    cmp::min,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -127,55 +127,31 @@ fn gen_init_list(
         let offset = initial_offset + (i as u64) * elem_t.size();
         match initializer {
             VariableInitializer::SingleElem(expr) => {
-                if let Expression::StringLiteral(s_data) = expr.expr {
-                    let buffer_len = if s_data.len() as u64 + offset > ctype.size() {
-                        max(ctype.size() as i64 - offset as i64, 0) as usize
-                    } else {
-                        s_data.len()
-                    };
-                    //Copy String Data
-                    for (i, chunk) in s_data.as_bytes()[..buffer_len].chunks(4).enumerate()
-                    {
-                        let offset = offset + (i * 4) as u64;
-                        if chunk.len() != 4 {
-                            for (loc, byte) in chunk.iter().enumerate() {
-                                let val = Value::ConstValue(Constant::Char(*byte as i64));
-                                instructions.push(Instruction::CopyToOffset(
-                                    val,
-                                    name.clone(),
-                                    offset + loc as u64,
-                                ));
-                            }
-                            break;
-                        } else{
-                            let val = i32::from_le_bytes(chunk.try_into().expect("4 bytes!"));
-                            let val = Value::ConstValue(Constant::Int(val as i64));
+                if let Expression::StringLiteral(s_data) = &expr.expr {
+                    const CHUNK_SIZE: usize = 8;
+                    // Adjust string data to size of array by truncating or adding 0-byte padding
+                    let buffer_len = min(s_data.len(), ctype.size() as usize);
+                    let mut data: Vec<u8> = s_data.as_bytes()[..buffer_len].to_vec();
+                    data.resize(expr.get_type().size() as usize, 0);
+                    // Loop over padded string and generate copy to offset instructions
+                    for (i, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
+                        let offset = offset + i as u64 * 8;
+                        let (chunk, remainder) = chunk.split_at(chunk.len() & 12);
+                        // Copy chunk
+                        if chunk.len() == 8 {
+                            let val = Constant::Long(i64::from_le_bytes(chunk.try_into().unwrap()));
+                            let val = Value::ConstValue(val);
                             instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
-                        } 
-                    }
-                    // Copy padding data
-                    let padding = if ctype.size() > s_data.len() as u64 {
-                        ctype.size() - s_data.len() as u64
-                    } else {
-                        0
-                    };
-                    for padding_offset in (0..padding).step_by(8) {
-                        if padding - padding_offset > chunk_size as u64 {
-                            let val = match chunk_size {
-                                1 => Value::ConstValue(Constant::Char(0)),
-                                4 => Value::ConstValue(Constant::Int(0)),
-                                8 => Value::ConstValue(Constant::Long(0)),
-                                _ => panic!("Invalid chunk size!"),
-                            };
-                            let offset = offset + buffer_len as u64 + padding_offset;
+                        } else if chunk.len() == 4 {
+                            let val = Constant::Int(i32::from_le_bytes(chunk.try_into().unwrap()) as i64);
+                            let val = Value::ConstValue(val);
                             instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
-                        } else {
-                            for loc in padding..padding_offset {
-                                let val = Value::ConstValue(Constant::Char(0));
-                                let offset = offset + buffer_len as u64 + loc;
-                                instructions.push(Instruction::CopyToOffset(val, name.clone(), offset + loc));
-                            }
-                            break;
+                        }
+                        // Copy remainder
+                        for (byte_offset, byte) in remainder.iter().enumerate() {
+                            let offset = offset + (byte_offset + chunk.len()) as u64;
+                            let val = Value::ConstValue(Constant::Char(*byte as i64));
+                            instructions.push(Instruction::CopyToOffset(val, name.clone(), offset))
                         }
                     }
                 } else {
