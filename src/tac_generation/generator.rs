@@ -1,6 +1,9 @@
 // Generates Three Adress Code Intermediate representation (Step between Parser AST and Assembly AST)
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    cmp::min,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use crate::{
     parse::parse_tree::{
@@ -124,8 +127,34 @@ fn gen_init_list(
         let offset = initial_offset + (i as u64) * elem_t.size();
         match initializer {
             VariableInitializer::SingleElem(expr) => {
-                if let Expression::StringLiteral(_s_data) = expr.expr {
-                    todo!("String literal initialization of local arrays!")
+                if let Expression::StringLiteral(s_data) = &expr.expr {
+                    const CHUNK_SIZE: usize = 8;
+                    // Adjust string data to size of array by truncating or adding 0-byte padding
+                    let buffer_len = min(s_data.len(), ctype.size() as usize);
+                    let mut data: Vec<u8> = s_data.as_bytes()[..buffer_len].to_vec();
+                    data.resize(expr.get_type().size() as usize, 0);
+                    // Loop over padded string and generate copy to offset instructions
+                    for (i, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
+                        let offset = offset + i as u64 * 8;
+                        let (chunk, remainder) = chunk.split_at(chunk.len() & 12);
+                        // Copy chunk
+                        if chunk.len() == 8 {
+                            let val = Constant::Long(i64::from_le_bytes(chunk.try_into().unwrap()));
+                            let val = Value::ConstValue(val);
+                            instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
+                        } else if chunk.len() == 4 {
+                            let val =
+                                Constant::Int(i32::from_le_bytes(chunk.try_into().unwrap()) as i64);
+                            let val = Value::ConstValue(val);
+                            instructions.push(Instruction::CopyToOffset(val, name.clone(), offset));
+                        }
+                        // Copy remainder
+                        for (byte_offset, byte) in remainder.iter().enumerate() {
+                            let offset = offset + (byte_offset + chunk.len()) as u64;
+                            let val = Value::ConstValue(Constant::Char(*byte as i64));
+                            instructions.push(Instruction::CopyToOffset(val, name.clone(), offset))
+                        }
+                    }
                 } else {
                     let result = gen_expression_and_convert(expr, instructions, symbols);
                     instructions.push(Instruction::CopyToOffset(result, name.clone(), offset));
