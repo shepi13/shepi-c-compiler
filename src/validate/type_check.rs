@@ -363,6 +363,7 @@ fn type_check_binary_expr(
             Binary(BinaryExpression { left, right, ..binary }.into()).set_type(&CType::Int)
         }
         LeftShift | RightShift => {
+            let left = if !binary.is_assignment { left.promote_char()? } else { left };
             let common_type = get_common_type(&left, &right)?;
             let result_t = left.get_type();
             assert_or_err(common_type.is_int(), "Operands for bitshift must be integer types!")?;
