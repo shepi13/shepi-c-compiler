@@ -50,8 +50,12 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
             }
             Instruction::Compare(_, _, _) => rewrite_cmp(&mut instructions, instruction),
             Instruction::Push(_) => rewrite_push(&mut instructions, instruction),
-            Instruction::MovSignExtend(_, _) => rewrite_sign_extend(&mut instructions, instruction),
-            Instruction::MovZeroExtend(_, _) => rewrite_zero_extend(&mut instructions, instruction),
+            Instruction::MovSignExtend(_, _, _, _) => {
+                rewrite_sign_extend(&mut instructions, instruction)
+            }
+            Instruction::MovZeroExtend(_, _, _, _) => {
+                rewrite_zero_extend(&mut instructions, instruction)
+            }
             Instruction::Cvttsd2si(_, _, _) => rewrite_cvttsd2si(&mut instructions, instruction),
             Instruction::Cvtsi2sd(_, _, _) => rewrite_cvtsi2sd(&mut instructions, instruction),
             Instruction::Lea(_, _) => rewrite_lea(&mut instructions, instruction),
@@ -62,7 +66,12 @@ fn rewrite_instructions(old_instructions: Vec<Instruction>) -> Vec<Instruction> 
 }
 
 fn rewrite_mov(instructions: &mut Vec<Instruction>, mov: Instruction) {
-    let Instruction::Mov(src, dst, mov_type) = mov else { panic!("Expected mov!") };
+    let Instruction::Mov(mut src, dst, mov_type) = mov else { panic!("Expected mov!") };
+    // Rewrite IMM if it doesn't fit in a byte
+    if mov_type == AssemblyType::Byte && check_overflow(&src, u8::MAX as i128) {
+        let Imm(val) = src else { panic!("Can only overflow if IMM!") };
+        src = Imm(val % 256);
+    }
     // Rewrite src (if it is larger than max int, or if both src and dst are in memory)
     let scratch = if mov_type == AssemblyType::Double { XMM14 } else { R10 };
     let operands_in_mem = is_mem_operand(&src) && is_mem_operand(&dst);
@@ -113,29 +122,48 @@ fn rewrite_cvtsi2sd(instructions: &mut Vec<Instruction>, cvt: Instruction) {
 }
 
 fn rewrite_sign_extend(instructions: &mut Vec<Instruction>, sign_x: Instruction) {
-    let Instruction::MovSignExtend(mut src, dst) = sign_x else { panic!("Expected moveSX!") };
+    let Instruction::MovSignExtend(mut src, dst, src_t, dst_t) = sign_x else {
+        panic!("Expected moveSX!")
+    };
     // src cannot be constant
     if matches!(src, Imm(_)) {
-        instructions.push(Instruction::Mov(src, Reg(R10), Longword));
-        src = Reg(R10)
+        instructions.push(Instruction::Mov(src, Reg(R10), src_t));
+        src = Reg(R10);
     }
     // dst cannot be in memory
     if is_mem_operand(&dst) {
-        instructions.push(Instruction::MovSignExtend(src, Reg(R11)));
-        instructions.push(Instruction::Mov(Reg(R11), dst, Quadword))
+        instructions.push(Instruction::MovSignExtend(src, Reg(R11), src_t, dst_t));
+        instructions.push(Instruction::Mov(Reg(R11), dst, dst_t))
     } else {
-        instructions.push(Instruction::MovSignExtend(src, dst));
+        instructions.push(Instruction::MovSignExtend(src, dst, src_t, dst_t));
     }
 }
 
 fn rewrite_zero_extend(instructions: &mut Vec<Instruction>, zero_x: Instruction) {
-    let Instruction::MovZeroExtend(src, dst) = zero_x else { panic!("Expected movZX!") };
-    // Zero extend is just a move using an intermediate register if necessary
-    if is_mem_operand(&dst) {
-        instructions.push(Instruction::Mov(src, Reg(R11), Longword));
-        instructions.push(Instruction::Mov(Reg(R11), dst, Quadword));
+    let Instruction::MovZeroExtend(mut src, dst, src_t, dst_t) = zero_x else {
+        panic!("Expected movZX!")
+    };
+    // Zero extend for longs is just a move using an intermediate register if necessary
+    if src_t == Longword {
+        if is_mem_operand(&dst) {
+            instructions.push(Instruction::Mov(src, Reg(R11), Longword));
+            instructions.push(Instruction::Mov(Reg(R11), dst, Quadword));
+        } else {
+            instructions.push(Instruction::Mov(src, dst, Longword));
+        }
     } else {
-        instructions.push(Instruction::Mov(src, dst, Longword));
+        // src cannot be constant
+        if matches!(src, Imm(_)) {
+            instructions.push(Instruction::Mov(src, Reg(R10), src_t));
+            src = Reg(R10);
+        }
+        // destination must be register
+        if is_mem_operand(&dst) {
+            instructions.push(Instruction::MovZeroExtend(src, Reg(R11), src_t, dst_t));
+            instructions.push(Instruction::Mov(Reg(R11), dst, dst_t));
+        } else {
+            instructions.push(Instruction::MovZeroExtend(src, dst, src_t, dst_t));
+        }
     }
 }
 

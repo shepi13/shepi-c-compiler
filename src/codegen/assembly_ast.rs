@@ -1,7 +1,11 @@
 use Register::*;
 use std::{cmp::Ordering, collections::HashMap, sync::atomic::AtomicUsize};
 
-use crate::validate::ctype::{CType, Initializer};
+use crate::{
+    parse::parse_tree,
+    tac_generation::tac_ast,
+    validate::ctype::{CType, Initializer, Symbols},
+};
 
 pub type BackendSymbols = HashMap<String, AsmSymbol>;
 #[derive(Debug, Clone)]
@@ -45,9 +49,9 @@ pub struct Function {
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Mov(Operand, Operand, AssemblyType),
-    MovSignExtend(Operand, Operand),
-    MovZeroExtend(Operand, Operand),
     Lea(Operand, Operand),
+    MovSignExtend(Operand, Operand, AssemblyType, AssemblyType),
+    MovZeroExtend(Operand, Operand, AssemblyType, AssemblyType),
     Cvttsd2si(Operand, Operand, AssemblyType),
     Cvtsi2sd(Operand, Operand, AssemblyType),
     Unary(UnaryOperator, Operand, AssemblyType),
@@ -96,6 +100,7 @@ pub enum Operand {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssemblyType {
+    Byte,
     Longword,
     Quadword,
     Double,
@@ -104,8 +109,9 @@ pub enum AssemblyType {
 impl AssemblyType {
     pub fn get_alignment(&self) -> usize {
         match self {
-            Self::Double | Self::Quadword => 8,
+            Self::Byte => 1,
             Self::Longword => 4,
+            Self::Double | Self::Quadword => 8,
             Self::ByteArray(_, alignment) => *alignment,
         }
     }
@@ -113,6 +119,7 @@ impl AssemblyType {
 impl From<CType> for AssemblyType {
     fn from(ctype: CType) -> Self {
         match &ctype {
+            CType::Char | CType::SignedChar | CType::UnsignedChar => AssemblyType::Byte,
             CType::Int | CType::UnsignedInt => AssemblyType::Longword,
             CType::Long | CType::UnsignedLong => AssemblyType::Quadword,
             CType::Double => AssemblyType::Double,
@@ -120,14 +127,39 @@ impl From<CType> for AssemblyType {
             CType::Array(elem_t, _) => {
                 let size = ctype.size();
                 let alignment = if size < 16 { elem_t.size().next_power_of_two() / 2 } else { 16 };
+                let alignment = alignment.max(1);
                 assert!([1, 2, 4, 8, 16].contains(&alignment), "Alignment error: {:#?}", alignment);
                 AssemblyType::ByteArray(size, alignment as usize)
             }
             CType::Function(_, _) => panic!("Not a variable!"),
-            CType::Char | CType::SignedChar | CType::UnsignedChar => todo!("Char asm type!"),
         }
     }
 }
+
+pub trait IntoAsmType {
+    fn get_ctype(&self, symbols: &Symbols) -> CType;
+    fn get_asm_type(&self, symbols: &Symbols) -> AssemblyType;
+}
+impl IntoAsmType for tac_ast::Value {
+    fn get_ctype(&self, symbols: &Symbols) -> CType {
+        match self {
+            tac_ast::Value::Variable(name) => symbols[name].ctype.clone(),
+            tac_ast::Value::ConstValue(constexpr) => match constexpr {
+                parse_tree::Constant::Int(_) => CType::Int,
+                parse_tree::Constant::UInt(_) => CType::UnsignedInt,
+                parse_tree::Constant::Long(_) => CType::Long,
+                parse_tree::Constant::ULong(_) => CType::UnsignedLong,
+                parse_tree::Constant::Double(_) => CType::Double,
+                parse_tree::Constant::Char(_) => CType::Char,
+                parse_tree::Constant::UChar(_) => CType::UnsignedChar,
+            },
+        }
+    }
+    fn get_asm_type(&self, symbols: &Symbols) -> AssemblyType {
+        AssemblyType::from(self.get_ctype(symbols))
+    }
+}
+
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Register {

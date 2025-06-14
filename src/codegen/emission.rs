@@ -2,12 +2,12 @@ use super::assembly_ast::{
     self, AsmSymbol, AssemblyType, BackendSymbols, BinaryOperator, Condition, Function,
     StaticConstant, StaticVar,
 };
-use crate::validate::ctype::Initializer;
+use crate::{helpers::lib::escape_asm_string, validate::ctype::Initializer};
 use std::error::Error;
 
-type EmptyResult = Result<(), Box<dyn Error>>;
+type Result = std::result::Result<(), Box<dyn Error>>;
 
-pub fn emit_program<T>(output: &mut T, program: assembly_ast::Program) -> EmptyResult
+pub fn emit_program<T>(output: &mut T, program: assembly_ast::Program) -> Result
 where
     T: std::fmt::Write,
 {
@@ -24,54 +24,58 @@ where
     Ok(())
 }
 
-fn emit_static_var<T>(output: &mut T, var: StaticVar) -> EmptyResult
+fn emit_initializer<T>(output: &mut T, initializer: Initializer) -> Result
 where
     T: std::fmt::Write,
 {
     use Initializer::*;
+    match initializer {
+        ZeroInit(size) => writeln!(output, "    .zero {}", size)?,
+        Char(_) | UChar(_) => writeln!(output, "    .byte {}", initializer.int_value())?,
+        Int(_) | UInt(_) => writeln!(output, "    .long {}", initializer.int_value())?,
+        Long(_) | ULong(_) => writeln!(output, "    .quad {}", initializer.int_value())?,
+        Double(val) => writeln!(output, "    .double {}", val)?,
+        PointerInit(label) => writeln!(output, "    .quad {}", label)?,
+        StringInit { data, null_terminated } => {
+            let new_data = escape_asm_string(data);
+            if null_terminated {
+                writeln!(output, "    .asciz \"{}\"", new_data)?;
+            } else {
+                writeln!(output, "    .ascii \"{}\"", new_data)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn emit_static_var<T>(output: &mut T, var: StaticVar) -> Result
+where
+    T: std::fmt::Write,
+{
     if var.global {
         writeln!(output, "    .globl {}", var.name)?;
     }
-    if var.init.len() == 1 && matches!(var.init[0], ZeroInit(_)) {
+    if var.init.len() == 1 && matches!(var.init[0], Initializer::ZeroInit(_)) {
         writeln!(output, "    .bss")?;
     } else {
         writeln!(output, "    .data")?;
     }
     writeln!(output, "    .align {}", var.alignment)?;
     writeln!(output, "{}:", var.name)?;
-    for init in var.init {
-        let init_str = match init {
-            Int(_) | UInt(_) => format!(".long {}", init.int_value()),
-            Long(_) | ULong(_) => format!(".quad {}", init.int_value()),
-            Double(val) => format!(".double {}", val),
-            ZeroInit(size) => format!(".zero {size}"),
-            Char(_) | UChar(_) => todo!("Char static initializer emission!"),
-            StringInit { data: _, null_terminated: _ } | PointerInit(_) => {
-                todo!("Pointer/String initializer emission!")
-            }
-        };
-        writeln!(output, "    {}", init_str)?;
-    }
-    Ok(())
+    var.init.into_iter().try_for_each(|initializer| emit_initializer(output, initializer))
 }
 
-fn emit_static_const<T>(output: &mut T, var: StaticConstant) -> EmptyResult
+fn emit_static_const<T>(output: &mut T, var: StaticConstant) -> Result
 where
     T: std::fmt::Write,
 {
     writeln!(output, "    .section .rodata")?;
     writeln!(output, "    .align {}", var.alignment)?;
     writeln!(output, "{}:", var.name)?;
-    match var.init {
-        Initializer::Double(val) => {
-            writeln!(output, "    .double {val}")?;
-        }
-        _ => panic!("Not a double"),
-    }
-    Ok(())
+    emit_initializer(output, var.init)
 }
 
-fn emit_function<T>(output: &mut T, function: Function, symbols: &BackendSymbols) -> EmptyResult
+fn emit_function<T>(output: &mut T, function: Function, symbols: &BackendSymbols) -> Result
 where
     T: std::fmt::Write,
 {
@@ -89,7 +93,7 @@ fn emit_instructions<T: std::fmt::Write>(
     output: &mut T,
     instructions: &Vec<assembly_ast::Instruction>,
     symbols: &BackendSymbols,
-) -> EmptyResult {
+) -> Result {
     for instruction in instructions {
         match instruction {
             assembly_ast::Instruction::Mov(src, dst, move_type) => {
@@ -98,10 +102,19 @@ fn emit_instructions<T: std::fmt::Write>(
                 let t = get_size_suffix(move_type);
                 writeln!(output, "    mov{t} {src}, {dst}")?;
             }
-            assembly_ast::Instruction::MovSignExtend(src, dst) => {
-                let src = get_operand(src, &AssemblyType::Longword);
-                let dst = get_operand(dst, &AssemblyType::Quadword);
-                writeln!(output, "    movslq {src}, {dst}")?;
+            assembly_ast::Instruction::MovSignExtend(src, dst, src_type, dst_type) => {
+                let src_t = get_size_suffix(src_type);
+                let dst_t = get_size_suffix(dst_type);
+                let src = get_operand(src, src_type);
+                let dst = get_operand(dst, dst_type);
+                writeln!(output, "    movs{src_t}{dst_t} {src}, {dst}")?;
+            }
+            assembly_ast::Instruction::MovZeroExtend(src, dst, src_type, dst_type) => {
+                let src_t = get_size_suffix(src_type);
+                let dst_t = get_size_suffix(dst_type);
+                let src = get_operand(src, src_type);
+                let dst = get_operand(dst, dst_type);
+                writeln!(output, "    movz{src_t}{dst_t} {src}, {dst}")?;
             }
             assembly_ast::Instruction::Ret => {
                 writeln!(output, "    movq %rbp, %rsp")?;
@@ -119,6 +132,7 @@ fn emit_instructions<T: std::fmt::Write>(
                 AssemblyType::Quadword => writeln!(output, "    cqo")?,
                 AssemblyType::Double => panic!("Cdq not supported for double!"),
                 AssemblyType::ByteArray(_, _) => panic!("Cdq not supported for array!"),
+                AssemblyType::Byte => todo!("Byte cdq!"),
             },
             assembly_ast::Instruction::IDiv(operand, asm_type) => {
                 let t = get_size_suffix(asm_type);
@@ -177,9 +191,6 @@ fn emit_instructions<T: std::fmt::Write>(
                 } else {
                     writeln!(output, "    call {}@PLT", label)?;
                 }
-            }
-            assembly_ast::Instruction::MovZeroExtend(_, _) => {
-                panic!("Should be replaced with Mov instructions by rewriter!")
             }
             assembly_ast::Instruction::Cvttsd2si(src, dst, asm_type) => {
                 let src = get_operand(src, asm_type);
@@ -276,6 +287,7 @@ fn get_operand(operand: &assembly_ast::Operand, asm_type: &AssemblyType) -> Stri
         AssemblyType::Longword => get_operand_longword(operand),
         AssemblyType::Quadword | AssemblyType::Double => get_operand_quadword(operand),
         AssemblyType::ByteArray(_, _) => get_operand_longword(operand),
+        AssemblyType::Byte => get_short_reg(operand),
     }
 }
 
@@ -338,6 +350,7 @@ fn get_binary_operator(operator: &assembly_ast::BinaryOperator) -> &str {
 
 fn get_size_suffix(asm_type: &AssemblyType) -> &str {
     match asm_type {
+        AssemblyType::Byte => "b",
         AssemblyType::Longword => "l",
         AssemblyType::Quadword => "q",
         AssemblyType::Double => "sd",
