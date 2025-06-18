@@ -17,22 +17,21 @@ Following the guide in *Writing a C Compiler* by Nora Sandler
 - Arithmetic/Relational/Bitwise Operators (with short circuting && and || as well as precedence climbing)
 - Compound assignment, Increment and Decrement operators
 - Static and Extern variables
-- Signed/Unsigned integer types with proper C conversions and casting, including long/long long
+- Signed/Unsigned integer types with proper C conversions and casting, including char, long, and long long types
 - Double Precision floating point operations (Including proper NaN support)
 - Basic pointer operations (referencing and dereferencing)
 - Arrays and Pointer Arithmetic 
 	- Includes Pointer addition, subtraction, incr/decrement, and subscript access
 	- Simple initialization lists for both static and local variables
 	- VLAs not supported
+- String Literals and Character constants (including both static strings and strings as array intializers)
 ----------------
 
 ### In progress:
 
 - Structs/Unions
-- cstrings, string literals, and character constants
 - Dynamic memory allocation
-- Enums 
-- char type (single byte, although this should be similar to long/unsigned type implementation)
+- Enums
 - Optimizations
 
 ------------------
