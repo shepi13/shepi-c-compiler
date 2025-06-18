@@ -1,4 +1,5 @@
 use crate::{
+    helpers::error::{AddLocation, Error, assert_or_err},
     parse::parse_tree::{
         self, BlockItem, Declaration, ForInit, FunctionDeclaration, Location, Loop, Program,
         Statement, StorageClass, TypedExpression, VariableDeclaration, VariableInitializer,
@@ -7,62 +8,10 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Write,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-#[derive(Debug)]
-pub struct Error {
-    location: Option<Location>,
-    message: String,
-}
 type Result<T> = std::result::Result<T, Error>;
-pub fn assert_or_err(assertion: bool, message: &str) -> Result<()> {
-    if assertion { Ok(()) } else { Err(Error::new(message)) }
-}
-pub fn assert_or_err_fmt(assertion: bool, message: &str, value: &str) -> Result<()> {
-    if assertion { Ok(()) } else { Err(Error::fmt(message, value)) }
-}
-impl Error {
-    pub fn new(msg: &str) -> Self {
-        Self { location: None, message: msg.to_string() }
-    }
-    pub fn fmt(msg: &str, value: &str) -> Self {
-        Self {
-            location: None,
-            message: format!("{}: {}", msg, value),
-        }
-    }
-    pub fn error_message(&self, source: &str) -> String {
-        let mut result = String::new();
-        writeln!(result, "{}", self.message).unwrap();
-        let lines: Vec<&str> = source.lines().filter(|line| !line.starts_with("#")).collect();
-        if let Some(loc) = self.location {
-            writeln!(result, "At line {}:", loc.start_loc.0 + 1).unwrap();
-            if let Some(prev_line) = lines.get(loc.start_loc.0 - 1) {
-                writeln!(result, "{}", prev_line).unwrap();
-            }
-            for line in &lines[loc.start_loc.0..=loc.end_loc.0] {
-                writeln!(result, "{}", line).unwrap();
-            }
-        }
-        result.trim().to_string()
-    }
-}
-pub trait AddLocation {
-    fn add_location(self, location: Location) -> Self;
-}
-impl<T> AddLocation for Result<T> {
-    fn add_location(self, location: Location) -> Self {
-        match self {
-            Ok(val) => Ok(val),
-            Err(mut error) => {
-                error.location = Some(error.location.unwrap_or(location));
-                Err(error)
-            }
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 struct Identifier {
@@ -104,24 +53,44 @@ impl SymbolTable {
         }
     }
     fn resolve_continue(&self) -> Result<&str> {
-        assert_or_err(!self.loops.is_empty(), "Used continue outside of loop!")?;
+        assert_or_err(
+            !self.loops.is_empty(),
+            "Illegal continue",
+            "Used continue outside of loop!",
+        )?;
         Ok(&self.loops[self.loops.len() - 1])
     }
     fn resolve_break(&self) -> Result<&str> {
-        assert_or_err(!self.break_scopes.is_empty(), "Used break outside loop or switch!")?;
+        assert_or_err(
+            !self.break_scopes.is_empty(),
+            "Illegal break",
+            "Used break outside loop or switch!",
+        )?;
         Ok(&self.break_scopes[self.break_scopes.len() - 1])
     }
     fn resolve_case(&mut self, matcher: TypedExpression) -> Result<String> {
         let stack_len = self.switches.len() - 1;
-        assert_or_err(!self.switches.is_empty(), "Used case outside of switch!")?;
+        assert_or_err(
+            !self.switches.is_empty(),
+            "Illegal case statement",
+            "Used case outside of switch!",
+        )?;
         let case_label = case_name(&self.switches[stack_len].label);
         self.switches[stack_len].cases.push((case_label.clone(), matcher));
         Ok(case_label)
     }
     fn resolve_default(&mut self) -> Result<String> {
-        assert_or_err(!self.switches.is_empty(), "Used default outside of switch!")?;
+        assert_or_err(
+            !self.switches.is_empty(),
+            "Illegal default statement",
+            "Used default outside of switch!",
+        )?;
         let stack_len = self.switches.len() - 1;
-        assert_or_err(self.switches[stack_len].default.is_none(), "duplicate default!")?;
+        assert_or_err(
+            self.switches[stack_len].default.is_none(),
+            "Illegal default statement",
+            "duplicate default!",
+        )?;
         let default_label = format!("{}.default", &self.switches[stack_len].label);
         self.switches[stack_len].default = Some(default_label.clone());
         Ok(default_label)
@@ -204,10 +173,10 @@ impl SymbolTable {
         let name = &decl.name;
         let stack_len = self.identifiers.len() - 1;
         if let Some(prev_declaration) = self.identifiers[stack_len].get(name) {
-            assert_or_err_fmt(
+            assert_or_err(
                 prev_declaration.external && decl.storage == Some(StorageClass::Extern),
+                "Illegal declaration",
                 "Duplicate variable name in current scope",
-                name,
             )?;
         }
         if decl.storage == Some(StorageClass::Extern) {
@@ -230,15 +199,20 @@ impl SymbolTable {
         let defined = function.body.is_some();
         let name = &function.name;
         if self.current_function.is_some() {
-            assert_or_err(!defined, "Nested function definitions not allowed")?;
+            assert_or_err(
+                !defined,
+                "Illegal declaration",
+                "Nested function definitions not allowed",
+            )?;
             assert_or_err(
                 function.storage != Some(StorageClass::Static),
+                "Illegal declaration",
                 "static only allowed at top level scope",
             )?;
         }
         let stack_len = self.identifiers.len() - 1;
         if let Some(ident) = self.identifiers[stack_len].get(name) {
-            assert_or_err_fmt(ident.external, "Duplicate function declaration", name)?;
+            assert_or_err(ident.external, "Illegal declaration", "Duplicate function declaration")?;
         }
         self.identifiers[stack_len].insert(
             name.clone(),
@@ -250,14 +224,23 @@ impl SymbolTable {
         Ok(())
     }
     fn resolve_identifier(&self, name: &str) -> Result<String> {
-        let ident = self._lookup_identifier(name).ok_or(Error::fmt("Undeclared variable", name))?;
+        let ident = self._lookup_identifier(name).ok_or_else(|| {
+            Error::new("Invalid identifier", &format!("Undeclared variable: {}", name))
+        })?;
         Ok(ident.unique_name.to_string())
     }
     fn resolve_label(&mut self, target: String) -> Result<String> {
-        let function =
-            self.current_function.as_ref().ok_or(Error::new("Labels must be in functions"))?;
+        let function = self
+            .current_function
+            .as_ref()
+            .ok_or(Error::new("Invalid label", "Labels must be in functions"))?;
         for table in &self.labels {
-            assert_or_err_fmt(!table.contains(&target), "Duplicate label", &target)?;
+            if table.contains(&target) {
+                return Err(Error::new(
+                    "Invalid label",
+                    &format!("Duplicate label declaration: {}", target),
+                ));
+            }
         }
         let stack_len = self.labels.len() - 1;
         let mangled_label = format!("{}_{}_{}", target, function, target);
@@ -266,8 +249,10 @@ impl SymbolTable {
     }
     fn resolve_goto(&mut self, target: String) -> Result<String> {
         let stack_len = self.gotos.len() - 1;
-        let function =
-            &self.current_function.as_ref().ok_or(Error::new("Goto must be in function!"))?;
+        let function = &self
+            .current_function
+            .as_ref()
+            .ok_or(Error::new("Invalid goto", "Goto must be in function!"))?;
         let mangled_label = format!("{}_{}_{}", target, function, target);
         self.gotos[stack_len].insert(target);
         Ok(mangled_label)
@@ -361,6 +346,7 @@ fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Result<
                 ForInit::Decl(decl) => {
                     assert_or_err(
                         decl.storage.is_none(),
+                        "Invalid for-loop initializer",
                         "For loop initializer cannot be static or extern",
                     )?;
                     let mut decl = symbols.declare_local_variable(decl)?;

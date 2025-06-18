@@ -7,4 +7,5 @@ edition = "2024"
 clap = { version = "4.5.38", features = ["derive"] }
 lazy_static = "1.5.0"
 num-traits = "0.2.19"
+owo-colors = "4.2.1"
 regex = "1.11.1"
