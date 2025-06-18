@@ -25,6 +25,7 @@ Following the guide in *Writing a C Compiler* by Nora Sandler
 	- Simple initialization lists for both static and local variables
 	- VLAs not supported
 - String Literals and Character constants (including both static strings and strings as array intializers)
+- Variadic functions
 ----------------
 
 ### In progress:
