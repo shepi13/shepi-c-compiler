@@ -1,7 +1,10 @@
-use crate::parse::lexer::{ParseResult, Token, Tokens};
+use crate::helpers::error::Error;
+use crate::parse::lexer::{Token, Tokens};
 use crate::validate::ctype::CType;
 
 use super::parser::{parse_constant, parse_identifier, parse_type};
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Declarator {
@@ -16,7 +19,7 @@ pub struct ParamInfo {
     pub declarator: Box<Declarator>,
 }
 
-fn parse_simple_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
+fn parse_simple_declarator(tokens: &mut Tokens) -> Result<Declarator> {
     if tokens.try_consume(Token::OpenParen) {
         let declarator = parse_declarator(tokens)?;
         tokens.expect_token(Token::CloseParen)?;
@@ -26,7 +29,7 @@ fn parse_simple_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
     }
 }
 
-fn parse_direct_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
+fn parse_direct_declarator(tokens: &mut Tokens) -> Result<Declarator> {
     let declarator = parse_simple_declarator(tokens)?;
     if tokens.peek() == Token::OpenBracket {
         parse_array_declarator(tokens, declarator)
@@ -45,7 +48,7 @@ fn parse_direct_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
 fn parse_array_declarator(
     tokens: &mut Tokens,
     mut declarator: Declarator,
-) -> ParseResult<Declarator> {
+) -> Result<Declarator> {
     while tokens.try_consume(Token::OpenBracket) {
         let subscript = parse_constant(tokens)?;
         assert!(subscript.is_integer(), "Array indices must be integers");
@@ -57,7 +60,7 @@ fn parse_array_declarator(
     Ok(declarator)
 }
 
-fn parse_param_list(tokens: &mut Tokens) -> ParseResult<Vec<(CType, Declarator)>> {
+fn parse_param_list(tokens: &mut Tokens) -> Result<Vec<(CType, Declarator)>> {
     if tokens.try_consume(Token::Keyword("void")) {
         return Ok(Vec::new());
     }
@@ -70,13 +73,13 @@ fn parse_param_list(tokens: &mut Tokens) -> ParseResult<Vec<(CType, Declarator)>
     }
     Ok(params)
 }
-fn parse_param(tokens: &mut Tokens) -> ParseResult<(CType, Declarator)> {
+fn parse_param(tokens: &mut Tokens) -> Result<(CType, Declarator)> {
     let type_tokens = tokens.consume_type_specifiers();
     let ctype = parse_type(type_tokens).map_err(|err| tokens.parse_error(err))?;
     Ok((ctype, parse_declarator(tokens)?))
 }
 
-pub fn parse_declarator(tokens: &mut Tokens) -> ParseResult<Declarator> {
+pub fn parse_declarator(tokens: &mut Tokens) -> Result<Declarator> {
     if tokens.try_consume(Token::Star) {
         Ok(Declarator::Pointer(parse_declarator(tokens)?.into()))
     } else {
@@ -90,7 +93,7 @@ pub struct DeclaratorResult {
     pub ctype: CType,
     pub params: Vec<String>,
 }
-pub fn process_declarator(decl: Declarator, base_type: CType) -> ParseResult<DeclaratorResult> {
+pub fn process_declarator(decl: Declarator, base_type: CType) -> Result<DeclaratorResult> {
     match decl {
         Declarator::Identifier(name) => Ok(DeclaratorResult {
             name,
@@ -133,7 +136,7 @@ pub enum AbstractDeclarator {
     Array(Box<AbstractDeclarator>, u64),
 }
 
-pub fn parse_simple_abstract_declarator(tokens: &mut Tokens) -> ParseResult<AbstractDeclarator> {
+pub fn parse_simple_abstract_declarator(tokens: &mut Tokens) -> Result<AbstractDeclarator> {
     if tokens.try_consume(Token::OpenParen) {
         let declarator = parse_abstract_declarator(tokens);
         tokens.expect_token(Token::CloseParen)?;
@@ -143,7 +146,7 @@ pub fn parse_simple_abstract_declarator(tokens: &mut Tokens) -> ParseResult<Abst
     }
 }
 
-fn parse_direct_abstract_declarator(tokens: &mut Tokens) -> ParseResult<AbstractDeclarator> {
+fn parse_direct_abstract_declarator(tokens: &mut Tokens) -> Result<AbstractDeclarator> {
     let declarator = parse_simple_abstract_declarator(tokens)?;
     if tokens.peek() == Token::OpenBracket {
         parse_abstract_array_declarator(tokens, declarator)
@@ -152,7 +155,7 @@ fn parse_direct_abstract_declarator(tokens: &mut Tokens) -> ParseResult<Abstract
     }
 }
 
-pub fn parse_abstract_declarator(tokens: &mut Tokens) -> ParseResult<AbstractDeclarator> {
+pub fn parse_abstract_declarator(tokens: &mut Tokens) -> Result<AbstractDeclarator> {
     if tokens.try_consume(Token::Star) {
         Ok(AbstractDeclarator::Pointer(parse_abstract_declarator(tokens)?.into()))
     } else {
@@ -163,7 +166,7 @@ pub fn parse_abstract_declarator(tokens: &mut Tokens) -> ParseResult<AbstractDec
 fn parse_abstract_array_declarator(
     tokens: &mut Tokens,
     mut decl: AbstractDeclarator,
-) -> ParseResult<AbstractDeclarator> {
+) -> Result<AbstractDeclarator> {
     while tokens.try_consume(Token::OpenBracket) {
         let subscript = parse_constant(tokens)?;
         assert!(subscript.is_integer(), "Array indices must be integers");
@@ -178,7 +181,7 @@ fn parse_abstract_array_declarator(
 pub fn process_abstract_declarator(
     decl: AbstractDeclarator,
     base_type: CType,
-) -> ParseResult<CType> {
+) -> Result<CType> {
     match decl {
         AbstractDeclarator::Base => Ok(base_type),
         AbstractDeclarator::Pointer(inner) => {

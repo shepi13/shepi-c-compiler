@@ -1,7 +1,15 @@
+use owo_colors::OwoColorize;
 use std::cmp::max;
 
 use lazy_static::lazy_static;
 use regex::Regex;
+
+use crate::{
+    helpers::error::{AddLocation, Error},
+    parse::parse_tree::Location,
+};
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 pub enum Token<'a> {
@@ -199,66 +207,22 @@ lazy_static! {
     ];
 }
 
-#[derive(Debug)]
-pub struct LexError {
-    pub message: String,
-    pub line: String,
-    pub prev_line: Option<String>,
-    pub line_number: usize,
-    pub column: usize,
-}
-pub type LexResult<T> = Result<T, LexError>;
-pub type ParseError = LexError;
-pub type ParseResult<T> = LexResult<T>;
-impl std::fmt::Display for LexError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Error: {}", self.message)?;
-        writeln!(f, "At line {}:", self.line_number)?;
-        if let Some(prev_line) = &self.prev_line {
-            writeln!(f, "{}", prev_line)?;
-        }
-        writeln!(f, "{}", self.line)?;
-        for _ in 1..self.column {
-            write!(f, " ")?;
-        }
-        write!(f, "^")?;
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Tokens<'a> {
     tokens: Vec<Token<'a>>,
     locations: Vec<(usize, usize)>,
-    source: Vec<&'a str>,
     current_token: usize,
 }
 // Private lexing functions
 impl<'a> Tokens<'a> {
-    fn from(data: &'a str) -> Self {
-        // Ignore preprocessor comments for now
-        let source = data.lines().filter(|line| !preprocessor_regex.is_match(line)).collect();
-        Self {
-            tokens: Vec::new(),
-            source,
-            locations: Vec::new(),
-            current_token: 0,
-        }
-    }
     fn push_token(&mut self, token: Token<'a>, location: (usize, usize)) {
         self.tokens.push(token);
         self.locations.push(location);
     }
-    fn lex_error(&self, message: String) -> LexError {
+    fn lex_error(&self, message: String) -> Result<()> {
         let location = self.locations.last().unwrap_or(&(0, 0));
-        let line = self.source[location.0].to_string();
-        LexError {
-            message,
-            line,
-            prev_line: None,
-            line_number: location.0 + 1,
-            column: location.1 + 1,
-        }
+        let location = Location { start_loc: *location, end_loc: *location };
+        Err(Error::new("Invalid token", &message)).add_location(location)
     }
 }
 
@@ -287,12 +251,18 @@ impl Tokens<'_> {
             true
         }
     }
-    pub fn expect_token(&mut self, token: Token) -> ParseResult<()> {
+    pub fn expect_token(&mut self, token: Token) -> Result<()> {
         let next_token = self.tokens[self.current_token];
         let result = self.consume() == token;
         self.assert(
             result,
-            format!("Syntax Error: Expected `{:?}`, found `{:?}`", token, next_token).as_str(),
+            format!(
+                "{}: Expected `{:?}`, found `{:?}`",
+                "Syntax Error".bright_red(),
+                token,
+                next_token
+            )
+            .as_str(),
         )
     }
     pub fn is_empty(&self) -> bool {
@@ -305,19 +275,16 @@ impl Tokens<'_> {
         self.current_token += position;
         &tokens[..position]
     }
-    pub fn parse_error(&self, message: &str) -> ParseError {
-        let location = self.locations[max(self.current_token, 1) - 1];
-        let line = self.source[location.0];
-        let prev_line = self.source[max(location.0, 1) - 1];
-        ParseError {
-            message: message.to_string(),
-            line: line.to_string(),
-            prev_line: Some(prev_line.to_string()),
-            line_number: location.0 + 1,
-            column: location.1 + 1,
-        }
+    pub fn parse_error(&self, message: &str) -> Error {
+        let location = Location {
+            start_loc: self.locations[max(self.current_token, 1) - 1],
+            end_loc: self.locations[self.current_token],
+        };
+        let mut error = Error::new("Syntax Error", message);
+        error.add_location(location);
+        error
     }
-    pub fn assert(&self, assertion: bool, message: &str) -> ParseResult<()> {
+    pub fn assert(&self, assertion: bool, message: &str) -> Result<()> {
         if assertion { Ok(()) } else { Err(self.parse_error(message)) }
     }
 }
@@ -333,8 +300,8 @@ impl std::fmt::Display for Tokens<'_> {
     }
 }
 
-pub fn lex(mut data: &str) -> LexResult<Tokens> {
-    let mut tokens = Tokens::from(data);
+pub fn lex(mut data: &str) -> Result<Tokens> {
+    let mut tokens = Tokens::default();
     let mut source_location = (0, 0); // (line_number, col)
     while let Some(first_char) = data.chars().next() {
         // Skip preprocessor notes for now
@@ -358,7 +325,7 @@ pub fn lex(mut data: &str) -> LexResult<Tokens> {
             data = &data[fullmatch.len()..];
             source_location = (source_location.0, source_location.1 + fullmatch.len());
         } else {
-            return Err(tokens.lex_error(format!("Failed to match token '{}'", first_char)));
+            tokens.lex_error(format!("Failed to match token '{}'", first_char))?;
         }
     }
     Ok(tokens)

@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -10,22 +9,18 @@ use super::declarators::{
 use lazy_static::lazy_static;
 
 use crate::{
-    helpers::lib::{unescape_char, unescape_string},
-    parse::{lexer::Tokens, parse_tree::Location},
+    helpers::{error::Error, lib::{unescape_char, unescape_string}},
     validate::ctype::CType,
 };
 
-use super::{
-    lexer::{self, ParseResult},
-    parse_tree::VariableInitializer,
-};
-use lexer::Token;
-
+use super::lexer::{Token, Tokens};
 use super::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, ConditionExpression,
-    Constant, Declaration, Expression, ForInit, FunctionDeclaration, IncrementType, Loop, Program,
-    Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
+    Constant, Declaration, Expression, ForInit, FunctionDeclaration, IncrementType, Location, Loop, Program,
+    Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration, VariableInitializer
 };
+
+type Result<T> = std::result::Result<T, Error>;
 
 lazy_static! {
     static ref precedence_table: HashMap<Token<'static>, usize> = HashMap::from([
@@ -71,7 +66,7 @@ fn switch_name() -> String {
     format!("switch.{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-pub fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
+pub fn parse_type(tokens: &[Token]) -> std::result::Result<CType, &'static str> {
     use Token::Specifier;
     let assert = |cond, msg: &'static str| if cond { Ok(()) } else { Err(msg) };
     // Count specifier tokens
@@ -123,7 +118,7 @@ pub fn parse_type(tokens: &[Token]) -> Result<CType, &'static str> {
     }
 }
 
-fn parse_specifiers(tokens: &mut Tokens) -> ParseResult<(CType, Option<StorageClass>)> {
+fn parse_specifiers(tokens: &mut Tokens) -> Result<(CType, Option<StorageClass>)> {
     let mut types = Vec::new();
     let mut storage_classes = Vec::new();
     while matches!(tokens.peek(), Token::Specifier(_)) {
@@ -139,7 +134,7 @@ fn parse_specifiers(tokens: &mut Tokens) -> ParseResult<(CType, Option<StorageCl
     Ok((ctype, storage_classes.pop()))
 }
 
-pub fn parse_identifier(tokens: &mut Tokens) -> ParseResult<String> {
+pub fn parse_identifier(tokens: &mut Tokens) -> Result<String> {
     // Parses an identifier and advances the cursor
     let next_token = tokens.consume();
     match next_token {
@@ -150,7 +145,7 @@ pub fn parse_identifier(tokens: &mut Tokens) -> ParseResult<String> {
         }
     }
 }
-fn parse_binop(tokens: &mut Tokens) -> ParseResult<BinaryOperator> {
+fn parse_binop(tokens: &mut Tokens) -> Result<BinaryOperator> {
     // Advance cursor, and map tokens representing binary operations to binary op type
     use Token::*;
     let next_token = tokens.consume();
@@ -179,7 +174,7 @@ fn parse_binop(tokens: &mut Tokens) -> ParseResult<BinaryOperator> {
     }
 }
 
-fn parse_argument_list(tokens: &mut Tokens) -> ParseResult<Vec<TypedExpression>> {
+fn parse_argument_list(tokens: &mut Tokens) -> Result<Vec<TypedExpression>> {
     let mut args: Vec<TypedExpression> = Vec::new();
     let mut comma = false;
     while tokens[0] != Token::CloseParen {
@@ -192,7 +187,7 @@ fn parse_argument_list(tokens: &mut Tokens) -> ParseResult<Vec<TypedExpression>>
 fn parse_post_operator(
     tokens: &mut Tokens,
     expression: TypedExpression,
-) -> ParseResult<TypedExpression> {
+) -> Result<TypedExpression> {
     if tokens.try_consume(Token::Increment) {
         parse_post_operator(
             tokens,
@@ -223,14 +218,14 @@ fn parse_post_operator(
     }
 }
 
-pub fn parse_constant(tokens: &mut Tokens) -> ParseResult<Constant> {
+pub fn parse_constant(tokens: &mut Tokens) -> Result<Constant> {
     let result = try_parse_constant(tokens.consume());
     match result {
         Ok(constant) => Ok(constant),
         Err(_) => Err(tokens.parse_error("Failed to parse constant!")),
     }
 }
-fn try_parse_constant(token: Token) -> Result<Constant, Box<dyn Error>> {
+fn try_parse_constant(token: Token) -> std::result::Result<Constant, Box<dyn std::error::Error>> {
     match token {
         Token::Character(data) => match unescape_char(data) {
             Ok(val) => Ok(Constant::Int(val as i64)),
@@ -251,7 +246,7 @@ fn try_parse_constant(token: Token) -> Result<Constant, Box<dyn Error>> {
     }
 }
 
-fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
+fn parse_factor(tokens: &mut Tokens) -> Result<TypedExpression> {
     // Parses a factor (unary value/operator) of a larger expression
     let token = tokens.consume();
     let expr = match token {
@@ -322,7 +317,7 @@ fn parse_factor(tokens: &mut Tokens) -> ParseResult<TypedExpression> {
     };
     parse_post_operator(tokens, expr.into())
 }
-fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> ParseResult<TypedExpression> {
+fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> Result<TypedExpression> {
     // Parses an expression using precedence climbing
     let mut left = parse_factor(tokens)?;
     while precedence_table.contains_key(&tokens[0]) && precedence_table[&tokens[0]] >= min_prec {
@@ -354,7 +349,7 @@ fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> ParseResult<TypedEx
     }
     Ok(left)
 }
-fn parse_optional_expression(tokens: &mut Tokens) -> ParseResult<Option<TypedExpression>> {
+fn parse_optional_expression(tokens: &mut Tokens) -> Result<Option<TypedExpression>> {
     use Token::*;
     match tokens[0] {
         Constant(_) | Hyphen | Tilde | Exclam | OpenParen | Identifier(_) => {
@@ -363,7 +358,7 @@ fn parse_optional_expression(tokens: &mut Tokens) -> ParseResult<Option<TypedExp
         _ => Ok(None),
     }
 }
-fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
+fn parse_statement(tokens: &mut Tokens) -> Result<Statement> {
     // Parses a statement
     if tokens.try_consume(Token::Keyword("return")) {
         let return_value = parse_expression(tokens, 0)?;
@@ -473,7 +468,7 @@ fn parse_statement(tokens: &mut Tokens) -> ParseResult<Statement> {
         Ok(Statement::ExprStmt(expr))
     }
 }
-fn parse_variable_declaration(tokens: &mut Tokens) -> ParseResult<VariableDeclaration> {
+fn parse_variable_declaration(tokens: &mut Tokens) -> Result<VariableDeclaration> {
     let decl = parse_declaration(tokens)?;
     match decl {
         Declaration::Variable(var_decl) => Ok(var_decl),
@@ -481,7 +476,7 @@ fn parse_variable_declaration(tokens: &mut Tokens) -> ParseResult<VariableDeclar
     }
 }
 
-fn parse_declaration(tokens: &mut Tokens) -> ParseResult<Declaration> {
+fn parse_declaration(tokens: &mut Tokens) -> Result<Declaration> {
     let start_loc = tokens.location();
     let (ctype, storage) = parse_specifiers(tokens)?;
     let declarator = parse_declarator(tokens)?;
@@ -515,7 +510,7 @@ fn parse_declaration(tokens: &mut Tokens) -> ParseResult<Declaration> {
     }
 }
 
-fn parse_initializer(tokens: &mut Tokens) -> ParseResult<VariableInitializer> {
+fn parse_initializer(tokens: &mut Tokens) -> Result<VariableInitializer> {
     if tokens.try_consume(Token::OpenBrace) {
         tokens.assert(tokens.peek() != Token::CloseBrace, "Empty initializer!")?;
         let mut initializers = Vec::new();
@@ -532,7 +527,7 @@ fn parse_initializer(tokens: &mut Tokens) -> ParseResult<VariableInitializer> {
     }
 }
 
-fn parse_block_item(tokens: &mut Tokens) -> ParseResult<BlockItem> {
+fn parse_block_item(tokens: &mut Tokens) -> Result<BlockItem> {
     if matches!(tokens.peek(), Token::Specifier(_)) {
         Ok(BlockItem::DeclareItem(parse_declaration(tokens)?))
     } else {
@@ -542,7 +537,7 @@ fn parse_block_item(tokens: &mut Tokens) -> ParseResult<BlockItem> {
         Ok(BlockItem::StatementItem(stmt, Location { start_loc, end_loc }))
     }
 }
-fn parse_block(tokens: &mut Tokens) -> ParseResult<Block> {
+fn parse_block(tokens: &mut Tokens) -> Result<Block> {
     let mut body: Block = Vec::new();
     while tokens.peek() != Token::CloseBrace {
         body.push(parse_block_item(tokens)?);
@@ -550,7 +545,7 @@ fn parse_block(tokens: &mut Tokens) -> ParseResult<Block> {
     tokens.expect_token(Token::CloseBrace)?;
     Ok(body)
 }
-pub fn parse(tokens: &mut Tokens) -> ParseResult<Program> {
+pub fn parse(tokens: &mut Tokens) -> Result<Program> {
     // Parses entire program
     let mut program: Program = Vec::new();
     while !tokens.is_empty() {

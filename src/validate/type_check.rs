@@ -4,18 +4,16 @@ use std::{
 };
 
 use crate::{
+    helpers::error::{AddLocation, Error, assert_or_err},
     parse::parse_tree::{
         AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem,
         ConditionExpression, Constant, Declaration, Expression, ForInit, FunctionDeclaration,
         Program, Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
         VariableInitializer,
     },
-    validate::{
-        ctype::{
-            CType, Initializer, IsLValue, StaticInitializer, Symbol, SymbolAttr, Symbols,
-            TypeTable, get_common_type, string_name,
-        },
-        semantics::{AddLocation, Error, assert_or_err},
+    validate::ctype::{
+        CType, Initializer, IsLValue, StaticInitializer, Symbol, SymbolAttr, Symbols, TypeTable,
+        get_common_type, string_name,
     },
 };
 
@@ -31,7 +29,7 @@ pub fn eval_constant_expr(expr: &TypedExpression, ctype: &CType) -> Result<Const
     match &expr.expr {
         Expression::Constant(constant) => eval_constant(constant, ctype),
         Expression::Unary(UnaryOperator::Negate, constexpr) => eval_constant_expr(constexpr, ctype),
-        _ => Err(Error::new("Failed to parse constant expression!")),
+        _ => Err(Error::new("Invalid constant", "Failed to parse constant expression!")),
     }
 }
 
@@ -49,9 +47,9 @@ fn eval_constant(constant: &Constant, ctype: &CType) -> Result<Constant> {
         },
         CType::Pointer(ctype) | CType::Array(ctype, _) => match eval_constant(constant, ctype) {
             Ok(constant) if constant.int_value() == 0 => Ok(constant),
-            _ => Err(Error::new("Failed to parse constant expression!")),
+            _ => Err(Error::new("Invalid constant", "Failed to parse constant expression!")),
         },
-        _ => Err(Error::new("Failed to parse constant expression!")),
+        _ => Err(Error::new("Invalid constant", "Failed to parse constant expression!")),
     }
 }
 
@@ -114,7 +112,7 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<S
             let cur_func = table
                 .current_function
                 .as_ref()
-                .ok_or(Error::new("Return must be inside function!"))?;
+                .ok_or(Error::new("Illegal return statement", "Return must be inside function!"))?;
             let cur_func_type = &table.symbols[cur_func].ctype;
             let CType::Function(_, return_type) = cur_func_type else { panic!("Match failed!") };
             Return(expr.convert_by_assignment(return_type)?)
@@ -147,7 +145,11 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<S
             default,
         } => {
             let condition = type_check_and_convert(condition, table)?.promote_char()?;
-            assert_or_err(condition.get_type().is_int(), "Can only switch on integer types!")?;
+            assert_or_err(
+                condition.get_type().is_int(),
+                "Invalid switch condition",
+                "Can only switch on integer types!",
+            )?;
             let cond_type = condition.get_type();
             let mut new_cases = Vec::new();
             let mut case_vals = HashSet::new();
@@ -155,9 +157,21 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<S
                 let constexpr =
                     eval_constant_expr(&case.1, &cond_type).expect("Must be constexpr!");
                 let case_typed = type_check_and_convert(case.1, table)?;
-                assert_or_err(case_typed.get_type().is_int(), "Switch case must be integer type!")?;
-                assert_or_err(cond_type.is_int(), "Switch condition must be integer type!")?;
-                assert_or_err(!case_vals.contains(&constexpr.int_value()), "Duplicate case!")?;
+                assert_or_err(
+                    case_typed.get_type().is_int(),
+                    "Invalid switch case",
+                    "Switch case must be integer type!",
+                )?;
+                assert_or_err(
+                    cond_type.is_int(),
+                    "Invalid switch case",
+                    "Switch condition must be integer type!",
+                )?;
+                assert_or_err(
+                    !case_vals.contains(&constexpr.int_value()),
+                    "Invalid switch case",
+                    "Duplicate case!",
+                )?;
                 case_vals.insert(constexpr.int_value());
                 new_cases.push((case.0, Expression::Constant(constexpr).into()));
             }
@@ -208,6 +222,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             let var_type = &table.symbols[&name].ctype;
             assert_or_err(
                 !matches!(var_type, CType::Function(_, _)),
+                "Illegal declaration",
                 "Function name used as variable!",
             )?;
             Expression::Variable(name).set_type(var_type)
@@ -225,13 +240,19 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             let old_type = typed_inner.get_type();
             assert_or_err(
                 new_type != CType::Double || !old_type.is_pointer(),
+                "Invalid cast",
                 "Cannot convert pointer to double!",
             )?;
             assert_or_err(
                 old_type != CType::Double || !new_type.is_pointer(),
+                "Invalid cast",
                 "Cannot convert double to pointer!",
             )?;
-            assert_or_err(!matches!(new_type, CType::Array(_, _)), "Cannot cast to array type")?;
+            assert_or_err(
+                !matches!(new_type, CType::Array(_, _)),
+                "Invalid cast",
+                "Cannot cast to array type",
+            )?;
             Expression::Cast(new_type.clone(), typed_inner.into()).set_type(&new_type)
         }
         Expression::Unary(op, inner) => {
@@ -243,19 +264,31 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
                     Expression::Unary(op, typed_inner.into()).set_type(&CType::Int)
                 }
                 UnaryOperator::Complement => {
-                    assert_or_err(new_type.is_int(), "Invalid operand for operator `~`")?;
+                    assert_or_err(
+                        new_type.is_int(),
+                        "Illegal operand",
+                        "Invalid operand for operator `~`",
+                    )?;
                     let typed_inner = typed_inner.promote_char()?;
                     let result_t = typed_inner.get_type();
                     Expression::Unary(op, typed_inner.into()).set_type(&result_t)
                 }
                 UnaryOperator::Negate => {
-                    assert_or_err(!new_type.is_pointer(), "Cannot negate pointer!")?;
+                    assert_or_err(
+                        !new_type.is_pointer(),
+                        "Illegal operand",
+                        "Cannot negate pointer!",
+                    )?;
                     let typed_inner = typed_inner.promote_char()?;
                     let result_t = typed_inner.get_type();
                     Expression::Unary(op, typed_inner.into()).set_type(&result_t)
                 }
                 UnaryOperator::Increment(_) => {
-                    assert_or_err(is_lvalue, "Increment target must be lvalue!")?;
+                    assert_or_err(
+                        is_lvalue,
+                        "Illegal operand",
+                        "Increment target must be lvalue!",
+                    )?;
                     Expression::Unary(op, typed_inner.into()).set_type(&new_type)
                 }
             }
@@ -264,7 +297,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
         Expression::Assignment(assign) => {
             let left = type_check_and_convert(assign.left, table)?;
             let right = type_check_and_convert(assign.right, table)?;
-            assert_or_err(left.is_lvalue(), "Assignment target must be lvalue!")?;
+            assert_or_err(
+                left.is_lvalue(),
+                "Illegal assignment",
+                "Assignment target must be lvalue!",
+            )?;
             let left_type = left.get_type();
             let right = right.convert_by_assignment(&left_type)?;
             Expression::Assignment(AssignmentExpression { left, right }.into()).set_type(&left_type)
@@ -283,7 +320,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             let expected_type = table.symbols[&name].ctype.clone();
             match expected_type {
                 CType::Function(arg_types, ret_type) => {
-                    assert_or_err(arg_types.len() == args.len(), "Incorrect number of arguments!")?;
+                    assert_or_err(
+                        arg_types.len() == args.len(),
+                        "Invalid function call",
+                        "Incorrect number of arguments!",
+                    )?;
                     let mut converted_args = Vec::new();
                     for (arg, arg_type) in zip(args, arg_types) {
                         let typed_arg = type_check_and_convert(arg, table)?;
@@ -291,7 +332,7 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
                     }
                     Expression::FunctionCall(name, converted_args).set_type(&ret_type)
                 }
-                _ => Err(Error::new("Variable used as function!")),
+                _ => Err(Error::new("Invalid function call", "Variable used as function!")),
             }
         }
         Expression::Dereference(inner) => {
@@ -300,11 +341,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
                 CType::Pointer(reference_t) => {
                     Expression::Dereference(typed_inner.into()).set_type(&reference_t)
                 }
-                _ => Err(Error::new("Invalid dreference!")),
+                _ => Err(Error::new("Invalid dereference", "Operand is not pointer!")),
             }
         }
         Expression::AddrOf(inner) => {
-            assert_or_err(inner.is_lvalue(), "Invalid operand to unary `&`, expected lvalue!")?;
+            assert_or_err(inner.is_lvalue(), "Invalid operand", "Unary `&` expects lvalue!")?;
             let typed_inner = type_check_expression(*inner, table)?;
             let reference_t = typed_inner.get_type();
             Expression::AddrOf(typed_inner.into()).set_type(&CType::Pointer(reference_t.into()))
@@ -315,16 +356,27 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             let left_t = left.get_type();
             let right_t = right.get_type();
             if let CType::Pointer(ptr_t) = &left_t {
-                assert_or_err(right_t.is_int(), "Subscript takes integer and pointer operands")?;
+                assert_or_err(
+                    right_t.is_int(),
+                    "Illegal subscript",
+                    "Subscript `[]` takes integer and pointer operands",
+                )?;
                 right = right.convert_to(&CType::Long)?;
                 Expression::Subscript(left.into(), right.into()).set_type(ptr_t)
             } else if let CType::Pointer(ptr_t) = &right_t {
-                assert_or_err(left_t.is_int(), "Subscript takes integer and pointer operands")?;
+                assert_or_err(
+                    left_t.is_int(),
+                    "Illegal subscript",
+                    "Subscript `[]` takes integer and pointer operands",
+                )?;
                 left = left.convert_to(&CType::Long)?;
                 // Swap left and right so left is always the pointer
                 Expression::Subscript(right.into(), left.into()).set_type(ptr_t)
             } else {
-                Err(Error::new("Subscript takes integer and pointer operands!"))
+                Err(Error::new(
+                    "Illegal subscript",
+                    "Subscript `[]` takes integer and pointer operands!",
+                ))
             }
         }
         Expression::StringLiteral(ref string_data) => {
@@ -351,11 +403,13 @@ fn type_check_binary_expr(
             if common_type.is_pointer() && !matches!(binary.operator, IsEqual | NotEqual) {
                 assert_or_err(
                     !left.is_null_ptr()? && !right.is_null_ptr()?,
-                    "Cannot compare null with relational operators in C",
+                    "Invalid comparision",
+                    "Cannot use null with relational operators in C",
                 )?;
                 assert_or_err(
                     left.get_type() == right.get_type(),
-                    "Pointer comparison type mismatch",
+                    "Invalid comparison",
+                    "Pointer comparison types must match!",
                 )?;
             }
             let left = left.convert_to(&common_type)?;
@@ -365,23 +419,36 @@ fn type_check_binary_expr(
         LeftShift | RightShift => {
             let common_type = get_common_type(&left, &right)?;
             let result_t = left.get_type();
-            assert_or_err(common_type.is_int(), "Operands for bitshift must be integer types!")?;
+            assert_or_err(
+                common_type.is_int(),
+                "Invalid operand",
+                "Operands for bitshift must be integer types!",
+            )?;
             Binary(BinaryExpression { left, right, ..binary }.into()).set_type(&result_t)
         }
         Multiply | Divide => {
             let common_type = get_common_type(&left, &right)?;
-            assert_or_err(!common_type.is_pointer(), "Cannot multiply/divide pointers!")?;
+            assert_or_err(
+                !common_type.is_pointer(),
+                "Invalid operand",
+                "Cannot multiply/divide pointers!",
+            )?;
             type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
         }
         Remainder => {
             let common_type = get_common_type(&left, &right)?;
-            assert_or_err(common_type.is_int(), "Operands for remainder must be integer types!")?;
+            assert_or_err(
+                common_type.is_int(),
+                "Invalid operand",
+                "Operands for remainder must be integer types!",
+            )?;
             type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
         }
         BitAnd | BitOr | BitXor => {
             let common_type = get_common_type(&left, &right)?;
             assert_or_err(
                 common_type.is_int(),
+                "Invalid Operand",
                 "Operands for bit operators must be integer types!",
             )?;
             type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
@@ -394,6 +461,7 @@ fn type_check_binary_expr(
             } else if left_t.is_pointer() && right_t.is_int() {
                 assert_or_err(
                     !binary.is_assignment || left.is_lvalue(),
+                    "Invalid assignment",
                     "Can only assign to lvalue!",
                 )?;
                 let right = right.convert_to(&CType::Long)?;
@@ -402,13 +470,14 @@ fn type_check_binary_expr(
                 // If right is pointer, we swap left/right, as tac expects the ptr to be on the left
                 assert_or_err(
                     !binary.is_assignment,
+                    "Invalid assignment types",
                     "Adding int to pointer gives pointer, not int",
                 )?;
                 let left = left.convert_to(&CType::Long)?;
                 Binary(BinaryExpression { left: right, right: left, ..binary }.into())
                     .set_type(&right_t)
             } else {
-                Err(Error::new("Invalid operands for addition"))
+                Err(Error::new("Invalid operand", "Illegal operands for addition"))
             }
         }
         Subtract => {
@@ -419,6 +488,7 @@ fn type_check_binary_expr(
             } else if left_t.is_pointer() && right_t.is_int() {
                 assert_or_err(
                     !binary.is_assignment || left.is_lvalue(),
+                    "Invalid assignment",
                     "Can only assign to lvalue",
                 )?;
                 // Subtraction with pointer/int is addition with negated value
@@ -430,11 +500,12 @@ fn type_check_binary_expr(
             } else if left_t.is_pointer() && left_t == right_t {
                 assert_or_err(
                     !binary.is_assignment,
+                    "Invalid assignment types",
                     "Subtracting pointers gives int, not pointer!",
                 )?;
                 Binary(BinaryExpression { left, right, ..binary }.into()).set_type(&CType::Long)
             } else {
-                Err(Error::new("Invalid operands for subtraction"))
+                Err(Error::new("Invalid operand", "Illegal operands for subtraction"))
             }
         }
     }
@@ -448,7 +519,7 @@ fn type_check_arithmetic_binexpr(
 ) -> Result<TypedExpression> {
     let common_type = get_common_type(&left, &right)?;
     let binexpr = if is_assignment {
-        assert_or_err(left.is_lvalue(), "Can only assign to lvalue!")?;
+        assert_or_err(left.is_lvalue(), "Invalid assignemnt", "Can only assign to lvalue!")?;
         let right = right.convert_to(&common_type)?;
         BinaryExpression { left, right, operator, is_assignment }
     } else {
@@ -469,11 +540,22 @@ fn type_check_function(
     let mut global = function.storage != Some(StorageClass::Static);
     if let Some(symbol) = table.symbols.get(&function.name) {
         let SymbolAttr::Function { defined: prev_def, global: prev_global } = symbol.attrs else {
-            return Err(Error::new("Expected function!"));
+            return Err(Error::new(
+                "Invalid declaration",
+                "Previous declaration isn't a function!",
+            ));
         };
-        assert_or_err(symbol.ctype == *ctype, "Incompatible function declarations!")?;
-        assert_or_err(!prev_def || !defined, "Function redefinition!")?;
-        assert_or_err(!prev_global || global, "static definition cannot follow non-static")?;
+        assert_or_err(
+            symbol.ctype == *ctype,
+            "Invalid declaration",
+            "Incompatible function declarations!",
+        )?;
+        assert_or_err(!prev_def || !defined, "Invalid declaration", "Function redefinition!")?;
+        assert_or_err(
+            !prev_global || global,
+            "Invalid declaration",
+            "Static function declaration cannot follow non-static",
+        )?;
         global = prev_global;
         defined = prev_def;
     }
@@ -496,7 +578,11 @@ fn type_check_function(
 
 fn type_check_array_params(mut function: FunctionDeclaration) -> Result<FunctionDeclaration> {
     let CType::Function(param_types, return_t) = function.ctype else { panic!("Not a function!") };
-    assert_or_err(!matches!(*return_t, CType::Array(_, _)), "Function cannot return array")?;
+    assert_or_err(
+        !matches!(*return_t, CType::Array(_, _)),
+        "Invalid return type",
+        "Function cannot return array",
+    )?;
     let adjusted_params = param_types
         .into_iter()
         .map(|param_t| match param_t {
@@ -517,10 +603,21 @@ fn parse_static_initializer(
         Some(VariableInitializer::SingleElem(expr)) => {
             if let CType::Array(elem_t, size) = ctype {
                 let Expression::StringLiteral(s_data) = &expr.expr else {
-                    return Err(Error::new("Cannot initialize static array with a scalar!"));
+                    return Err(Error::new(
+                        "Initialization error",
+                        "Cannot initialize static array with a scalar!",
+                    ));
                 };
-                assert_or_err(elem_t.is_char(), "Cannot initialize a non-char with a string!")?;
-                assert_or_err(s_data.len() as u64 <= *size, "Too many characters in string!")?;
+                assert_or_err(
+                    elem_t.is_char(),
+                    "Initialization error",
+                    "Cannot initialize a non-char with a string!",
+                )?;
+                assert_or_err(
+                    s_data.len() as u64 <= *size,
+                    "Initialization error",
+                    "Too many characters in string!",
+                )?;
                 let null_terminated = *size > s_data.len() as u64;
                 let mut init_list =
                     vec![Initializer::StringInit { data: s_data.clone(), null_terminated }];
@@ -534,6 +631,7 @@ fn parse_static_initializer(
             } else {
                 assert_or_err(
                     !matches!(ctype, CType::Array(_, _)),
+                    "Initialization error",
                     "Cannot initialize static array with a scalar!",
                 )?;
                 let expr_constant = eval_constant_expr(expr, ctype);
@@ -545,16 +643,28 @@ fn parse_static_initializer(
                         parse_initializer_value(val, ctype)
                     }
                     Ok(Constant::Double(val)) => parse_initializer_value(val, ctype),
-                    Err(_) => return Err(Error::new("Failed to parse static initializer")),
+                    Err(_) => {
+                        return Err(Error::new(
+                            "Initialization parse error",
+                            "Failed to parse static initializer",
+                        ));
+                    }
                 };
                 Ok(StaticInitializer::Initialized(vec![init_val]))
             }
         }
         Some(VariableInitializer::CompoundInit(init_list)) => {
             let CType::Array(elem_t, size) = ctype else {
-                return Err(Error::new("Cannot initiate static scalar with initializer list"));
+                return Err(Error::new(
+                    "Initialization error",
+                    "Cannot initiate static scalar with initializer list",
+                ));
             };
-            assert_or_err(init_list.len() as u64 <= *size, "Initializer longer than array!")?;
+            assert_or_err(
+                init_list.len() as u64 <= *size,
+                "Initialization error",
+                "Initializer longer than array!",
+            )?;
             let mut initializers = Vec::new();
             for initializer in init_list {
                 let sub_init = parse_static_initializer(Some(initializer), elem_t)?;
@@ -623,14 +733,19 @@ fn type_check_initializer(
         SingleElem(expr) => {
             if let CType::Array(elem_t, size) = target_t {
                 let Expression::StringLiteral(data) = &expr.expr else {
-                    return Err(Error::new("Cannot initialize array with a scalar!"));
+                    return Err(Error::new(
+                        "Initialization error",
+                        "Cannot initialize array with a scalar!",
+                    ));
                 };
                 assert_or_err(
                     elem_t.is_char(),
+                    "Initialization error",
                     "Cannot initialize a non-char type with a string!",
                 )?;
                 assert_or_err(
                     data.len() as u64 <= *size,
+                    "Initialization error",
                     "Too many characters in strign literal!",
                 )?;
                 Ok(SingleElem(expr.set_type(target_t)?))
@@ -641,9 +756,16 @@ fn type_check_initializer(
         }
         CompoundInit(init_list) => {
             let CType::Array(elem_t, size) = target_t else {
-                return Err(Error::new("Cannot initialize a scalar with a compound initializer!"));
+                return Err(Error::new(
+                    "Initialization error",
+                    "Cannot initialize a scalar with a compound initializer!",
+                ));
             };
-            assert_or_err(init_list.len() as u64 <= *size, "Too many items in initializer!")?;
+            assert_or_err(
+                init_list.len() as u64 <= *size,
+                "Initialization error",
+                "Too many items in initializer!",
+            )?;
             let mut typechecked_list = init_list
                 .into_iter()
                 .map(|init| type_check_initializer(init, elem_t, table))
@@ -671,9 +793,17 @@ fn type_check_var_declaration(
 ) -> Result<VariableDeclaration> {
     match var.storage {
         Some(StorageClass::Extern) => {
-            assert_or_err(var.init.is_none(), "Local extern variable cannot have initializer!")?;
+            assert_or_err(
+                var.init.is_none(),
+                "Illegal initializer",
+                "Local extern variable cannot have initializer!",
+            )?;
             if let Some(symbol) = table.symbols.get(&var.name) {
-                assert_or_err(symbol.ctype == var.ctype, "Declaration types don't match!")?;
+                assert_or_err(
+                    symbol.ctype == var.ctype,
+                    "Invalid declaration",
+                    "Declaration types don't match!",
+                )?;
             } else {
                 let init = StaticInitializer::None;
                 let attrs = SymbolAttr::Static { init, global: true };
@@ -691,7 +821,11 @@ fn type_check_var_declaration(
                     let Expression::StringLiteral(s_data) = &expr.expr else {
                         panic!("Is string!")
                     };
-                    assert_or_err(**elem_t == CType::Char, "Can only init char* with string!")?;
+                    assert_or_err(
+                        **elem_t == CType::Char,
+                        "Initialization error",
+                        "Can only init char* with string!",
+                    )?;
                     // Insert constant static string into symbol table
                     let name = string_name();
                     table.symbols.insert(
@@ -744,17 +878,28 @@ fn type_check_var_filescope(var: &VariableDeclaration, table: &mut TypeTable) ->
     let mut global = var.storage != Some(StorageClass::Static);
     if let Some(symbol) = table.symbols.get(&var.name) {
         let SymbolAttr::Static { init: prev_init, global: prev_global } = &symbol.attrs else {
-            return Err(Error::new("Expected static attributes!"));
+            return Err(Error::new(
+                "Invalid declaration",
+                "Expected prev declaration to be static variable!",
+            ));
         };
-        assert_or_err(symbol.ctype == var.ctype, "Declaration types don't match!")?;
+        assert_or_err(
+            symbol.ctype == var.ctype,
+            "Invalid declaration",
+            "Declaration types don't match!",
+        )?;
         if var.storage == Some(StorageClass::Extern) {
             global = *prev_global;
         } else if global != *prev_global {
-            return Err(Error::new("Conflicting linkage!"));
+            return Err(Error::new(
+                "Invalid declaration",
+                "Declarations have conflicting linkage!",
+            ));
         }
         if matches!(prev_init, Initialized(_)) {
             assert_or_err(
                 !matches!(init_value, Initialized(_)),
+                "Invalid declaration",
                 "Conflicting static initializers!",
             )?;
             init_value = prev_init.clone();

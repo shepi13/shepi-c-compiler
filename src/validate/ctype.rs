@@ -2,8 +2,9 @@
 //! variable initialization data structures.
 
 use crate::{
+    helpers::error::Error,
     parse::parse_tree::{Expression, TypedExpression},
-    validate::{semantics::Error, type_check::eval_constant_expr},
+    validate::type_check::eval_constant_expr,
 };
 use std::{
     collections::HashMap,
@@ -205,7 +206,7 @@ impl TypedExpression {
         {
             self.convert_to(ctype)
         } else {
-            Err(Error::new("Cannot convert type for assignment!"))
+            Err(Error::new("Invalid types", "Failed to convert by assignment!"))
         }
     }
 }
@@ -217,7 +218,7 @@ pub fn get_common_pointer_type(left: &TypedExpression, right: &TypedExpression) 
     } else if left.is_null_ptr()? {
         Ok(right_type)
     } else {
-        Err(Error::new("Expressions have incompatible types!"))
+        Err(Error::new("Invalid types", "Pointers have incompatible types!"))
     }
 }
 pub fn get_common_type(left: &TypedExpression, right: &TypedExpression) -> Result<CType> {
