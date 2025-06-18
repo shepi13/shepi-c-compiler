@@ -9,15 +9,19 @@ use super::declarators::{
 use lazy_static::lazy_static;
 
 use crate::{
-    helpers::{error::Error, lib::{unescape_char, unescape_string}},
+    helpers::{
+        error::Error,
+        lib::{unescape_char, unescape_string},
+    },
     validate::ctype::CType,
 };
 
 use super::lexer::{Token, Tokens};
 use super::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, ConditionExpression,
-    Constant, Declaration, Expression, ForInit, FunctionDeclaration, IncrementType, Location, Loop, Program,
-    Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration, VariableInitializer
+    Constant, Declaration, Expression, ForInit, FunctionDeclaration, IncrementType, Location, Loop,
+    Program, Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
+    VariableInitializer,
 };
 
 type Result<T> = std::result::Result<T, Error>;

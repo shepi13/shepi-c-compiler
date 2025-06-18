@@ -45,10 +45,7 @@ fn parse_direct_declarator(tokens: &mut Tokens) -> Result<Declarator> {
     }
 }
 
-fn parse_array_declarator(
-    tokens: &mut Tokens,
-    mut declarator: Declarator,
-) -> Result<Declarator> {
+fn parse_array_declarator(tokens: &mut Tokens, mut declarator: Declarator) -> Result<Declarator> {
     while tokens.try_consume(Token::OpenBracket) {
         let subscript = parse_constant(tokens)?;
         assert!(subscript.is_integer(), "Array indices must be integers");
@@ -178,10 +175,7 @@ fn parse_abstract_array_declarator(
     Ok(decl)
 }
 
-pub fn process_abstract_declarator(
-    decl: AbstractDeclarator,
-    base_type: CType,
-) -> Result<CType> {
+pub fn process_abstract_declarator(decl: AbstractDeclarator, base_type: CType) -> Result<CType> {
     match decl {
         AbstractDeclarator::Base => Ok(base_type),
         AbstractDeclarator::Pointer(inner) => {
