@@ -321,14 +321,18 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             match expected_type {
                 CType::Function(arg_types, ret_type) => {
                     assert_or_err(
-                        arg_types.len() == args.len(),
+                        arg_types.len() == args.len() || arg_types.last() == Some(&CType::VarArgs),
                         "Invalid function call",
                         "Incorrect number of arguments!",
                     )?;
                     let mut converted_args = Vec::new();
-                    for (arg, arg_type) in zip(args, arg_types) {
+                    for (i, arg) in args.into_iter().enumerate() {
                         let typed_arg = type_check_and_convert(arg, table)?;
-                        converted_args.push(typed_arg.convert_by_assignment(&arg_type)?);
+                        if i < arg_types.len() && arg_types[i] != CType::VarArgs {
+                            converted_args.push(typed_arg.convert_by_assignment(&arg_types[i])?);
+                        } else {
+                            converted_args.push(typed_arg);
+                        }
                     }
                     Expression::FunctionCall(name, converted_args).set_type(&ret_type)
                 }
@@ -701,7 +705,9 @@ where
         CType::UnsignedLong => Initializer::ULong(val.as_()),
         CType::Double => Initializer::Double(val.as_()),
         CType::Pointer(_) if num_traits::AsPrimitive::<i64>::as_(val) == 0 => Initializer::ULong(0),
-        CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) => panic!("Not a variable!"),
+        CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) | CType::VarArgs => {
+            panic!("Not a variable!")
+        }
     }
 }
 
@@ -720,7 +726,7 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::UnsignedLong => SingleElem(Expression::Constant(Constant::ULong(0)).into()),
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
-        CType::Function(_, _) => panic!("Cannot zero initialize a function"),
+        CType::Function(_, _) | CType::VarArgs => panic!("Cannot zero initialize a function"),
     }
 }
 

@@ -74,6 +74,7 @@ pub enum Token<'a> {
     Colon,
     // Other
     Comma,
+    Ellipses,
 }
 
 impl<'a> Token<'a> {
@@ -160,6 +161,7 @@ lazy_static! {
         // 3 Character Symbols
         (Token::RightShiftEqual, Regex::new(r"^>>=").unwrap()),
         (Token::LeftShiftEqual, Regex::new(r"^<<=").unwrap()),
+        (Token::Ellipses, Regex::new(r"^\.\.\.").unwrap()),
         // 2 Character Symbols
         (Token::Decrement, Regex::new(r"^--").unwrap()),
         (Token::Increment, Regex::new(r"^\+\+").unwrap()),

@@ -12,6 +12,7 @@ pub enum Declarator {
     Pointer(Box<Declarator>),
     Function(Vec<ParamInfo>, Box<Declarator>),
     Array(Box<Declarator>, u64),
+    VarArgs,
 }
 #[derive(Debug)]
 pub struct ParamInfo {
@@ -71,6 +72,9 @@ fn parse_param_list(tokens: &mut Tokens) -> Result<Vec<(CType, Declarator)>> {
     Ok(params)
 }
 fn parse_param(tokens: &mut Tokens) -> Result<(CType, Declarator)> {
+    if tokens.try_consume(Token::Ellipses) {
+        return Ok((CType::VarArgs, Declarator::VarArgs));
+    }
     let type_tokens = tokens.consume_type_specifiers();
     let ctype = parse_type(type_tokens).map_err(|err| tokens.parse_error(err))?;
     Ok((ctype, parse_declarator(tokens)?))
@@ -97,6 +101,11 @@ pub fn process_declarator(decl: Declarator, base_type: CType) -> Result<Declarat
             ctype: base_type,
             params: Vec::new(),
         }),
+        Declarator::VarArgs => Ok(DeclaratorResult {
+            name: "...".to_string(),
+            ctype: CType::VarArgs,
+            params: Vec::new(),
+        }),
         Declarator::Pointer(inner) => process_declarator(*inner, CType::Pointer(base_type.into())),
         Declarator::Array(inner, size) => {
             let derived_t = CType::Array(base_type.into(), size);
@@ -106,12 +115,18 @@ pub fn process_declarator(decl: Declarator, base_type: CType) -> Result<Declarat
             Declarator::Identifier(name) => {
                 let mut param_types = Vec::new();
                 let mut param_names = Vec::new();
-                for param in params {
+                let param_count = params.len();
+                for (idx, param) in params.into_iter().enumerate() {
                     let result = process_declarator(*param.declarator, param.ctype)?;
                     assert!(
                         !matches!(result.ctype, CType::Function(_, _)),
                         "Function pointers not allowed in parameter",
                     );
+                    if result.ctype == CType::VarArgs {
+                        param_types.push(result.ctype);
+                        assert!(idx == param_count - 1, "Varargs must be last function param!");
+                        break;
+                    }
                     param_names.push(result.name);
                     param_types.push(result.ctype);
                 }
