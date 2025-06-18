@@ -27,6 +27,7 @@ pub enum CType {
     Function(Vec<CType>, Box<CType>),
     Pointer(Box<CType>),
     Array(Box<CType>, u64),
+    VarArgs,
 }
 
 impl CType {
@@ -37,7 +38,7 @@ impl CType {
             CType::Int | CType::UnsignedInt => 4,
             CType::Long | CType::UnsignedLong => 8,
             CType::Double => 8,
-            CType::Function(_, _) => panic!("Not a variable or constant!"),
+            CType::Function(_, _) | CType::VarArgs => panic!("Not a variable or constant!"),
             CType::Pointer(_) => 8,
             CType::Array(elem_t, elem_c) => elem_c * elem_t.size(),
         }
@@ -65,7 +66,11 @@ impl CType {
             | Self::Char
             | Self::UnsignedChar
             | Self::SignedChar => true,
-            Self::Double | Self::Function(_, _) | Self::Pointer(_) | Self::Array(_, _) => false,
+            Self::Double
+            | Self::Function(_, _)
+            | Self::Pointer(_)
+            | Self::Array(_, _)
+            | Self::VarArgs => false,
         }
     }
     /// Checks if a type is a pointer
