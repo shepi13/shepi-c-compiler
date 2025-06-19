@@ -97,7 +97,7 @@ impl<'a> Token<'a> {
     pub fn is_type_specifier(&self) -> bool {
         match self {
             Token::Specifier(specifier) => {
-                ["int", "long", "signed", "unsigned", "double", "char"].contains(specifier)
+                ["int", "long", "signed", "unsigned", "double", "char", "void"].contains(specifier)
             }
             _ => false,
         }
@@ -129,10 +129,10 @@ lazy_static! {
             r"^unsigned\b",
             r"^double\b",
             r"^char\b",
+            r"^void\b",
         ].join("|")).unwrap()),
         // Other keywords
         (Token::Keyword(""), Regex::new(&[
-            r"^void\b",
             r"^return\b",
             r"^if\b",
             r"^else\b",
@@ -145,6 +145,7 @@ lazy_static! {
             r"^switch\b",
             r"^case\b",
             r"^default\b",
+            r"^sizeof\b",
         ].join("|")).unwrap()),
         // Identifiers and Constants
         (Token::Identifier(""), Regex::new(r"(^[a-zA-Z_]\w*\b)").unwrap()),

@@ -107,7 +107,7 @@ fn type_check_block_item(block_item: BlockItem, table: &mut TypeTable) -> Result
 fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<Statement> {
     use Statement::*;
     let result = match statement {
-        Return(expr) => {
+        Return(Some(expr)) => {
             let expr = type_check_and_convert(expr, table)?;
             let cur_func = table
                 .current_function
@@ -115,8 +115,9 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<S
                 .ok_or(Error::new("Illegal return statement", "Return must be inside function!"))?;
             let cur_func_type = &table.symbols[cur_func].ctype;
             let CType::Function(_, return_type) = cur_func_type else { panic!("Match failed!") };
-            Return(expr.convert_by_assignment(return_type)?)
+            Return(Some(expr.convert_by_assignment(return_type)?))
         }
+        Return(None) => todo!("Void return type checking!"),
         ExprStmt(expr) => ExprStmt(type_check_and_convert(expr, table)?),
         Label(name, statement) => Label(name, type_check_statement(*statement, table)?.into()),
         If(expr, if_true, if_false) => {
@@ -387,6 +388,8 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             let string_len = string_data.len() as u64 + 1;
             expr.expr.set_type(&CType::Array(CType::Char.into(), string_len))
         }
+        Expression::SizeOf(_) => todo!("Size of expression type checking!"),
+        Expression::SizeOfT(_) => todo!("Size of type - type checking!"),
     }
 }
 
@@ -705,7 +708,7 @@ where
         CType::UnsignedLong => Initializer::ULong(val.as_()),
         CType::Double => Initializer::Double(val.as_()),
         CType::Pointer(_) if num_traits::AsPrimitive::<i64>::as_(val) == 0 => Initializer::ULong(0),
-        CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) | CType::VarArgs => {
+        CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) | CType::VarArgs | CType::Void => {
             panic!("Not a variable!")
         }
     }
@@ -726,7 +729,7 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::UnsignedLong => SingleElem(Expression::Constant(Constant::ULong(0)).into()),
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
-        CType::Function(_, _) | CType::VarArgs => panic!("Cannot zero initialize a function"),
+        CType::Function(_, _) | CType::VarArgs | CType::Void => panic!("Cannot zero initialize a function"),
     }
 }
 

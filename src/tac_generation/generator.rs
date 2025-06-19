@@ -181,10 +181,11 @@ fn gen_instructions(
     symbols: &mut Symbols,
 ) {
     match statement {
-        Statement::Return(value) => {
+        Statement::Return(Some(value)) => {
             let dst = gen_expression_and_convert(value, instructions, symbols);
             instructions.push(Instruction::Return(dst));
         }
+        Statement::Return(None) => todo!("Void return types!"),
         Statement::Null => (),
         Statement::ExprStmt(value) => {
             gen_expression_and_convert(value, instructions, symbols);
@@ -483,6 +484,8 @@ fn gen_expression(
             );
             ExpResult::Operand(Value::Variable(name))
         }
+        Expression::SizeOf(_) => todo!("Sizeof expression tac gen!"),
+        Expression::SizeOfT(_) => todo!("Sizeof type tac gen!"),
     }
 }
 
