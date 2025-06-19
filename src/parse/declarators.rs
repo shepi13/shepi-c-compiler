@@ -59,7 +59,8 @@ fn parse_array_declarator(tokens: &mut Tokens, mut declarator: Declarator) -> Re
 }
 
 fn parse_param_list(tokens: &mut Tokens) -> Result<Vec<(CType, Declarator)>> {
-    if tokens.try_consume(Token::Keyword("void")) {
+    if tokens[0] == Token::Specifier("void") && tokens[1] == Token::CloseParen {
+        tokens.consume();
         return Ok(Vec::new());
     }
     let mut params = Vec::new();

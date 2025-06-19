@@ -18,7 +18,7 @@ pub enum BlockItem {
 }
 #[derive(Debug, Clone)]
 pub enum Statement {
-    Return(TypedExpression),
+    Return(Option<TypedExpression>),
     ExprStmt(TypedExpression),
     If(TypedExpression, Box<Statement>, Box<Option<Statement>>),
     While(Loop),
@@ -124,6 +124,8 @@ pub enum Expression {
     Dereference(Box<TypedExpression>),
     AddrOf(Box<TypedExpression>),
     Subscript(Box<TypedExpression>, Box<TypedExpression>),
+    SizeOf(Box<TypedExpression>),
+    SizeOfT(CType),
 }
 #[derive(Debug, Clone)]
 pub struct BinaryExpression {

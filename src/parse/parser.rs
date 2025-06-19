@@ -75,6 +75,7 @@ pub fn parse_type(tokens: &[Token]) -> std::result::Result<CType, &'static str> 
     let assert = |cond, msg: &'static str| if cond { Ok(()) } else { Err(msg) };
     // Count specifier tokens
     let count_token = |token| tokens.iter().filter(|elem| **elem == token).count();
+    let void_count = count_token(Specifier("void"));
     let signed_count = count_token(Specifier("signed"));
     let unsigned_count = count_token(Specifier("unsigned"));
     let int_count = count_token(Specifier("int"));
@@ -89,6 +90,12 @@ pub fn parse_type(tokens: &[Token]) -> std::result::Result<CType, &'static str> 
     };
     assert(!tokens.is_empty(), "Must specify type!")?;
     assert(int_count <= 1, "Repeated int keyword!")?;
+
+    // Void type
+    if void_count > 0 {
+        assert(tokens.len() == 1, "Void type cannot be combined with other specifiers!")?;
+        return Ok(CType::Void);
+    }
 
     // Double and long double declaration and checks
     if double_count == 1 && [0, 1].contains(&long_count) {
@@ -250,6 +257,24 @@ fn try_parse_constant(token: Token) -> std::result::Result<Constant, Box<dyn std
     }
 }
 
+fn parse_type_name(tokens: &mut Tokens) -> Result<CType> {
+    let type_tokens = tokens.consume_type_specifiers();
+    let base_type = parse_type(type_tokens).map_err(|err| tokens.parse_error(err))?;
+    let abstract_decl = parse_abstract_declarator(tokens)?;
+    process_abstract_declarator(abstract_decl, base_type)
+}
+
+fn parse_cast_expression(tokens: &mut Tokens) -> Result<TypedExpression> {
+    if tokens[0] == Token::OpenParen && tokens[1].is_type_specifier() {
+        tokens.expect_token(Token::OpenParen)?;
+        let ctype = parse_type_name(tokens)?;
+        tokens.expect_token(Token::CloseParen)?;
+        Ok(Expression::Cast(ctype, parse_cast_expression(tokens)?.into()).into())
+    } else {
+        parse_factor(tokens)
+    }
+}
+
 fn parse_factor(tokens: &mut Tokens) -> Result<TypedExpression> {
     // Parses a factor (unary value/operator) of a larger expression
     let token = tokens.consume();
@@ -278,32 +303,39 @@ fn parse_factor(tokens: &mut Tokens) -> Result<TypedExpression> {
             }
             Expression::StringLiteral(string_data)
         }
-        Token::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_factor(tokens)?.into()),
-        Token::Tilde => Expression::Unary(UnaryOperator::Complement, parse_factor(tokens)?.into()),
-        Token::Exclam => Expression::Unary(UnaryOperator::LogicalNot, parse_factor(tokens)?.into()),
-        Token::Ampersand => Expression::AddrOf(parse_factor(tokens)?.into()),
-        Token::Star => Expression::Dereference(parse_factor(tokens)?.into()),
+        Token::Keyword("sizeof") => {
+            if tokens[0] == Token::OpenParen && tokens[1].is_type_specifier() {
+                tokens.expect_token(Token::OpenParen)?;
+                let ctype = parse_type_name(tokens)?;
+                tokens.expect_token(Token::CloseParen)?;
+                Expression::SizeOfT(ctype)
+            } else {
+                Expression::SizeOf(parse_factor(tokens)?.into())
+            }
+        }
+        Token::Hyphen => {
+            Expression::Unary(UnaryOperator::Negate, parse_cast_expression(tokens)?.into())
+        }
+        Token::Tilde => {
+            Expression::Unary(UnaryOperator::Complement, parse_cast_expression(tokens)?.into())
+        }
+        Token::Exclam => {
+            Expression::Unary(UnaryOperator::LogicalNot, parse_cast_expression(tokens)?.into())
+        }
+        Token::Ampersand => Expression::AddrOf(parse_cast_expression(tokens)?.into()),
+        Token::Star => Expression::Dereference(parse_cast_expression(tokens)?.into()),
         Token::Increment => Expression::Unary(
             UnaryOperator::Increment(IncrementType::PreIncrement),
-            parse_factor(tokens)?.into(),
+            parse_cast_expression(tokens)?.into(),
         ),
         Token::Decrement => Expression::Unary(
             UnaryOperator::Increment(IncrementType::PreDecrement),
-            parse_factor(tokens)?.into(),
+            parse_cast_expression(tokens)?.into(),
         ),
         Token::OpenParen => {
-            if tokens.peek().is_type_specifier() {
-                let type_tokens = tokens.consume_type_specifiers();
-                let base_type = parse_type(type_tokens).map_err(|err| tokens.parse_error(err))?;
-                let abstract_decl = parse_abstract_declarator(tokens)?;
-                let ctype = process_abstract_declarator(abstract_decl, base_type)?;
-                tokens.expect_token(Token::CloseParen)?;
-                Expression::Cast(ctype, parse_factor(tokens)?.into())
-            } else {
-                let expr = parse_expression(tokens, 0)?;
-                tokens.expect_token(Token::CloseParen)?;
-                expr.expr
-            }
+            let expr = parse_expression(tokens, 0)?;
+            tokens.expect_token(Token::CloseParen)?;
+            expr.expr
         }
         Token::Identifier(name) => {
             let name = name.to_string();
@@ -323,7 +355,7 @@ fn parse_factor(tokens: &mut Tokens) -> Result<TypedExpression> {
 }
 fn parse_expression(tokens: &mut Tokens, min_prec: usize) -> Result<TypedExpression> {
     // Parses an expression using precedence climbing
-    let mut left = parse_factor(tokens)?;
+    let mut left = parse_cast_expression(tokens)?;
     while precedence_table.contains_key(&tokens[0]) && precedence_table[&tokens[0]] >= min_prec {
         let token_prec = precedence_table[&tokens[0]];
         if tokens.try_consume(Token::Equal) {
@@ -365,9 +397,13 @@ fn parse_optional_expression(tokens: &mut Tokens) -> Result<Option<TypedExpressi
 fn parse_statement(tokens: &mut Tokens) -> Result<Statement> {
     // Parses a statement
     if tokens.try_consume(Token::Keyword("return")) {
-        let return_value = parse_expression(tokens, 0)?;
-        tokens.expect_token(Token::SemiColon)?;
-        Ok(Statement::Return(return_value))
+        if tokens.try_consume(Token::SemiColon) {
+            Ok(Statement::Return(None))
+        } else {
+            let return_value = parse_expression(tokens, 0)?;
+            tokens.expect_token(Token::SemiColon)?;
+            Ok(Statement::Return(Some(return_value)))
+        }
     } else if tokens.try_consume(Token::SemiColon) {
         Ok(Statement::Null)
     } else if tokens.try_consume(Token::Keyword("if")) {

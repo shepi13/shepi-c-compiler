@@ -312,7 +312,8 @@ fn resolve_block_item(block_item: BlockItem, symbols: &mut SymbolTable) -> Resul
 fn resolve_statement(statement: Statement, symbols: &mut SymbolTable) -> Result<Statement> {
     use parse_tree::Statement::*;
     let new_statement = match statement {
-        Return(expr) => Return(resolve_expression(expr, symbols)?),
+        Return(Some(expr)) => Return(Some(resolve_expression(expr, symbols)?)),
+        Return(None) => todo!("Void return types semantics!"),
         ExprStmt(expr) => ExprStmt(resolve_expression(expr, symbols)?),
         While(loop_data) => While(resolve_loop(loop_data, symbols, true)?),
         DoWhile(loop_data) => DoWhile(resolve_loop(loop_data, symbols, true)?),
@@ -478,6 +479,8 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Resul
             resolve_expression(*sub_expr, symbols)?.into(),
         ),
         StringLiteral(_) => expr,
+        SizeOf(_) => todo!("Size of expression semantics!"),
+        SizeOfT(_) => todo!("Size of type semantics!"),
     };
     // Convert to TypedExpression
     Ok(result.into())
