@@ -313,9 +313,15 @@ fn parse_factor(tokens: &mut Tokens) -> Result<TypedExpression> {
                 Expression::SizeOf(parse_factor(tokens)?.into())
             }
         }
-        Token::Hyphen => Expression::Unary(UnaryOperator::Negate, parse_cast_expression(tokens)?.into()),
-        Token::Tilde => Expression::Unary(UnaryOperator::Complement, parse_cast_expression(tokens)?.into()),
-        Token::Exclam => Expression::Unary(UnaryOperator::LogicalNot, parse_cast_expression(tokens)?.into()),
+        Token::Hyphen => {
+            Expression::Unary(UnaryOperator::Negate, parse_cast_expression(tokens)?.into())
+        }
+        Token::Tilde => {
+            Expression::Unary(UnaryOperator::Complement, parse_cast_expression(tokens)?.into())
+        }
+        Token::Exclam => {
+            Expression::Unary(UnaryOperator::LogicalNot, parse_cast_expression(tokens)?.into())
+        }
         Token::Ampersand => Expression::AddrOf(parse_cast_expression(tokens)?.into()),
         Token::Star => Expression::Dereference(parse_cast_expression(tokens)?.into()),
         Token::Increment => Expression::Unary(

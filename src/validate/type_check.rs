@@ -708,7 +708,11 @@ where
         CType::UnsignedLong => Initializer::ULong(val.as_()),
         CType::Double => Initializer::Double(val.as_()),
         CType::Pointer(_) if num_traits::AsPrimitive::<i64>::as_(val) == 0 => Initializer::ULong(0),
-        CType::Function(_, _) | CType::Pointer(_) | CType::Array(_, _) | CType::VarArgs | CType::Void => {
+        CType::Function(_, _)
+        | CType::Pointer(_)
+        | CType::Array(_, _)
+        | CType::VarArgs
+        | CType::Void => {
             panic!("Not a variable!")
         }
     }
@@ -729,7 +733,9 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::UnsignedLong => SingleElem(Expression::Constant(Constant::ULong(0)).into()),
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
-        CType::Function(_, _) | CType::VarArgs | CType::Void => panic!("Cannot zero initialize a function"),
+        CType::Function(_, _) | CType::VarArgs | CType::Void => {
+            panic!("Cannot zero initialize a function")
+        }
     }
 }
 
