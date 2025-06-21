@@ -45,6 +45,9 @@ fn eval_constant(constant: &Constant, ctype: &CType) -> Result<Constant> {
             Constant::Double(val) => Ok(Constant::Double(*val)),
             _ => Ok(Constant::Double(constant.int_value() as f64)),
         },
+        CType::Pointer(elem_t) if **elem_t == CType::Void => {
+            eval_constant(constant, &CType::Pointer(Box::new(CType::Char)))
+        }
         CType::Pointer(ctype) | CType::Array(ctype, _) => match eval_constant(constant, ctype) {
             Ok(constant) if constant.int_value() == 0 => Ok(constant),
             _ => Err(Error::new("Invalid constant", "Failed to parse constant expression!")),
@@ -85,6 +88,13 @@ fn type_check_declaration(
             } else {
                 var = type_check_var_declaration(var, table).add_location(location)?;
             }
+            assert_or_err(
+                var.ctype != CType::Void,
+                "Illegal Declaration",
+                "Cannot declare void variables",
+            )
+            .add_location(location)?;
+            var.ctype.validate_specifier().add_location(location)?;
             Ok(Declaration::Variable(var))
         }
     }
@@ -109,19 +119,27 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<S
     let result = match statement {
         Return(Some(expr)) => {
             let expr = type_check_and_convert(expr, table)?;
-            let cur_func = table
-                .current_function
-                .as_ref()
-                .ok_or(Error::new("Illegal return statement", "Return must be inside function!"))?;
-            let cur_func_type = &table.symbols[cur_func].ctype;
-            let CType::Function(_, return_type) = cur_func_type else { panic!("Match failed!") };
+            let return_type = table.current_function_return_type()?;
             Return(Some(expr.convert_by_assignment(return_type)?))
         }
-        Return(None) => todo!("Void return type checking!"),
+        Return(None) => {
+            let return_type = table.current_function_return_type()?;
+            assert_or_err(
+                matches!(return_type, CType::Void),
+                "Invalid return type",
+                "Empty return from non-void function!",
+            )?;
+            Return(None)
+        }
         ExprStmt(expr) => ExprStmt(type_check_and_convert(expr, table)?),
         Label(name, statement) => Label(name, type_check_statement(*statement, table)?.into()),
         If(expr, if_true, if_false) => {
             let expr = type_check_and_convert(expr, table)?;
+            assert_or_err(
+                expr.get_type().is_scalar(),
+                "Invalid condition",
+                "Condition must be a scalar type!",
+            )?;
             let if_true = type_check_statement(*if_true, table)?;
             let if_false =
                 if_false.map(|statement| type_check_statement(statement, table)).transpose()?;
@@ -129,11 +147,21 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<S
         }
         While(mut loop_data) => {
             loop_data.condition = type_check_and_convert(loop_data.condition, table)?;
+            assert_or_err(
+                loop_data.condition.get_type().is_scalar(),
+                "Invalid condition",
+                "Condition must be a scalar type!",
+            )?;
             loop_data.body = type_check_statement(*loop_data.body, table)?.into();
             While(loop_data)
         }
         DoWhile(mut loop_data) => {
             loop_data.condition = type_check_and_convert(loop_data.condition, table)?;
+            assert_or_err(
+                loop_data.condition.get_type().is_scalar(),
+                "Invalid condition",
+                "Condition must be a scalar type!",
+            )?;
             loop_data.body = type_check_statement(*loop_data.body, table)?.into();
             DoWhile(loop_data)
         }
@@ -194,6 +222,11 @@ fn type_check_statement(statement: Statement, table: &mut TypeTable) -> Result<S
                 _ => ForInit::Expr(None),
             };
             loop_data.condition = type_check_and_convert(loop_data.condition, table)?;
+            assert_or_err(
+                loop_data.condition.get_type().is_scalar(),
+                "Invalid condition",
+                "Condition must be a scalar type!",
+            )?;
             let post =
                 post.map(|post_expr| type_check_and_convert(post_expr, table)).transpose()?;
             loop_data.body = type_check_statement(*loop_data.body, table)?.into();
@@ -234,9 +267,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             Constant::UInt(_) => Expression::Constant(constant).set_type(&CType::UnsignedInt),
             Constant::ULong(_) => Expression::Constant(constant).set_type(&CType::UnsignedLong),
             Constant::Double(_) => Expression::Constant(constant).set_type(&CType::Double),
-            Constant::Char(_) | Constant::UChar(_) => todo!("Char constants!"),
+            Constant::Char(_) => Expression::Constant(constant).set_type(&CType::Char),
+            Constant::UChar(_) => Expression::Constant(constant).set_type(&CType::UnsignedChar),
         },
         Expression::Cast(new_type, inner) => {
+            new_type.validate_specifier()?;
             let typed_inner = type_check_and_convert(*inner, table)?;
             let old_type = typed_inner.get_type();
             assert_or_err(
@@ -249,12 +284,15 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
                 "Invalid cast",
                 "Cannot convert double to pointer!",
             )?;
-            assert_or_err(
-                !matches!(new_type, CType::Array(_, _)),
-                "Invalid cast",
-                "Cannot cast to array type",
-            )?;
-            Expression::Cast(new_type.clone(), typed_inner.into()).set_type(&new_type)
+            if new_type == CType::Void {
+                Expression::Cast(CType::Void, typed_inner.into()).set_type(&CType::Void)
+            } else if !new_type.is_scalar() {
+                return Err(Error::new("Invalid cast", "Can only cast to scalar or void!"));
+            } else if !old_type.is_scalar() {
+                return Err(Error::new("Invalid cast", "Cannot cast non-scalar type to scalar!"));
+            } else {
+                Expression::Cast(new_type.clone(), typed_inner.into()).set_type(&new_type)
+            }
         }
         Expression::Unary(op, inner) => {
             let typed_inner = type_check_and_convert(*inner, table)?;
@@ -262,6 +300,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             let new_type = typed_inner.get_type();
             match op {
                 UnaryOperator::LogicalNot => {
+                    assert_or_err(
+                        new_type.is_scalar(),
+                        "Illegal operand",
+                        "Invalid operand for operator `!`, not a scalar!",
+                    )?;
                     Expression::Unary(op, typed_inner.into()).set_type(&CType::Int)
                 }
                 UnaryOperator::Complement => {
@@ -276,9 +319,9 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
                 }
                 UnaryOperator::Negate => {
                     assert_or_err(
-                        !new_type.is_pointer(),
+                        new_type.is_arithmetic(),
                         "Illegal operand",
-                        "Cannot negate pointer!",
+                        "Invalid operand for operator `-`, must be arithmetic!",
                     )?;
                     let typed_inner = typed_inner.promote_char()?;
                     let result_t = typed_inner.get_type();
@@ -289,6 +332,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
                         is_lvalue,
                         "Illegal operand",
                         "Increment target must be lvalue!",
+                    )?;
+                    assert_or_err(
+                        new_type.is_pointer_to_complete() || new_type.is_arithmetic(),
+                        "Illegal operand",
+                        "Cannot increment pointer to incomplete type!",
                     )?;
                     Expression::Unary(op, typed_inner.into()).set_type(&new_type)
                 }
@@ -309,6 +357,11 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
         }
         Expression::Condition(cond) => {
             let condition = type_check_and_convert(cond.condition, table)?;
+            assert_or_err(
+                condition.get_type().is_scalar(),
+                "Invalid condition",
+                "Condition must be a scalar type!",
+            )?;
             let if_true = type_check_and_convert(cond.if_true, table)?;
             let if_false = type_check_and_convert(cond.if_false, table)?;
             let common_type = get_common_type(&if_true, &if_false)?;
@@ -343,6 +396,9 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
         Expression::Dereference(inner) => {
             let typed_inner = type_check_and_convert(*inner, table)?;
             match typed_inner.get_type() {
+                CType::Pointer(reference_t) if *reference_t == CType::Void => {
+                    Err(Error::new("Invalid dereference", "Cannot dereference void pointer!"))
+                }
                 CType::Pointer(reference_t) => {
                     Expression::Dereference(typed_inner.into()).set_type(&reference_t)
                 }
@@ -358,38 +414,52 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
         Expression::Subscript(left, right) => {
             let mut left = type_check_and_convert(*left, table)?;
             let mut right = type_check_and_convert(*right, table)?;
-            let left_t = left.get_type();
-            let right_t = right.get_type();
-            if let CType::Pointer(ptr_t) = &left_t {
-                assert_or_err(
-                    right_t.is_int(),
-                    "Illegal subscript",
-                    "Subscript `[]` takes integer and pointer operands",
-                )?;
-                right = right.convert_to(&CType::Long)?;
-                Expression::Subscript(left.into(), right.into()).set_type(ptr_t)
-            } else if let CType::Pointer(ptr_t) = &right_t {
-                assert_or_err(
-                    left_t.is_int(),
-                    "Illegal subscript",
-                    "Subscript `[]` takes integer and pointer operands",
-                )?;
-                left = left.convert_to(&CType::Long)?;
-                // Swap left and right so left is always the pointer
-                Expression::Subscript(right.into(), left.into()).set_type(ptr_t)
-            } else {
-                Err(Error::new(
+            if !left.get_type().is_pointer() {
+                (left, right) = (right, left)
+            }
+            let ptr_t = left.get_type();
+            let subscr_t = right.get_type();
+            let CType::Pointer(elem_t) = &ptr_t else {
+                return Err(Error::new(
                     "Illegal subscript",
                     "Subscript `[]` takes integer and pointer operands!",
-                ))
-            }
+                ));
+            };
+            assert_or_err(
+                subscr_t.is_int(),
+                "Illegal subscript",
+                "Subscript `[]` takes integer and pointer operands",
+            )?;
+            assert_or_err(
+                elem_t.is_complete(),
+                "Illegal subscript",
+                "Subscript to incomplete type!",
+            )?;
+            let right = right.convert_to(&CType::Long)?;
+            Expression::Subscript(left.into(), right.into()).set_type(elem_t)
         }
         Expression::StringLiteral(ref string_data) => {
             let string_len = string_data.len() as u64 + 1;
             expr.expr.set_type(&CType::Array(CType::Char.into(), string_len))
         }
-        Expression::SizeOf(_) => todo!("Size of expression type checking!"),
-        Expression::SizeOfT(_) => todo!("Size of type - type checking!"),
+        Expression::SizeOf(inner) => {
+            let typed_inner = type_check_expression(*inner, table)?;
+            assert_or_err(
+                typed_inner.get_type().is_complete(),
+                "Invalid sizeof operand",
+                "Cannot get size of incomplete type",
+            )?;
+            Expression::SizeOf(Box::new(typed_inner)).set_type(&CType::UnsignedLong)
+        }
+        Expression::SizeOfT(ref type_t) => {
+            type_t.validate_specifier()?;
+            assert_or_err(
+                type_t.is_complete(),
+                "Invalid sizeof operand",
+                "Cannot get size of incomplete type!",
+            )?;
+            expr.expr.set_type(&CType::UnsignedLong)
+        }
     }
 }
 
@@ -403,11 +473,29 @@ fn type_check_binary_expr(
     let right = type_check_and_convert(binary.right, table)?;
     match binary.operator {
         LogicalAnd | LogicalOr => {
+            assert_or_err(
+                left.get_type().is_scalar() && right.get_type().is_scalar(),
+                "Illegal Operand",
+                "Invalid operands for `and`, expected scalars!",
+            )?;
             Binary(BinaryExpression { left, right, ..binary }.into()).set_type(&CType::Int)
         }
-        LessThan | GreaterThan | LessThanEqual | GreaterThanEqual | IsEqual | NotEqual => {
+        IsEqual | NotEqual => {
             let common_type = get_common_type(&left, &right)?;
-            if common_type.is_pointer() && !matches!(binary.operator, IsEqual | NotEqual) {
+            let left_t = left.get_type();
+            let right_t = right.get_type();
+            assert_or_err(
+                common_type.is_pointer() || left_t.is_arithmetic() && right_t.is_arithmetic(),
+                "Invalid comparision",
+                "Equality checks expect pointer or arithmetic types",
+            )?;
+            let left = left.convert_to(&common_type)?;
+            let right = right.convert_to(&common_type)?;
+            Binary(BinaryExpression { left, right, ..binary }.into()).set_type(&CType::Int)
+        }
+        LessThan | GreaterThan | LessThanEqual | GreaterThanEqual => {
+            let common_type = get_common_type(&left, &right)?;
+            if common_type.is_pointer() {
                 assert_or_err(
                     !left.is_null_ptr()? && !right.is_null_ptr()?,
                     "Invalid comparision",
@@ -417,6 +505,18 @@ fn type_check_binary_expr(
                     left.get_type() == right.get_type(),
                     "Invalid comparison",
                     "Pointer comparison types must match!",
+                )?;
+                assert_or_err(
+                    left.get_type().is_pointer_to_complete()
+                        && right.get_type().is_pointer_to_complete(),
+                    "Invalid comparison",
+                    "Pointer comparision types must be complete!",
+                )?;
+            } else {
+                assert_or_err(
+                    left.get_type().is_arithmetic() && right.get_type().is_arithmetic(),
+                    "Invalid comparision",
+                    "Types must be arithmetic or pointer",
                 )?;
             }
             let left = left.convert_to(&common_type)?;
@@ -437,9 +537,9 @@ fn type_check_binary_expr(
         Multiply | Divide => {
             let common_type = get_common_type(&left, &right)?;
             assert_or_err(
-                !common_type.is_pointer(),
+                common_type.is_arithmetic(),
                 "Invalid operand",
-                "Cannot multiply/divide pointers!",
+                "Operands for multiply/divide must be arithmetic!",
             )?;
             type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
         }
@@ -466,7 +566,7 @@ fn type_check_binary_expr(
             let right_t = right.get_type();
             if left_t.is_arithmetic() && right_t.is_arithmetic() {
                 type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
-            } else if left_t.is_pointer() && right_t.is_int() {
+            } else if left_t.is_pointer_to_complete() && right_t.is_int() {
                 assert_or_err(
                     !binary.is_assignment || left.is_lvalue(),
                     "Invalid assignment",
@@ -474,7 +574,7 @@ fn type_check_binary_expr(
                 )?;
                 let right = right.convert_to(&CType::Long)?;
                 Binary(BinaryExpression { left, right, ..binary }.into()).set_type(&left_t)
-            } else if right_t.is_pointer() && left_t.is_int() {
+            } else if right_t.is_pointer_to_complete() && left_t.is_int() {
                 // If right is pointer, we swap left/right, as tac expects the ptr to be on the left
                 assert_or_err(
                     !binary.is_assignment,
@@ -493,7 +593,7 @@ fn type_check_binary_expr(
             let right_t = right.get_type();
             if left_t.is_arithmetic() && right_t.is_arithmetic() {
                 type_check_arithmetic_binexpr(left, right, binary.operator, binary.is_assignment)
-            } else if left_t.is_pointer() && right_t.is_int() {
+            } else if left_t.is_pointer_to_complete() && right_t.is_int() {
                 assert_or_err(
                     !binary.is_assignment || left.is_lvalue(),
                     "Invalid assignment",
@@ -505,7 +605,7 @@ fn type_check_binary_expr(
                     .set_type(&CType::Long)?;
                 Binary(BinaryExpression { left, right, operator: Add, ..binary }.into())
                     .set_type(&left_t)
-            } else if left_t.is_pointer() && left_t == right_t {
+            } else if left_t.is_pointer_to_complete() && left_t == right_t {
                 assert_or_err(
                     !binary.is_assignment,
                     "Invalid assignment types",
@@ -542,7 +642,7 @@ fn type_check_function(
     function: FunctionDeclaration,
     table: &mut TypeTable,
 ) -> Result<FunctionDeclaration> {
-    let function = type_check_array_params(function)?;
+    let function = type_check_params(function)?;
     let ctype = &function.ctype;
     let mut defined = function.body.is_some();
     let mut global = function.storage != Some(StorageClass::Static);
@@ -584,7 +684,7 @@ fn type_check_function(
     }
 }
 
-fn type_check_array_params(mut function: FunctionDeclaration) -> Result<FunctionDeclaration> {
+fn type_check_params(mut function: FunctionDeclaration) -> Result<FunctionDeclaration> {
     let CType::Function(param_types, return_t) = function.ctype else { panic!("Not a function!") };
     assert_or_err(
         !matches!(*return_t, CType::Array(_, _)),
@@ -593,11 +693,17 @@ fn type_check_array_params(mut function: FunctionDeclaration) -> Result<Function
     )?;
     let adjusted_params = param_types
         .into_iter()
-        .map(|param_t| match param_t {
-            CType::Array(elem_t, _) => CType::Pointer(elem_t),
-            _ => param_t,
+        .map(|param_t| {
+            param_t.validate_specifier()?;
+            match param_t {
+                CType::Array(elem_t, _) => Ok(CType::Pointer(elem_t)),
+                CType::Void => {
+                    Err(Error::new("Illegal Declaration", "Cannot declare void parameters"))
+                }
+                _ => Ok(param_t),
+            }
         })
-        .collect();
+        .collect::<Result<Vec<CType>>>()?;
     function.ctype = CType::Function(adjusted_params, return_t);
     Ok(function)
 }

@@ -1,6 +1,8 @@
 //! Module for CType type and implementations, along with symbol table and other static
 //! variable initialization data structures.
 
+use lazy_static::lazy_static;
+
 use crate::{
     helpers::error::Error,
     parse::parse_tree::{Expression, TypedExpression},
@@ -85,6 +87,35 @@ impl CType {
     pub fn is_arithmetic(&self) -> bool {
         self.is_int() || *self == Self::Double
     }
+    /// Checks if type is scalar
+    pub fn is_scalar(&self) -> bool {
+        self.is_arithmetic() || matches!(self, Self::Pointer(_))
+    }
+    /// Checks if type is complete
+    pub fn is_complete(&self) -> bool {
+        !matches!(self, Self::Void | Self::VarArgs)
+    }
+    /// Checks if pointer type is complete
+    pub fn is_pointer_to_complete(&self) -> bool {
+        match self {
+            Self::Pointer(elem_t) => elem_t.is_complete(),
+            _ => false,
+        }
+    }
+    /// Validates that type specifier doesn't eventually point to array of void elements
+    pub fn validate_specifier(&self) -> Result<()> {
+        match self {
+            Self::Array(elem_t, _) if !elem_t.is_complete() => {
+                Err(Error::new("Invalid specifier", "Array of incomplete types!"))
+            }
+            Self::Array(elem_t, _) | Self::Pointer(elem_t) => elem_t.validate_specifier(),
+            Self::Function(param_types, ret_t) => {
+                param_types.iter().try_for_each(|t| t.validate_specifier())?;
+                ret_t.validate_specifier()
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Main symbol table for the compiler
@@ -92,6 +123,18 @@ impl CType {
 pub struct TypeTable {
     pub symbols: Symbols,
     pub current_function: Option<String>,
+}
+
+impl TypeTable {
+    pub fn current_function_return_type(&self) -> Result<&CType> {
+        let cur_func = self
+            .current_function
+            .as_ref()
+            .ok_or(Error::new("Illegal return statement", "Return must be inside function!"))?;
+        let cur_func_type = &self.symbols[cur_func].ctype;
+        let CType::Function(_, return_type) = cur_func_type else { panic!("Expected function!") };
+        Ok(return_type)
+    }
 }
 
 /// A map from symbols to their type and any stored attributes
@@ -182,6 +225,10 @@ impl Expression {
     }
 }
 
+lazy_static! {
+    static ref VOID_PTR: CType = CType::Pointer(Box::new(CType::Void));
+}
+
 impl TypedExpression {
     pub fn set_type(mut self, ctype: &CType) -> Result<Self> {
         self.ctype = Some(ctype.clone());
@@ -208,11 +255,15 @@ impl TypedExpression {
         if self.get_type().is_char() { self.convert_to(&CType::Int) } else { Ok(self) }
     }
     pub fn convert_by_assignment(self, ctype: &CType) -> Result<Self> {
+        // Conditions that allow us to convert automatically by assignment
+        let both_arithmetic = self.get_type().is_arithmetic() && ctype.is_arithmetic();
+        let from_null_ptr = self.is_null_ptr()? && ctype.is_pointer();
+        let from_void_ptr = *ctype == *VOID_PTR && self.get_type().is_pointer();
+        let to_void_ptr = self.get_type() == *VOID_PTR && ctype.is_pointer();
+        // Check and convert
         if self.get_type() == *ctype {
             Ok(self)
-        } else if (self.get_type().is_arithmetic() && ctype.is_arithmetic())
-            || (self.is_null_ptr()? && ctype.is_pointer())
-        {
+        } else if both_arithmetic || from_null_ptr || from_void_ptr || to_void_ptr {
             self.convert_to(ctype)
         } else {
             Err(Error::new("Invalid types", "Failed to convert by assignment!"))
@@ -226,6 +277,10 @@ pub fn get_common_pointer_type(left: &TypedExpression, right: &TypedExpression) 
         Ok(left_type)
     } else if left.is_null_ptr()? {
         Ok(right_type)
+    } else if left_type == *VOID_PTR && right_type.is_pointer()
+        || left_type.is_pointer() && right_type == *VOID_PTR
+    {
+        Ok(CType::Pointer(Box::new(CType::Void)))
     } else {
         Err(Error::new("Invalid types", "Pointers have incompatible types!"))
     }
