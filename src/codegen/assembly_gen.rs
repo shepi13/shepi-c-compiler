@@ -132,13 +132,14 @@ fn gen_instructions(
         use AssemblyType::*;
         use Instruction::*;
         match instruction {
-            tac_ast::Instruction::Return(val) => {
+            tac_ast::Instruction::Return(Some(val)) => {
                 let val_type = val.get_asm_type(symbols);
                 let val = gen_operand(val, stack, symbols);
                 let reg = if val_type == Double { Reg(XMM0) } else { Reg(AX) };
                 asm_instructions.push(Mov(val, reg, val_type));
                 asm_instructions.push(Ret);
             }
+            tac_ast::Instruction::Return(None) => asm_instructions.push(Ret),
             tac_ast::Instruction::UnaryOp { operator, src, dst } => {
                 use BinaryOperator::BitXor;
                 let src_type = src.get_asm_type(symbols);
@@ -464,7 +465,7 @@ fn gen_func_call(
     stack: &mut StackGen,
     name: String,
     args: Vec<tac_ast::Value>,
-    dst: tac_ast::Value,
+    dst: Option<tac_ast::Value>,
     symbols: &Symbols,
 ) {
     use AssemblyType::*;
@@ -500,10 +501,12 @@ fn gen_func_call(
         instructions.push(Binary(BinaryOperator::Add, Imm(bytes_to_remove), Reg(SP), Quadword));
     }
     // Get return value from eax or xmm0
-    let dst_type = dst.get_asm_type(symbols);
-    let dst = gen_operand(dst, stack, symbols);
-    let result_reg = if dst_type == AssemblyType::Double { Reg(XMM0) } else { Reg(AX) };
-    instructions.push(Instruction::Mov(result_reg, dst, dst_type));
+    if let Some(dst) = dst {
+        let dst_type = dst.get_asm_type(symbols);
+        let dst = gen_operand(dst, stack, symbols);
+        let result_reg = if dst_type == AssemblyType::Double { Reg(XMM0) } else { Reg(AX) };
+        instructions.push(Instruction::Mov(result_reg, dst, dst_type));
+    }
 }
 
 fn gen_binary_op(

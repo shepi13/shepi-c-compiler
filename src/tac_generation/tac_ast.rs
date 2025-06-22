@@ -13,7 +13,7 @@ pub enum TopLevelDecl {
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
-    Return(Value),
+    Return(Option<Value>),
     SignExtend(Value, Value),
     ZeroExtend(Value, Value),
     Truncate(Value, Value),
@@ -30,7 +30,7 @@ pub enum Instruction {
     Label(String),
     Jump(String),
     JumpCond { jump_type: JumpType, condition: Value, target: String },
-    Function(String, Vec<Value>, Value),
+    Function(String, Vec<Value>, Option<Value>),
     AddPtr(Value, Value, u64, Value),
     CopyToOffset(Value, String, u64),
 }
