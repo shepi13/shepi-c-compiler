@@ -33,24 +33,24 @@ pub struct Args {
     #[arg(long)]
     print_commands: bool,
     /// Only run the lexer
-    #[arg(short, long)]
+    #[arg(long)]
     lex: bool,
     /// Run the parser and lexer
-    #[arg(short, long)]
+    #[arg(long)]
     parse: bool,
     #[arg(long)]
     semantics: bool,
     /// Run the parser, lexer, and type checking
-    #[arg(short, long)]
+    #[arg(long)]
     validate: bool,
     /// Run the lexer, parser, and TAC generation
-    #[arg(short, long)]
+    #[arg(long)]
     tacky: bool,
     /// Run assembly generation but without rewrites
     #[arg(long)]
     no_rewrite: bool,
     /// Run the lexer, parser, and all code gen, but don't output assembly
-    #[arg(short = 'g', long)]
+    #[arg(long)]
     codegen: bool,
     /// Output assembly, but don't run linker
     #[arg(short = 'S')]

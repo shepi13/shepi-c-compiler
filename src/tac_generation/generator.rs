@@ -12,7 +12,8 @@ use crate::{
     },
     tac_generation::tac_ast::{Instruction, JumpType, Program, TopLevelDecl, Value},
     validate::ctype::{
-        CType, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, string_name,
+        CType, Initializer, StaticInitializer, Symbol, SymbolAttr, Symbols, get_common_type,
+        string_name,
     },
 };
 
@@ -69,7 +70,11 @@ fn gen_function(function: parse_tree::FunctionDeclaration, symbols: &mut Symbols
     let mut instructions: Vec<Instruction> = Vec::new();
     if let Some(body) = function.body {
         gen_block(body, &mut instructions, symbols);
-        instructions.push(Instruction::Return(Value::ConstValue(parse_tree::Constant::Int(0))));
+        let ret_val = match function.ctype {
+            CType::Function(_, ret_t) if *ret_t == CType::Void => None,
+            _ => Some(Value::ConstValue(parse_tree::Constant::Int(0))),
+        };
+        instructions.push(Instruction::Return(ret_val));
     }
     let SymbolAttr::Function { defined: _, global } = symbols[&function.name].attrs else {
         panic!("Expected function!")
@@ -183,9 +188,9 @@ fn gen_instructions(
     match statement {
         Statement::Return(Some(value)) => {
             let dst = gen_expression_and_convert(value, instructions, symbols);
-            instructions.push(Instruction::Return(dst));
+            instructions.push(Instruction::Return(Some(dst)));
         }
-        Statement::Return(None) => todo!("Void return types!"),
+        Statement::Return(None) => instructions.push(Instruction::Return(None)),
         Statement::Null => (),
         Statement::ExprStmt(value) => {
             gen_expression_and_convert(value, instructions, symbols);
@@ -376,7 +381,7 @@ fn gen_expression(
             } else if binary.operator == Subtract && binary.left.get_type().is_pointer() {
                 gen_pointer_subtraction(instructions, *binary, symbols)
             } else if binary.is_assignment {
-                gen_compound_assignment(instructions, *binary, expr_t, symbols)
+                gen_compound_assignment(instructions, *binary, symbols)
             } else {
                 let src1 = gen_expression_and_convert(binary.left, instructions, symbols);
                 let src2 = gen_expression_and_convert(binary.right, instructions, symbols);
@@ -407,7 +412,6 @@ fn gen_expression(
         }
         Expression::Condition(condition) => {
             let expr_type = expression.ctype.expect("Undefined type!");
-            let dst = gen_temp_var(expr_type, symbols);
             let end_label = gen_label("cond_end");
             let e2_label = gen_label("cond_e2");
             let cond = gen_expression_and_convert(condition.condition, instructions, symbols);
@@ -416,14 +420,24 @@ fn gen_expression(
                 condition: cond,
                 target: e2_label.clone(),
             });
-            let e1 = gen_expression_and_convert(condition.if_true, instructions, symbols);
-            instructions.push(Instruction::Copy(e1, dst.clone()));
-            instructions.push(Instruction::Jump(end_label.clone()));
-            instructions.push(Instruction::Label(e2_label));
-            let e2 = gen_expression_and_convert(condition.if_false, instructions, symbols);
-            instructions.push(Instruction::Copy(e2, dst.clone()));
-            instructions.push(Instruction::Label(end_label));
-            ExpResult::Operand(dst)
+            if expr_type == CType::Void {
+                gen_expression_and_convert(condition.if_true, instructions, symbols);
+                instructions.push(Instruction::Jump(end_label.clone()));
+                instructions.push(Instruction::Label(e2_label));
+                gen_expression_and_convert(condition.if_false, instructions, symbols);
+                instructions.push(Instruction::Label(end_label));
+                ExpResult::Operand(Value::Variable(String::from("DummyVar")))
+            } else {
+                let dst = gen_temp_var(expr_type, symbols);
+                let e1 = gen_expression_and_convert(condition.if_true, instructions, symbols);
+                instructions.push(Instruction::Copy(e1, dst.clone()));
+                instructions.push(Instruction::Jump(end_label.clone()));
+                instructions.push(Instruction::Label(e2_label));
+                let e2 = gen_expression_and_convert(condition.if_false, instructions, symbols);
+                instructions.push(Instruction::Copy(e2, dst.clone()));
+                instructions.push(Instruction::Label(end_label));
+                ExpResult::Operand(dst)
+            }
         }
         Expression::FunctionCall(name, args) => {
             let expr_type = expression.ctype.expect("Undefined type!");
@@ -431,9 +445,21 @@ fn gen_expression(
                 .into_iter()
                 .map(|arg| gen_expression_and_convert(arg, instructions, symbols))
                 .collect();
-            let dst = gen_temp_var(expr_type, symbols);
-            instructions.push(Instruction::Function(name.to_string(), results, dst.clone()));
-            ExpResult::Operand(dst)
+            match &symbols[&name].ctype {
+                CType::Function(_, ret_t) if **ret_t == CType::Void => {
+                    instructions.push(Instruction::Function(name.to_string(), results, None));
+                    ExpResult::Operand(Value::Variable(String::from("DummyVar")))
+                }
+                _ => {
+                    let dst = gen_temp_var(expr_type, symbols);
+                    instructions.push(Instruction::Function(
+                        name.to_string(),
+                        results,
+                        Some(dst.clone()),
+                    ));
+                    ExpResult::Operand(dst)
+                }
+            }
         }
         Expression::Cast(new_type, castexpr) => {
             let old_type = castexpr.get_type();
@@ -484,8 +510,13 @@ fn gen_expression(
             );
             ExpResult::Operand(Value::Variable(name))
         }
-        Expression::SizeOf(_) => todo!("Sizeof expression tac gen!"),
-        Expression::SizeOfT(_) => todo!("Sizeof type tac gen!"),
+        Expression::SizeOf(expr) => {
+            let size = expr.get_type().size();
+            ExpResult::Operand(Value::ConstValue(Constant::ULong(size)))
+        }
+        Expression::SizeOfT(type_t) => {
+            ExpResult::Operand(Value::ConstValue(Constant::ULong(type_t.size())))
+        }
     }
 }
 
@@ -608,11 +639,14 @@ fn gen_pointer_subtraction(
 fn gen_compound_assignment(
     instructions: &mut Vec<Instruction>,
     binary: BinaryExpression,
-    expr_t: CType,
     symbols: &mut Symbols,
 ) -> ExpResult {
     use Instruction::*;
     let left_t = binary.left.get_type();
+    let expr_t = match binary.operator {
+        BinaryOperator::LeftShift | BinaryOperator::RightShift => left_t.clone(),
+        _ => get_common_type(&binary.left, &binary.right).expect("Compound type error!"),
+    };
     // Generate and cast lvalue to common type
     let lval = gen_expression(binary.left, instructions, symbols);
     let src1 = lvalue_convert(instructions, lval.clone(), Some(left_t.clone()), symbols);
@@ -646,8 +680,10 @@ fn gen_cast(
     if new_type == old_type {
         return val;
     }
+    if new_type == CType::Void {
+        return Value::Variable(String::from("DummyVar"));
+    }
     let dst = gen_temp_var(new_type.clone(), symbols);
-
     if old_type == CType::Double && new_type.is_signed() {
         instructions.push(Instruction::DoubleToInt(val, dst.clone()));
     } else if old_type == CType::Double {

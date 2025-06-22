@@ -626,16 +626,18 @@ fn type_check_arithmetic_binexpr(
     is_assignment: bool,
 ) -> Result<TypedExpression> {
     let common_type = get_common_type(&left, &right)?;
-    let binexpr = if is_assignment {
+    if is_assignment {
         assert_or_err(left.is_lvalue(), "Invalid assignemnt", "Can only assign to lvalue!")?;
         let right = right.convert_to(&common_type)?;
-        BinaryExpression { left, right, operator, is_assignment }
+        let left_t = left.get_type();
+        let binexpr = BinaryExpression { left, right, operator, is_assignment };
+        Expression::Binary(binexpr.into()).set_type(&left_t)
     } else {
         let left = left.convert_to(&common_type)?;
         let right = right.convert_to(&common_type)?;
-        BinaryExpression { left, right, operator, is_assignment }
-    };
-    Expression::Binary(binexpr.into()).set_type(&common_type)
+        let binexpr = BinaryExpression { left, right, operator, is_assignment };
+        Expression::Binary(binexpr.into()).set_type(&common_type)
+    }
 }
 
 fn type_check_function(
