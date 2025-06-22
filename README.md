@@ -26,12 +26,12 @@ Following the guide in *Writing a C Compiler* by Nora Sandler
 	- VLAs not supported
 - String Literals and Character constants (including both static strings and strings as array intializers)
 - Variadic functions
+- Void type, sizeof, and dynamic memory allocation
 ----------------
 
 ### In progress:
 
 - Structs/Unions
-- Dynamic memory allocation
 - Enums
 - Optimizations
 
