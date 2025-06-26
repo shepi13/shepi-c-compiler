@@ -97,6 +97,7 @@ fn type_check_declaration(
             var.ctype.validate_specifier().add_location(location)?;
             Ok(Declaration::Variable(var))
         }
+        Declaration::Struct(_) => todo!("Struct type check!"),
     }
 }
 
@@ -460,6 +461,8 @@ fn type_check_expression(expr: TypedExpression, table: &mut TypeTable) -> Result
             )?;
             expr.expr.set_type(&CType::UnsignedLong)
         }
+        Expression::DotAccess(_, _) => todo!("Type check dot access!"),
+        Expression::Arrow(_, _) => todo!("Type check arrow access!"),
     }
 }
 
@@ -820,7 +823,8 @@ where
         | CType::Pointer(_)
         | CType::Array(_, _)
         | CType::VarArgs
-        | CType::Void => {
+        | CType::Void
+        | CType::Structure(_) => {
             panic!("Not a variable!")
         }
     }
@@ -841,7 +845,7 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::UnsignedLong => SingleElem(Expression::Constant(Constant::ULong(0)).into()),
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
-        CType::Function(_, _) | CType::VarArgs | CType::Void => {
+        CType::Function(_, _) | CType::VarArgs | CType::Void | CType::Structure(_) => {
             panic!("Cannot zero initialize a function")
         }
     }
