@@ -75,6 +75,8 @@ pub enum Token<'a> {
     // Other
     Comma,
     Ellipses,
+    Arrow,
+    Dot,
 }
 
 impl<'a> Token<'a> {
@@ -130,6 +132,8 @@ lazy_static! {
             r"^double\b",
             r"^char\b",
             r"^void\b",
+            r"^struct\b",
+            r"^union\b",
         ].join("|")).unwrap()),
         // Other keywords
         (Token::Keyword(""), Regex::new(&[
@@ -182,6 +186,7 @@ lazy_static! {
         (Token::AmpersandEqual, Regex::new(r"^\&\=").unwrap()),
         (Token::CaretEqual, Regex::new(r"^\^\=").unwrap()),
         (Token::PipeEqual, Regex::new(r"^\|\=").unwrap()),
+        (Token::Arrow, Regex::new(r"^->").unwrap()),
         // Single Character Symbols
         (Token::Hyphen, Regex::new(r"^-").unwrap()),
         (Token::Tilde, Regex::new(r"^~").unwrap()),
@@ -200,6 +205,7 @@ lazy_static! {
         (Token::QuestionMark, Regex::new(r"^\?").unwrap()),
         (Token::Colon, Regex::new(r"^\:").unwrap()),
         (Token::Comma, Regex::new(r"^\,").unwrap()),
+        (Token::Dot, Regex::new(r"(^\.)\D").unwrap()),
         // Brackets
         (Token::OpenParen, Regex::new(r"^\(").unwrap()),
         (Token::CloseParen, Regex::new(r"^\)").unwrap()),
