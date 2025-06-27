@@ -32,6 +32,7 @@ pub enum CType {
     VarArgs,
     Void,
     Structure(String),
+    Union(String),
 }
 
 impl CType {
@@ -48,6 +49,7 @@ impl CType {
             CType::Pointer(_) => 8,
             CType::Array(elem_t, elem_c) => elem_c * elem_t.size(),
             CType::Structure(_) => todo!("Structure size!"),
+            CType::Union(_) => todo!("Union size!"),
         }
     }
     /// For integers, returns whether or not the type is signed

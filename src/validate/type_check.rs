@@ -97,7 +97,8 @@ fn type_check_declaration(
             var.ctype.validate_specifier().add_location(location)?;
             Ok(Declaration::Variable(var))
         }
-        Declaration::Struct(_) => todo!("Struct type check!"),
+        Declaration::Struct { tag: _, members: _ } => todo!("Struct type check!"),
+        Declaration::Union { tag: _, members: _ } => todo!("Union type check!"),
     }
 }
 
@@ -824,7 +825,8 @@ where
         | CType::Array(_, _)
         | CType::VarArgs
         | CType::Void
-        | CType::Structure(_) => {
+        | CType::Structure(_)
+        | CType::Union(_) => {
             panic!("Not a variable!")
         }
     }
@@ -845,7 +847,7 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::UnsignedLong => SingleElem(Expression::Constant(Constant::ULong(0)).into()),
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
-        CType::Function(_, _) | CType::VarArgs | CType::Void | CType::Structure(_) => {
+        CType::Function(_, _) | CType::VarArgs | CType::Void | CType::Structure(_) | CType::Union(_) => {
             panic!("Cannot zero initialize a function")
         }
     }

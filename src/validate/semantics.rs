@@ -418,7 +418,8 @@ fn resolve_declaration(
             let location = func_decl.location;
             Declaration::Function(resolve_function(func_decl, symbols).add_location(location)?)
         }
-        Declaration::Struct(_) => todo!("Struct Semantics"),
+        Declaration::Struct { tag: _, members: _ } => todo!("Struct Semantics!"),
+        Declaration::Union { tag: _, members: _ } => todo!("Union Semantics!"),
     };
     Ok(decl)
 }

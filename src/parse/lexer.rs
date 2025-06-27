@@ -99,7 +99,7 @@ impl<'a> Token<'a> {
     pub fn is_type_specifier(&self) -> bool {
         match self {
             Token::Specifier(specifier) => {
-                ["int", "long", "signed", "unsigned", "double", "char", "void"].contains(specifier)
+                ["int", "long", "signed", "unsigned", "double", "char", "void", "struct", "union"].contains(specifier)
             }
             _ => false,
         }
@@ -279,8 +279,12 @@ impl Tokens<'_> {
     }
     pub fn consume_type_specifiers(&mut self) -> &[Token] {
         let tokens = &self.tokens[self.current_token..];
-        let position =
+        let mut position =
             tokens.iter().position(|token| !token.is_type_specifier()).unwrap_or(tokens.len());
+        // Struct/Union tokens must include identifier
+        if position != 0 && matches!(tokens[position - 1], Token::Specifier("struct" | "union")) {
+            position += 1;
+        }
         self.current_token += position;
         &tokens[..position]
     }

@@ -20,7 +20,8 @@ pub enum BlockItem {
 pub enum Declaration {
     Variable(VariableDeclaration),
     Function(FunctionDeclaration),
-    Struct(StructDeclaration),
+    Struct { tag: String, members: Vec<MemberDeclaration> },
+    Union { tag: String, members: Vec<MemberDeclaration> },
 }
 #[derive(Debug, Clone)]
 pub struct VariableDeclaration {
@@ -38,11 +39,6 @@ pub struct FunctionDeclaration {
     pub body: Option<Block>,
     pub storage: Option<StorageClass>,
     pub location: Location,
-}
-#[derive(Debug, Clone)]
-pub struct StructDeclaration {
-    pub tag: String,
-    pub members: Vec<MemberDeclaration>,
 }
 #[derive(Debug, Clone)]
 pub struct MemberDeclaration {

@@ -97,8 +97,17 @@ fn gen_block(block: parse_tree::Block, instructions: &mut Vec<Instruction>, symb
                 gen_declaration(decl, instructions, symbols);
             }
             parse_tree::BlockItem::DeclareItem(parse_tree::Declaration::Function(_)) => (),
-            parse_tree::BlockItem::DeclareItem(parse_tree::Declaration::Struct(_)) => {
+            parse_tree::BlockItem::DeclareItem(parse_tree::Declaration::Struct {
+                tag: _,
+                members: _,
+            }) => {
                 todo!("Structure declaration tac!")
+            }
+            parse_tree::BlockItem::DeclareItem(parse_tree::Declaration::Union {
+                tag: _,
+                members: _,
+            }) => {
+                todo!("Union declaration tac!")
             }
         }
     }
