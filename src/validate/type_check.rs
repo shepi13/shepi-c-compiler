@@ -847,7 +847,11 @@ fn zero_initializer(target_t: &CType) -> VariableInitializer {
         CType::UnsignedLong => SingleElem(Expression::Constant(Constant::ULong(0)).into()),
         CType::Double => SingleElem(Expression::Constant(Constant::Double(0.0)).into()),
         CType::Array(elem_t, size) => CompoundInit(vec![zero_initializer(elem_t); *size as usize]),
-        CType::Function(_, _) | CType::VarArgs | CType::Void | CType::Structure(_) | CType::Union(_) => {
+        CType::Function(_, _)
+        | CType::VarArgs
+        | CType::Void
+        | CType::Structure(_)
+        | CType::Union(_) => {
             panic!("Cannot zero initialize a function")
         }
     }

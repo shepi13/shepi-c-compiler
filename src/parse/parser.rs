@@ -20,8 +20,8 @@ use super::lexer::{Token, Tokens};
 use super::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, ConditionExpression,
     Constant, Declaration, Expression, ForInit, FunctionDeclaration, IncrementType, Location, Loop,
-    MemberDeclaration, Program, Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
-    VariableInitializer,
+    MemberDeclaration, Program, Statement, StorageClass, TypedExpression, UnaryOperator,
+    VariableDeclaration, VariableInitializer,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -76,7 +76,9 @@ pub fn parse_type(tokens: &[Token]) -> std::result::Result<CType, &'static str> 
     // Handle struct/union, which can't appear with other type specifiers and must have an identifier
     if matches!(tokens[0], Token::Specifier("struct" | "union")) {
         assert(tokens.len() == 2, "Struct must have identifier and no other type specifiers!")?;
-        let Token::Identifier(identifier) = tokens[1] else { return Err("Failed to parse name of struct/union") };
+        let Token::Identifier(identifier) = tokens[1] else {
+            return Err("Failed to parse name of struct/union");
+        };
         return if tokens[0] == Token::Specifier("struct") {
             Ok(CType::Structure(identifier.to_string()))
         } else {
@@ -545,8 +547,14 @@ fn parse_members(tokens: &mut Tokens) -> Result<Vec<MemberDeclaration>> {
             let ctype = parse_type(type_tokens).or_else(|err| Err(tokens.parse_error(err)))?;
             let declarator = parse_declarator(tokens)?;
             let decl_result = process_declarator(declarator, ctype)?;
-            tokens.assert(!matches!(decl_result.ctype, CType::Function(_, _)), "Function struct members not supported!")?;
-            members.push(MemberDeclaration { name: decl_result.name, ctype: decl_result.ctype });
+            tokens.assert(
+                !matches!(decl_result.ctype, CType::Function(_, _)),
+                "Function struct members not supported!",
+            )?;
+            members.push(MemberDeclaration {
+                name: decl_result.name,
+                ctype: decl_result.ctype,
+            });
             tokens.expect_token(Token::SemiColon)?;
         }
         tokens.assert(!members.is_empty(), "Struct/Union initializer cannot be empty!")?;
@@ -565,7 +573,7 @@ fn parse_declaration(tokens: &mut Tokens) -> Result<Declaration> {
         } else if let CType::Union(tag) = ctype {
             let members = parse_members(tokens)?;
             tokens.expect_token(Token::SemiColon)?;
-            return Ok(Declaration::Union { tag, members })
+            return Ok(Declaration::Union { tag, members });
         }
     }
     let declarator = parse_declarator(tokens)?;

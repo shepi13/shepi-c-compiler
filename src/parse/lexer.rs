@@ -99,7 +99,8 @@ impl<'a> Token<'a> {
     pub fn is_type_specifier(&self) -> bool {
         match self {
             Token::Specifier(specifier) => {
-                ["int", "long", "signed", "unsigned", "double", "char", "void", "struct", "union"].contains(specifier)
+                ["int", "long", "signed", "unsigned", "double", "char", "void", "struct", "union"]
+                    .contains(specifier)
             }
             _ => false,
         }
