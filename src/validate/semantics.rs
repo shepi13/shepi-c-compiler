@@ -418,6 +418,8 @@ fn resolve_declaration(
             let location = func_decl.location;
             Declaration::Function(resolve_function(func_decl, symbols).add_location(location)?)
         }
+        Declaration::Struct { tag: _, members: _ } => todo!("Struct Semantics!"),
+        Declaration::Union { tag: _, members: _ } => todo!("Union Semantics!"),
     };
     Ok(decl)
 }
@@ -481,6 +483,8 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Resul
         StringLiteral(_) => expr,
         SizeOf(expr) => SizeOf(resolve_expression(*expr, symbols)?.into()),
         SizeOfT(type_t) => SizeOfT(type_t),
+        DotAccess(_, _) => todo!("Dot access semantics!"),
+        Arrow(_, _) => todo!("Arrow semantics!"),
     };
     // Convert to TypedExpression
     Ok(result.into())

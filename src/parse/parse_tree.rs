@@ -17,6 +17,54 @@ pub enum BlockItem {
     DeclareItem(Declaration),
 }
 #[derive(Debug, Clone)]
+pub enum Declaration {
+    Variable(VariableDeclaration),
+    Function(FunctionDeclaration),
+    Struct { tag: String, members: Vec<MemberDeclaration> },
+    Union { tag: String, members: Vec<MemberDeclaration> },
+}
+#[derive(Debug, Clone)]
+pub struct VariableDeclaration {
+    pub name: String,
+    pub init: Option<VariableInitializer>,
+    pub ctype: CType,
+    pub storage: Option<StorageClass>,
+    pub location: Location,
+}
+#[derive(Debug, Clone)]
+pub struct FunctionDeclaration {
+    pub name: String,
+    pub ctype: CType,
+    pub params: Vec<String>,
+    pub body: Option<Block>,
+    pub storage: Option<StorageClass>,
+    pub location: Location,
+}
+#[derive(Debug, Clone)]
+pub struct MemberDeclaration {
+    pub name: String,
+    pub ctype: CType,
+}
+#[derive(Debug, Clone)]
+pub enum VariableInitializer {
+    SingleElem(TypedExpression),
+    CompoundInit(Vec<VariableInitializer>),
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageClass {
+    Static,
+    Extern,
+}
+impl StorageClass {
+    pub fn from(token: &Token) -> Self {
+        match token {
+            Token::Specifier("static") => Self::Static,
+            Token::Specifier("extern") => Self::Extern,
+            _ => panic!("Invalid storage class!"),
+        }
+    }
+}
+#[derive(Debug, Clone)]
 pub enum Statement {
     Return(Option<TypedExpression>),
     ExprStmt(TypedExpression),
@@ -51,48 +99,6 @@ pub enum ForInit {
     Decl(VariableDeclaration),
     Expr(Option<TypedExpression>),
 }
-#[derive(Debug, Clone)]
-pub enum Declaration {
-    Variable(VariableDeclaration),
-    Function(FunctionDeclaration),
-}
-#[derive(Debug, Clone)]
-pub enum VariableInitializer {
-    SingleElem(TypedExpression),
-    CompoundInit(Vec<VariableInitializer>),
-}
-
-#[derive(Debug, Clone)]
-pub struct VariableDeclaration {
-    pub name: String,
-    pub init: Option<VariableInitializer>,
-    pub ctype: CType,
-    pub storage: Option<StorageClass>,
-    pub location: Location,
-}
-#[derive(Debug, Clone)]
-pub struct FunctionDeclaration {
-    pub name: String,
-    pub ctype: CType,
-    pub params: Vec<String>,
-    pub body: Option<Block>,
-    pub storage: Option<StorageClass>,
-    pub location: Location,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StorageClass {
-    Static,
-    Extern,
-}
-impl StorageClass {
-    pub fn from(token: &Token) -> Self {
-        match token {
-            Token::Specifier("static") => Self::Static,
-            Token::Specifier("extern") => Self::Extern,
-            _ => panic!("Invalid storage class!"),
-        }
-    }
-}
 // Expressions
 #[derive(Debug, Clone)]
 pub struct TypedExpression {
@@ -126,6 +132,8 @@ pub enum Expression {
     Subscript(Box<TypedExpression>, Box<TypedExpression>),
     SizeOf(Box<TypedExpression>),
     SizeOfT(CType),
+    DotAccess(Box<TypedExpression>, String),
+    Arrow(Box<TypedExpression>, String),
 }
 #[derive(Debug, Clone)]
 pub struct BinaryExpression {

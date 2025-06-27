@@ -131,7 +131,13 @@ impl From<CType> for AssemblyType {
                 assert!([1, 2, 4, 8, 16].contains(&alignment), "Alignment error: {:#?}", alignment);
                 AssemblyType::ByteArray(size, alignment as usize)
             }
-            CType::Function(_, _) | CType::VarArgs | CType::Void => panic!("Not a variable!"),
+            CType::Union(_)
+            | CType::Structure(_)
+            | CType::Function(_, _)
+            | CType::VarArgs
+            | CType::Void => {
+                panic!("Not a variable!")
+            }
         }
     }
 }

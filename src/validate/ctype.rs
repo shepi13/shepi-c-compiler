@@ -31,6 +31,8 @@ pub enum CType {
     Array(Box<CType>, u64),
     VarArgs,
     Void,
+    Structure(String),
+    Union(String),
 }
 
 impl CType {
@@ -46,6 +48,8 @@ impl CType {
             }
             CType::Pointer(_) => 8,
             CType::Array(elem_t, elem_c) => elem_c * elem_t.size(),
+            CType::Structure(_) => todo!("Structure size!"),
+            CType::Union(_) => todo!("Union size!"),
         }
     }
     /// For integers, returns whether or not the type is signed
@@ -63,21 +67,16 @@ impl CType {
     }
     /// Checks if a type is an integer type
     pub fn is_int(&self) -> bool {
-        match self {
+        matches!(
+            self,
             Self::Int
-            | Self::Long
-            | Self::UnsignedInt
-            | Self::UnsignedLong
-            | Self::Char
-            | Self::UnsignedChar
-            | Self::SignedChar => true,
-            Self::Double
-            | Self::Function(_, _)
-            | Self::Pointer(_)
-            | Self::Array(_, _)
-            | Self::VarArgs
-            | Self::Void => false,
-        }
+                | Self::Long
+                | Self::UnsignedInt
+                | Self::UnsignedLong
+                | Self::Char
+                | Self::UnsignedChar
+                | Self::SignedChar
+        )
     }
     /// Checks if a type is a pointer
     pub fn is_pointer(&self) -> bool {

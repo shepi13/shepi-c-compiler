@@ -20,8 +20,8 @@ use super::lexer::{Token, Tokens};
 use super::parse_tree::{
     AssignmentExpression, BinaryExpression, BinaryOperator, Block, BlockItem, ConditionExpression,
     Constant, Declaration, Expression, ForInit, FunctionDeclaration, IncrementType, Location, Loop,
-    Program, Statement, StorageClass, TypedExpression, UnaryOperator, VariableDeclaration,
-    VariableInitializer,
+    MemberDeclaration, Program, Statement, StorageClass, TypedExpression, UnaryOperator,
+    VariableDeclaration, VariableInitializer,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -73,6 +73,18 @@ fn switch_name() -> String {
 pub fn parse_type(tokens: &[Token]) -> std::result::Result<CType, &'static str> {
     use Token::Specifier;
     let assert = |cond, msg: &'static str| if cond { Ok(()) } else { Err(msg) };
+    // Handle struct/union, which can't appear with other type specifiers and must have an identifier
+    if matches!(tokens[0], Token::Specifier("struct" | "union")) {
+        assert(tokens.len() == 2, "Struct must have identifier and no other type specifiers!")?;
+        let Token::Identifier(identifier) = tokens[1] else {
+            return Err("Failed to parse name of struct/union");
+        };
+        return if tokens[0] == Token::Specifier("struct") {
+            Ok(CType::Structure(identifier.to_string()))
+        } else {
+            Ok(CType::Union(identifier.to_string()))
+        };
+    }
     // Count specifier tokens
     let count_token = |token| tokens.iter().filter(|elem| **elem == token).count();
     let void_count = count_token(Specifier("void"));
@@ -135,6 +147,11 @@ fn parse_specifiers(tokens: &mut Tokens) -> Result<(CType, Option<StorageClass>)
     while matches!(tokens.peek(), Token::Specifier(_)) {
         if tokens.peek().is_type_specifier() {
             types.push(tokens[0]);
+            // Struct/Union have to have identifier for type parsing
+            if matches!(tokens.peek(), Token::Specifier("struct" | "union")) {
+                types.push(tokens[1]);
+                tokens.consume();
+            }
         } else {
             storage_classes.push(StorageClass::from(&tokens[0]));
         }
@@ -199,7 +216,13 @@ fn parse_post_operator(
     tokens: &mut Tokens,
     expression: TypedExpression,
 ) -> Result<TypedExpression> {
-    if tokens.try_consume(Token::Increment) {
+    if tokens.try_consume(Token::Dot) {
+        let tag = parse_identifier(tokens)?;
+        parse_post_operator(tokens, Expression::DotAccess(expression.into(), tag).into())
+    } else if tokens.try_consume(Token::Arrow) {
+        let tag = parse_identifier(tokens)?;
+        parse_post_operator(tokens, Expression::Arrow(expression.into(), tag).into())
+    } else if tokens.try_consume(Token::Increment) {
         parse_post_operator(
             tokens,
             Expression::Unary(
@@ -516,37 +539,77 @@ fn parse_variable_declaration(tokens: &mut Tokens) -> Result<VariableDeclaration
     }
 }
 
+fn parse_members(tokens: &mut Tokens) -> Result<Vec<MemberDeclaration>> {
+    let mut members = Vec::new();
+    if tokens.try_consume(Token::OpenBrace) {
+        while !tokens.try_consume(Token::CloseBrace) {
+            let type_tokens = tokens.consume_type_specifiers();
+            let ctype = parse_type(type_tokens).or_else(|err| Err(tokens.parse_error(err)))?;
+            let declarator = parse_declarator(tokens)?;
+            let decl_result = process_declarator(declarator, ctype)?;
+            tokens.assert(
+                !matches!(decl_result.ctype, CType::Function(_, _)),
+                "Function struct members not supported!",
+            )?;
+            members.push(MemberDeclaration {
+                name: decl_result.name,
+                ctype: decl_result.ctype,
+            });
+            tokens.expect_token(Token::SemiColon)?;
+        }
+        tokens.assert(!members.is_empty(), "Struct/Union initializer cannot be empty!")?;
+    }
+    Ok(members)
+}
+
 fn parse_declaration(tokens: &mut Tokens) -> Result<Declaration> {
     let start_loc = tokens.location();
     let (ctype, storage) = parse_specifiers(tokens)?;
+    if tokens.peek() == Token::SemiColon || tokens.peek() == Token::OpenBrace {
+        if let CType::Structure(tag) = ctype {
+            let members = parse_members(tokens)?;
+            tokens.expect_token(Token::SemiColon)?;
+            return Ok(Declaration::Struct { tag, members });
+        } else if let CType::Union(tag) = ctype {
+            let members = parse_members(tokens)?;
+            tokens.expect_token(Token::SemiColon)?;
+            return Ok(Declaration::Union { tag, members });
+        }
+    }
     let declarator = parse_declarator(tokens)?;
     let decl_result = process_declarator(declarator, ctype)?;
-    if matches!(decl_result.ctype, CType::Function(_, _)) {
-        let body = if tokens.try_consume(Token::OpenBrace) {
-            Some(parse_block(tokens)?)
-        } else {
+    match decl_result.ctype {
+        CType::Function(_, _) => {
+            let body = if tokens.try_consume(Token::OpenBrace) {
+                Some(parse_block(tokens)?)
+            } else {
+                tokens.expect_token(Token::SemiColon)?;
+                None
+            };
+            Ok(Declaration::Function(FunctionDeclaration {
+                name: decl_result.name,
+                ctype: decl_result.ctype,
+                params: decl_result.params,
+                storage,
+                body,
+                location: Location { start_loc, end_loc: tokens.location() },
+            }))
+        }
+        _ => {
+            let init = if tokens.try_consume(Token::Equal) {
+                Some(parse_initializer(tokens)?)
+            } else {
+                None
+            };
             tokens.expect_token(Token::SemiColon)?;
-            None
-        };
-        Ok(Declaration::Function(FunctionDeclaration {
-            name: decl_result.name,
-            ctype: decl_result.ctype,
-            params: decl_result.params,
-            storage,
-            body,
-            location: Location { start_loc, end_loc: tokens.location() },
-        }))
-    } else {
-        let init =
-            if tokens.try_consume(Token::Equal) { Some(parse_initializer(tokens)?) } else { None };
-        tokens.expect_token(Token::SemiColon)?;
-        Ok(Declaration::Variable(VariableDeclaration {
-            name: decl_result.name,
-            ctype: decl_result.ctype,
-            init,
-            storage,
-            location: Location { start_loc, end_loc: tokens.location() },
-        }))
+            Ok(Declaration::Variable(VariableDeclaration {
+                name: decl_result.name,
+                ctype: decl_result.ctype,
+                init,
+                storage,
+                location: Location { start_loc, end_loc: tokens.location() },
+            }))
+        }
     }
 }
 
