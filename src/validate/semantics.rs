@@ -1,8 +1,9 @@
 use crate::{
     helpers::error::{AddLocation, Error, assert_or_err},
     parse::parse_tree::{
-        self, BlockItem, Declaration, ForInit, FunctionDeclaration, Location, Loop, Program,
-        Statement, StorageClass, TypedExpression, VariableDeclaration, VariableInitializer,
+        self, BlockItem, Declaration, ForInit, FunctionDeclaration, Location, Loop,
+        MemberDeclaration, Program, Statement, StorageClass, TypedExpression, VariableDeclaration,
+        VariableInitializer,
     },
     validate::ctype::CType,
 };
@@ -37,6 +38,9 @@ struct SymbolTable {
 
     break_scopes: Vec<String>,
     current_function: Option<String>,
+
+    structs: Vec<HashMap<String, Identifier>>,
+    unions: Vec<HashMap<String, Identifier>>,
 }
 
 impl SymbolTable {
@@ -48,8 +52,59 @@ impl SymbolTable {
             loops: Vec::new(),
             switches: Vec::new(),
             break_scopes: Vec::new(),
-
+            structs: vec![HashMap::new()],
+            unions: vec![HashMap::new()],
             current_function: None,
+        }
+    }
+    fn resolve_tag(&mut self, tag: &str, is_union: bool) -> Result<String> {
+        type NameGenerator = fn(&str) -> String;
+        type Table = Vec<HashMap<String, Identifier>>;
+        let (table, gen_name): (&mut Table, NameGenerator) = match is_union {
+            true => (&mut self.unions, union_name),
+            false => (&mut self.structs, struct_name),
+        };
+        if let Some(prev_entry) = Self::_lookup_identifier(tag, &table) {
+            Ok(prev_entry.unique_name.clone())
+        } else {
+            let unique_tag = gen_name(tag);
+            table.last_mut().expect("Empty resolution stack!").insert(
+                tag.to_string(),
+                Identifier {
+                    unique_name: unique_tag.clone(),
+                    external: false,
+                },
+            );
+            Ok(unique_tag)
+        }
+    }
+    fn resolve_type(&self, type_specifier: CType) -> Result<CType> {
+        match type_specifier {
+            CType::Structure(tag) => {
+                let ident = Self::_lookup_identifier(&tag, &self.structs).ok_or_else(|| {
+                    Error::new("Invalid struct", &format!("Undeclared structure: {}", tag))
+                })?;
+                Ok(CType::Structure(ident.unique_name.to_string()))
+            }
+            CType::Union(tag) => {
+                let ident = Self::_lookup_identifier(&tag, &self.unions).ok_or_else(|| {
+                    Error::new("Invalid identifier", &format!("Undeclared union: {}", tag))
+                })?;
+                Ok(CType::Structure(ident.unique_name.to_string()))
+            }
+            CType::Pointer(elem_t) => Ok(CType::Pointer(self.resolve_type(*elem_t)?.into())),
+            CType::Array(elem_t, size) => {
+                Ok(CType::Array(self.resolve_type(*elem_t)?.into(), size))
+            }
+            CType::Function(param_ts, ret_t) => {
+                let param_ts = param_ts
+                    .into_iter()
+                    .map(|param_t| self.resolve_type(param_t))
+                    .collect::<Result<Vec<CType>>>()?;
+                let ret_t = self.resolve_type(*ret_t)?;
+                Ok(CType::Function(param_ts, ret_t.into()))
+            }
+            _ => Ok(type_specifier),
         }
     }
     fn resolve_continue(&self) -> Result<&str> {
@@ -97,9 +152,13 @@ impl SymbolTable {
     }
     fn enter_scope(&mut self) {
         self.identifiers.push(HashMap::new());
+        self.unions.push(HashMap::new());
+        self.structs.push(HashMap::new());
     }
     fn leave_scope(&mut self) {
         self.identifiers.pop();
+        self.unions.pop();
+        self.structs.pop();
     }
     fn enter_loop(&mut self, label: String) {
         self.loops.push(label.clone());
@@ -138,8 +197,11 @@ impl SymbolTable {
         );
         self.current_function = None;
     }
-    fn _lookup_identifier(&self, name: &str) -> Option<&Identifier> {
-        for table in self.identifiers.iter().rev() {
+    fn _lookup_identifier<'a>(
+        name: &str,
+        table: &'a Vec<HashMap<String, Identifier>>,
+    ) -> Option<&'a Identifier> {
+        for table in table.iter().rev() {
             if let Some(identifier) = table.get(name) {
                 return Some(identifier);
             }
@@ -224,7 +286,7 @@ impl SymbolTable {
         Ok(())
     }
     fn resolve_identifier(&self, name: &str) -> Result<String> {
-        let ident = self._lookup_identifier(name).ok_or_else(|| {
+        let ident = Self::_lookup_identifier(name, &self.identifiers).ok_or_else(|| {
             Error::new("Invalid identifier", &format!("Undeclared variable: {}", name))
         })?;
         Ok(ident.unique_name.to_string())
@@ -266,6 +328,14 @@ fn case_name(name: &str) -> String {
 fn variable_name(name: &str) -> String {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     format!("{}.{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+fn struct_name(name: &str) -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("{}.struct_{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+fn union_name(name: &str) -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("{}.union_{}", name, COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
 pub fn resolve_program(program: Program) -> Result<Program> {
@@ -402,6 +472,7 @@ fn resolve_declaration(
     symbols: &mut SymbolTable,
     global: bool,
 ) -> Result<Declaration> {
+    let is_union = matches!(decl, Declaration::Union { tag: _, members: _ });
     let decl = match decl {
         Declaration::Variable(mut var_decl) => {
             let location = var_decl.location;
@@ -418,8 +489,22 @@ fn resolve_declaration(
             let location = func_decl.location;
             Declaration::Function(resolve_function(func_decl, symbols).add_location(location)?)
         }
-        Declaration::Struct { tag: _, members: _ } => todo!("Struct Semantics!"),
-        Declaration::Union { tag: _, members: _ } => todo!("Union Semantics!"),
+        Declaration::Struct { tag, members } | Declaration::Union { tag, members } => {
+            let unique_tag = symbols.resolve_tag(&tag, is_union)?;
+            let processed_members = members
+                .into_iter()
+                .map(|member| -> Result<MemberDeclaration> {
+                    Ok(MemberDeclaration {
+                        name: member.name,
+                        ctype: symbols.resolve_type(member.ctype)?,
+                    })
+                })
+                .collect::<Result<Vec<MemberDeclaration>>>()?;
+            Declaration::Struct {
+                tag: unique_tag,
+                members: processed_members,
+            }
+        }
     };
     Ok(decl)
 }
@@ -483,8 +568,8 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Resul
         StringLiteral(_) => expr,
         SizeOf(expr) => SizeOf(resolve_expression(*expr, symbols)?.into()),
         SizeOfT(type_t) => SizeOfT(type_t),
-        DotAccess(_, _) => todo!("Dot access semantics!"),
-        Arrow(_, _) => todo!("Arrow semantics!"),
+        DotAccess(inner, member) => DotAccess(resolve_expression(*inner, symbols)?.into(), member),
+        Arrow(inner, member) => Arrow(resolve_expression(*inner, symbols)?.into(), member),
     };
     // Convert to TypedExpression
     Ok(result.into())
