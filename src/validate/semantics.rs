@@ -356,6 +356,7 @@ fn resolve_function(
         .into_iter()
         .map(|param| symbols.declare_parameter(param))
         .collect::<Result<Vec<String>>>()?;
+    function.ctype = symbols.resolve_type(function.ctype)?;
     if let Some(body) = function.body {
         symbols.enter_function(function.name.to_string());
         function.body = Some(
@@ -483,6 +484,7 @@ fn resolve_declaration(
             }
             var_decl.init =
                 resolve_initializer(var_decl.init, symbols).add_location(var_decl.location)?;
+            var_decl.ctype = symbols.resolve_type(var_decl.ctype)?;
             Declaration::Variable(var_decl)
         }
         Declaration::Function(func_decl) => {
@@ -558,7 +560,9 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Resul
                 args.into_iter().map(|arg| resolve_expression(arg, symbols)).collect();
             FunctionCall(name, args?)
         }
-        Cast(new_type, expr) => Cast(new_type, resolve_expression(*expr, symbols)?.into()),
+        Cast(new_type, expr) => {
+            Cast(symbols.resolve_type(new_type)?, resolve_expression(*expr, symbols)?.into())
+        }
         Dereference(inner) => Dereference(resolve_expression(*inner, symbols)?.into()),
         AddrOf(inner) => AddrOf(resolve_expression(*inner, symbols)?.into()),
         Subscript(expr, sub_expr) => Subscript(
@@ -567,7 +571,7 @@ fn resolve_expression(expr: TypedExpression, symbols: &mut SymbolTable) -> Resul
         ),
         StringLiteral(_) => expr,
         SizeOf(expr) => SizeOf(resolve_expression(*expr, symbols)?.into()),
-        SizeOfT(type_t) => SizeOfT(type_t),
+        SizeOfT(type_t) => SizeOfT(symbols.resolve_type(type_t)?),
         DotAccess(inner, member) => DotAccess(resolve_expression(*inner, symbols)?.into(), member),
         Arrow(inner, member) => Arrow(resolve_expression(*inner, symbols)?.into(), member),
     };
